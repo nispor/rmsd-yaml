@@ -1,0 +1,9 @@
+[package]
+name = "rmsd-yaml"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = { version = "0.4.22", features = ["std"] }
+regex = "1.10.6"
+serde = "1.0"
