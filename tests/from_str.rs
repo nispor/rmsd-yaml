@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use rmsd_yaml::RmsdPosition;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -16,7 +15,7 @@ fn test_from_str_to_struct() -> Result<(), Box<dyn std::error::Error>> {
         str_b: "abc"
     "#;
 
-    let foo_test: FooTest = rmsd_yaml::from_str(&yaml_str)?;
+    let foo_test: FooTest = rmsd_yaml::from_str(yaml_str)?;
 
     assert_eq!(
         foo_test,

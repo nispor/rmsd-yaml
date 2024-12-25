@@ -52,10 +52,10 @@ impl TryFrom<&str> for RmsdPosition {
             return Err(RmsdError::invalid_pos(err_msg.as_str()));
         }
 
-        let line = usize::from_str(&splited[1])
+        let line = usize::from_str(splited[1])
             .map_err(|_| RmsdError::invalid_pos(err_msg.as_str()))?;
 
-        let column = usize::from_str(&splited[3])
+        let column = usize::from_str(splited[3])
             .map_err(|_| RmsdError::invalid_pos(err_msg.as_str()))?;
 
         Ok(Self { line, column })

@@ -11,5 +11,6 @@ pub(crate) mod scalar_str;
 pub(crate) use self::char_iter::CharsIter;
 pub use self::deserializer::from_str;
 pub use self::error::RmsdError;
+pub(crate) use self::node::YamlToken;
 pub use self::node::{YamlNode, YamlNodeData};
 pub use self::position::RmsdPosition;

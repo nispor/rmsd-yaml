@@ -65,7 +65,7 @@ pub(crate) struct YamlToken {
 /// Tokenization input data with white spaces and comments removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum YamlTokenData {
+pub(crate) enum YamlTokenData {
     /// Empty
     Null,
     /// Leading space (0x20) count
@@ -99,43 +99,6 @@ pub enum YamlTokenData {
     Anchor(String),
     /// Refer to anchor by `*`
     Alias(String),
-}
-
-impl YamlTokenData {
-    pub fn is_empty(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    pub(crate) fn has_str(&self) -> bool {
-        matches!(
-            self,
-            Self::Scalar(_)
-                | Self::GlobalTag(_)
-                | Self::LocalTag(_)
-                | Self::DirectiveTag(_)
-                | Self::DirectiveYaml(_)
-                | Self::Anchor(_)
-                | Self::Alias(_)
-        )
-    }
-
-    pub(crate) fn push_char(&mut self, c: char) {
-        match self {
-            Self::Scalar(s)
-            | Self::GlobalTag(s)
-            | Self::LocalTag(s)
-            | Self::DirectiveTag(s)
-            | Self::DirectiveYaml(s)
-            | Self::Anchor(s)
-            | Self::Alias(s) => s.push(c),
-            _ => {
-                log::error!(
-                    "BUG: YamlTokenData::push_char() invoked on \
-                    data type not holding string: {self:?}"
-                );
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,7 +146,7 @@ pub enum YamlNodeData {
 
 impl YamlToken {
     pub(crate) fn parse(input: &str) -> Result<Vec<Self>, RmsdError> {
-        if input.len() == 0 {
+        if input.is_empty() {
             return Ok(vec![Self {
                 start: RmsdPosition::new(1, 0),
                 end: RmsdPosition::new(1, 0),
@@ -192,11 +155,8 @@ impl YamlToken {
         }
         let mut iter = CharsIter::new(input);
 
-        let mut line_number = 0usize;
-        let mut column = 0usize;
         let mut ret: Vec<Self> = Vec::new();
 
-        let mut skip_u8_index = 0usize;
         while let Some(c) = iter.peek() {
             if iter.next_pos().column == 1 {
                 let start_pos = iter.pos();
@@ -254,8 +214,8 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_START => {
                     iter.next();
                     ret.push(YamlToken {
-                        start: RmsdPosition::new(line_number, column),
-                        end: RmsdPosition::new(line_number, column),
+                        start: iter.pos(),
+                        end: iter.pos(),
                         data: YamlTokenData::FlowSequenceStart,
                     })
                 }
@@ -266,32 +226,32 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_END => {
                     iter.next();
                     ret.push(YamlToken {
-                        start: RmsdPosition::new(line_number, column),
-                        end: RmsdPosition::new(line_number, column),
+                        start: iter.pos(),
+                        end: iter.pos(),
                         data: YamlTokenData::FlowSequenceEnd,
                     })
                 }
                 YAML_CHAR_MAPPING_START => {
                     iter.next();
                     ret.push(YamlToken {
-                        start: RmsdPosition::new(line_number, column),
-                        end: RmsdPosition::new(line_number, column),
+                        start: iter.pos(),
+                        end: iter.pos(),
                         data: YamlTokenData::FlowMapStart,
                     })
                 }
                 YAML_CHAR_MAPPING_END => {
                     iter.next();
                     ret.push(YamlToken {
-                        start: RmsdPosition::new(line_number, column),
-                        end: RmsdPosition::new(line_number, column),
+                        start: iter.pos(),
+                        end: iter.pos(),
                         data: YamlTokenData::FlowMapEnd,
                     })
                 }
                 YAML_CHAR_TAG => {
                     iter.next();
                     ret.push(YamlToken {
-                        start: RmsdPosition::new(line_number, column),
-                        end: RmsdPosition::new(line_number, column),
+                        start: iter.pos(),
+                        end: iter.pos(),
                         data: YamlTokenData::MapValueIndicator,
                     })
                 }
@@ -321,9 +281,7 @@ impl YamlToken {
                     todo!()
                 }
                 YAML_CHAR_RESERVED | YAML_CHAR_RESERVED2 => {
-                    return Err(RmsdError::reserved_indicator(
-                        RmsdPosition::new(line_number, column),
-                    ));
+                    return Err(RmsdError::reserved_indicator(iter.pos()));
                 }
                 YAML_CHAR_SINGLE_QUOTE => {
                     iter.next();

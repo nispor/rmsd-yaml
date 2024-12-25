@@ -3,7 +3,7 @@
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 
-use crate::{RmsdError, RmsdPosition};
+use crate::{RmsdError, RmsdPosition, YamlToken};
 
 #[derive(Debug, Default)]
 pub struct RmsdDeserializer<'de> {
@@ -26,6 +26,9 @@ where
 {
     let mut deserializer = RmsdDeserializer::from_str(s);
 
+    let nodes = YamlToken::parse(s)?;
+    println!("HAHA {:?}", nodes);
+
     let t = T::deserialize(&mut deserializer)?;
     if deserializer.input.is_empty() {
         Ok(t)
@@ -34,17 +37,7 @@ where
     }
 }
 
-impl<'de> RmsdDeserializer<'de> {
-    fn parse_bool(&mut self) -> Result<bool, RmsdError> {
-        todo!()
-    }
-
-    fn parse_u64(&mut self) -> Result<u64, RmsdError> {
-        todo!()
-    }
-}
-
-impl<'de, 'a> Deserializer<'de> for &'a mut RmsdDeserializer<'de> {
+impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
     type Error = RmsdError;
 
     // Look at the input data to decide what Serde data model type to
@@ -57,11 +50,11 @@ impl<'de, 'a> Deserializer<'de> for &'a mut RmsdDeserializer<'de> {
         todo!()
     }
 
-    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_bool(self.parse_bool()?)
+        todo!()
     }
 
     fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>

@@ -20,10 +20,10 @@ pub(crate) fn read_double_quoted_str(
             ret.push(c);
         }
     }
-    return Err(RmsdError::unfinished_quote(
+    Err(RmsdError::unfinished_quote(
         format!("Unfinished double quote: {ret}"),
         iter.pos(),
-    ));
+    ))
 }
 
 // YAML 1.2.2: 7.3.2. Single-Quoted Style
@@ -59,10 +59,10 @@ pub(crate) fn read_single_quoted_str(
         }
     }
 
-    return Err(RmsdError::unfinished_quote(
+    Err(RmsdError::unfinished_quote(
         format!("Unfinished single quote: {ret}"),
         iter.pos(),
-    ));
+    ))
 }
 
 /// Read till end of line or any c-indicator defined in YAML 1.2.2
@@ -87,15 +87,13 @@ pub(crate) fn read_unquoted_str(
     while let Some(c) = iter.peek() {
         if YAML_CHAR_INDICATORS.contains(&c) {
             return Ok((ret, pos));
-        } else {
-            if let Some(p) = process_with_line_folding(
-                &mut ret,
-                iter,
-                &mut pending_whitespace,
-                &mut droped_first_newline,
-            ) {
-                pos = p;
-            }
+        } else if let Some(p) = process_with_line_folding(
+            &mut ret,
+            iter,
+            &mut pending_whitespace,
+            &mut droped_first_newline,
+        ) {
+            pos = p;
         }
     }
     Ok((ret, pos))

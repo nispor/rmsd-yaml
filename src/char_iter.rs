@@ -8,7 +8,6 @@ pub(crate) struct CharsIter<'s> {
     pos: RmsdPosition,
     /// The position of pending char.
     next_pos: RmsdPosition,
-    value: &'s str,
     iter: std::str::Chars<'s>,
 }
 
@@ -17,7 +16,6 @@ impl<'s> CharsIter<'s> {
         Self {
             pos: RmsdPosition::EOF,
             next_pos: RmsdPosition::default(),
-            value,
             iter: value.chars(),
         }
     }

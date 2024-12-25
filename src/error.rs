@@ -6,12 +6,8 @@ use crate::RmsdPosition;
 pub enum ErrorKind {
     #[default]
     Bug,
-    /// Reach end of file, internally.
-    Eof,
     /// Still have charters not parsed.
     TrailingCharacters,
-    /// Expecting boolean: true or false
-    NotBoolean,
     /// Invalid position string
     InvalidPosition,
     /// YAML reserved indicators( @ or `) can't start a plain scalar.
@@ -20,6 +16,50 @@ pub enum ErrorKind {
     InvalidEscapeScalar,
     /// Unfinished quote
     UnfinishedQuote,
+    /// Invalid ErrorKind
+    InvalidErrorKind,
+}
+
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Bug => "bug",
+                Self::TrailingCharacters => "trailing_characters",
+                Self::InvalidPosition => "invalid_position",
+                Self::StartWithReservedIndicator =>
+                    "start_with_reserved_indicator",
+                Self::InvalidEscapeScalar => "invalid_escape_scalar",
+                Self::UnfinishedQuote => "unfinished_quote",
+                Self::InvalidErrorKind => "invalid_error_kind",
+            }
+        )
+    }
+}
+
+impl TryFrom<&str> for ErrorKind {
+    type Error = RmsdError;
+
+    fn try_from(value: &str) -> Result<Self, RmsdError> {
+        match value {
+            "bug" => Ok(Self::Bug),
+            "trailing_characters" => Ok(Self::TrailingCharacters),
+            "invalid_position" => Ok(Self::InvalidPosition),
+            "start_with_reserved_indicator" => {
+                Ok(Self::StartWithReservedIndicator)
+            }
+            "invalid_escape_scalar" => Ok(Self::InvalidEscapeScalar),
+            "unfinished_quote" => Ok(Self::UnfinishedQuote),
+            "invalid_error_kind" => Ok(Self::InvalidErrorKind),
+            _ => Err(RmsdError::new(
+                ErrorKind::InvalidErrorKind,
+                format!("Invalid error kind: {value}"),
+                RmsdPosition::default(),
+            )),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -30,12 +70,12 @@ pub struct RmsdError {
 }
 
 impl RmsdError {
-    pub fn new(kind: ErrorKind, msg: &str, pos: RmsdPosition) -> Self {
-        Self {
-            kind,
-            msg: msg.to_string(),
-            pos,
-        }
+    pub fn new(kind: ErrorKind, msg: String, pos: RmsdPosition) -> Self {
+        Self { kind, msg, pos }
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
     }
 
     pub fn msg(&self) -> &str {
@@ -52,7 +92,7 @@ impl std::fmt::Display for RmsdError {
         &self,
         f: &mut std::fmt::Formatter<'_>,
     ) -> Result<(), std::fmt::Error> {
-        write!(f, "{} error: {}", self.pos, self.msg)
+        write!(f, "{} kind: {} error: {}", self.pos, self.kind, self.msg)
     }
 }
 
@@ -63,21 +103,19 @@ impl serde::de::Error for RmsdError {
     where
         T: std::fmt::Display,
     {
-        let error_message = msg.to_string();
-        if error_message.contains("error: ") {
-            if let Some((pos_str, msg_str)) =
-                error_message.split_once("error: ")
+        let msg = msg.to_string();
+        if let Some((pos_kind_str, msg_str)) = msg.split_once("error: ") {
+            if let Some((pos_str, kind_str)) = pos_kind_str.split_once("kind: ")
             {
                 return Self {
-                    pos: RmsdPosition::try_from(pos_str)
-                        .unwrap_or(RmsdPosition::default()),
+                    pos: RmsdPosition::try_from(pos_str).unwrap_or_default(),
                     msg: msg_str.to_string(),
-                    ..Default::default()
+                    kind: ErrorKind::try_from(kind_str).unwrap_or_default(),
                 };
             }
         }
         Self {
-            msg: msg.to_string(),
+            msg,
             ..Default::default()
         }
     }
@@ -93,35 +131,11 @@ impl RmsdError {
         }
     }
 
-    pub(crate) fn not_boolean(pos: RmsdPosition) -> Self {
-        Self {
-            kind: ErrorKind::NotBoolean,
-            pos,
-            msg: "still have trailing charters".to_string(),
-        }
-    }
-
-    pub(crate) fn eof() -> Self {
-        Self {
-            kind: ErrorKind::Eof,
-            msg: "Reach end of file".to_string(),
-            ..Default::default()
-        }
-    }
-
     pub(crate) fn invalid_pos(msg: &str) -> Self {
         Self {
             kind: ErrorKind::InvalidPosition,
             msg: msg.to_string(),
             ..Default::default()
-        }
-    }
-
-    pub(crate) fn bug(msg: String, pos: RmsdPosition) -> Self {
-        Self {
-            kind: ErrorKind::Bug,
-            msg,
-            pos,
         }
     }
 
