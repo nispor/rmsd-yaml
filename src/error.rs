@@ -2,11 +2,49 @@
 
 use crate::RmsdPosition;
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub enum ErrorKind {
+    #[default]
+    Bug,
+    /// Reach end of file, internally.
+    Eof,
+    /// Still have charters not parsed.
+    TrailingCharacters,
+    /// Expecting boolean: true or false
+    NotBoolean,
+    /// Invalid position string
+    InvalidPosition,
+    /// YAML reserved indicators( @ or `) can't start a plain scalar.
+    StartWithReservedIndicator,
+    /// Invalid escape scalar
+    InvalidEscapeScalar,
+    /// Unfinished quote
+    UnfinishedQuote,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct RmsdError {
-    //    kind: ErrorKind,
-    msg: Box<String>,
-    position: RmsdPosition,
+    kind: ErrorKind,
+    msg: String,
+    pos: RmsdPosition,
+}
+
+impl RmsdError {
+    pub fn new(kind: ErrorKind, msg: &str, pos: RmsdPosition) -> Self {
+        Self {
+            kind,
+            msg: msg.to_string(),
+            pos,
+        }
+    }
+
+    pub fn msg(&self) -> &str {
+        self.msg.as_str()
+    }
+
+    pub fn pos(&self) -> RmsdPosition {
+        self.pos
+    }
 }
 
 impl std::fmt::Display for RmsdError {
@@ -14,7 +52,7 @@ impl std::fmt::Display for RmsdError {
         &self,
         f: &mut std::fmt::Formatter<'_>,
     ) -> Result<(), std::fmt::Error> {
-        write!(f, "{} error: {}", self.position, self.msg)
+        write!(f, "{} error: {}", self.pos, self.msg)
     }
 }
 
@@ -31,13 +69,15 @@ impl serde::de::Error for RmsdError {
                 error_message.split_once("error: ")
             {
                 return Self {
-                    position: pos_str.into(),
-                    msg: Box::new(msg_str.to_string()),
+                    pos: RmsdPosition::try_from(pos_str)
+                        .unwrap_or(RmsdPosition::default()),
+                    msg: msg_str.to_string(),
+                    ..Default::default()
                 };
             }
         }
         Self {
-            msg: Box::new(msg.to_string()),
+            msg: msg.to_string(),
             ..Default::default()
         }
     }
@@ -45,17 +85,71 @@ impl serde::de::Error for RmsdError {
 
 impl RmsdError {
     /// Still have trailing charters not parsed
-    pub(crate) fn trailing_characters(position: RmsdPosition) -> Self {
+    pub(crate) fn trailing_characters(pos: RmsdPosition) -> Self {
         Self {
-            position,
-            msg: Box::new("still have trailing charters".to_string()),
+            kind: ErrorKind::TrailingCharacters,
+            pos,
+            msg: "still have trailing charters".to_string(),
+        }
+    }
+
+    pub(crate) fn not_boolean(pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::NotBoolean,
+            pos,
+            msg: "still have trailing charters".to_string(),
         }
     }
 
     pub(crate) fn eof() -> Self {
         Self {
-            msg: Box::new("Reach end of file".to_string()),
+            kind: ErrorKind::Eof,
+            msg: "Reach end of file".to_string(),
             ..Default::default()
+        }
+    }
+
+    pub(crate) fn invalid_pos(msg: &str) -> Self {
+        Self {
+            kind: ErrorKind::InvalidPosition,
+            msg: msg.to_string(),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn bug(msg: String, pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::Bug,
+            msg,
+            pos,
+        }
+    }
+
+    pub(crate) fn reserved_indicator(pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::StartWithReservedIndicator,
+            msg: "YAML reserved indicators( @ or `) can't start a plain scalar"
+                .to_string(),
+            pos,
+        }
+    }
+
+    pub(crate) fn invalid_escape_scalar(
+        msg: String,
+        pos: RmsdPosition,
+    ) -> Self {
+        Self {
+            kind: ErrorKind::InvalidEscapeScalar,
+            msg,
+            pos,
+        }
+    }
+
+    pub(crate) fn unfinished_quote(msg: String, pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::UnfinishedQuote,
+            msg,
+            pos,
         }
     }
 }
