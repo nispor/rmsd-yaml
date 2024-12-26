@@ -10,7 +10,7 @@ use crate::RmsdError;
 /// null of this line.
 /// Default to first character of first line: line 1 column 1.
 /// The line 0 and column 0 means End of file [RmsdPosition::EOF]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct RmsdPosition {
     /// Line number, start from 1.
     pub line: usize,
@@ -49,14 +49,14 @@ impl TryFrom<&str> for RmsdPosition {
 
         if splited.len() != 4 || splited[0] != "line" || splited[2] != "column"
         {
-            return Err(RmsdError::invalid_pos(err_msg.as_str()));
+            return Err(RmsdError::invalid_pos(err_msg.clone()));
         }
 
         let line = usize::from_str(splited[1])
-            .map_err(|_| RmsdError::invalid_pos(err_msg.as_str()))?;
+            .map_err(|_| RmsdError::invalid_pos(err_msg.clone()))?;
 
         let column = usize::from_str(splited[3])
-            .map_err(|_| RmsdError::invalid_pos(err_msg.as_str()))?;
+            .map_err(|_| RmsdError::invalid_pos(err_msg.clone()))?;
 
         Ok(Self { line, column })
     }

@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::hash::{DefaultHasher, Hasher};
-
-use indexmap::IndexMap;
-
 use crate::{
-    indent::count_indent,
-    scalar_str::{
-        read_double_quoted_str, read_single_quoted_str, read_unquoted_str,
-    },
-    CharsIter, RmsdError, RmsdPosition,
+    process_indent, read_double_quoted_str, read_single_quoted_str,
+    read_unquoted_str, CharsIter, RmsdError, RmsdPosition,
 };
 
 const YAML_CHAR_SEQUENCE_ENTRY: char = '-';
@@ -54,13 +47,6 @@ pub(crate) const YAML_CHAR_INDICATORS: [char; 19] = [
     YAML_CHAR_RESERVED2,
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct YamlToken {
-    pub start: RmsdPosition,
-    pub end: RmsdPosition,
-    pub data: YamlTokenData,
-}
-
 /// YAML Token Data
 /// Tokenization input data with white spaces and comments removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,8 +54,6 @@ pub(crate) struct YamlToken {
 pub(crate) enum YamlTokenData {
     /// Empty
     Null,
-    /// Leading space (0x20) count
-    Indent(usize),
     /// The `-` character for sequence in block collection
     BlockSequenceIndicator,
     /// The `[` character for sequence start in flow style
@@ -87,6 +71,7 @@ pub(crate) enum YamlTokenData {
     // We need to convert escaped UTF-8 char like `\0001F600` to
     /// Scalar content
     Scalar(String),
+    /*
     /// Global tag using `tag:`
     GlobalTag(String),
     /// Local tag using `!`
@@ -99,78 +84,61 @@ pub(crate) enum YamlTokenData {
     Anchor(String),
     /// Refer to anchor by `*`
     Alias(String),
+    */
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct YamlNode {
-    pub data: YamlNodeData,
-    pub pos: RmsdPosition,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct YamlTag {
-    pub name: String,
-    pub data: YamlNodeData,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct YamlNodeMap(IndexMap<YamlNodeData, YamlNodeData>);
-
-impl std::hash::Hash for YamlNodeMap {
-    fn hash<H>(&self, state: &mut H)
-    where
-        H: Hasher,
-    {
-        let mut h: u64 = 0;
-        for (k, v) in &self.0 {
-            let mut hasher = DefaultHasher::new();
-            k.hash(&mut hasher);
-            v.hash(&mut hasher);
-            h ^= hasher.finish();
-        }
-        state.write_u64(h);
+impl std::fmt::Display for YamlTokenData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: Improve this
+        write!(f, "{self:?}")
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum YamlNodeData {
-    Null,
-    Int(i64),
-    Uint(u64),
-    Float((i64, u64)),
-    String(String),
-    Sequence(Vec<YamlNodeData>),
-    Map(Box<YamlNodeMap>),
-    Tag(Box<YamlTag>),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YamlToken {
+    pub indent: usize,
+    pub start: RmsdPosition,
+    pub end: RmsdPosition,
+    pub data: YamlTokenData,
+}
+
+impl std::fmt::Display for YamlToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: Improve this
+        write!(f, "{self:?}")
+    }
 }
 
 impl YamlToken {
     pub(crate) fn parse(input: &str) -> Result<Vec<Self>, RmsdError> {
         if input.is_empty() {
             return Ok(vec![Self {
+                indent: 0,
                 start: RmsdPosition::new(1, 0),
                 end: RmsdPosition::new(1, 0),
                 data: YamlTokenData::Null,
             }]);
         }
         let mut iter = CharsIter::new(input);
-
         let mut ret: Vec<Self> = Vec::new();
+        let mut indent = 0usize;
 
-        while let Some(c) = iter.peek() {
+        while let Some(mut c) = iter.peek() {
             if iter.next_pos().column == 1 {
-                let start_pos = iter.pos();
-                let indent_count = count_indent(&mut iter);
-                if indent_count > 0 {
-                    ret.push(YamlToken {
-                        start: start_pos,
-                        end: iter.pos(),
-                        data: YamlTokenData::Indent(indent_count),
-                    });
-                    continue;
+                indent = process_indent(&mut iter);
+                if indent > 0 {
+                    c = if let Some(c) = iter.peek() {
+                        c
+                    } else {
+                        break;
+                    }
                 }
             }
             match c {
+                // New lines at document start
+                '\n' => {
+                    iter.next();
+                }
                 YAML_CHAR_SEQUENCE_ENTRY
                 | YAML_CHAR_MAPPING_KEY
                 | YAML_CHAR_MAPPING_VALUE => {
@@ -186,24 +154,31 @@ impl YamlToken {
                     };
                     iter.next();
                     if let Some(c) = iter.peek() {
-                        if c == ' ' || c == '\t' {
+                        if c == ' ' || c == '\t' || c == '\n' {
                             let start = iter.pos();
                             iter.next();
                             ret.push(YamlToken {
+                                indent,
                                 start,
-                                end: iter.pos(),
+                                end: start,
                                 data: indicator,
                             });
                         } else {
-                            ret.push(read_unquoted_str_token(&mut iter)?);
+                            ret.push(read_unquoted_str_token(
+                                &mut iter,
+                                indent,
+                                is_after_map_indicator(&ret),
+                            )?);
                         }
                     } else {
                         ret.push(YamlToken {
+                            indent,
                             start: iter.pos(),
                             end: iter.pos(),
                             data: indicator,
                         });
                         ret.push(YamlToken {
+                            indent,
                             start: RmsdPosition::EOF,
                             end: RmsdPosition::EOF,
                             data: YamlTokenData::Null,
@@ -214,6 +189,7 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_START => {
                     iter.next();
                     ret.push(YamlToken {
+                        indent,
                         start: iter.pos(),
                         end: iter.pos(),
                         data: YamlTokenData::FlowSequenceStart,
@@ -226,6 +202,7 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_END => {
                     iter.next();
                     ret.push(YamlToken {
+                        indent,
                         start: iter.pos(),
                         end: iter.pos(),
                         data: YamlTokenData::FlowSequenceEnd,
@@ -234,6 +211,7 @@ impl YamlToken {
                 YAML_CHAR_MAPPING_START => {
                     iter.next();
                     ret.push(YamlToken {
+                        indent,
                         start: iter.pos(),
                         end: iter.pos(),
                         data: YamlTokenData::FlowMapStart,
@@ -242,6 +220,7 @@ impl YamlToken {
                 YAML_CHAR_MAPPING_END => {
                     iter.next();
                     ret.push(YamlToken {
+                        indent,
                         start: iter.pos(),
                         end: iter.pos(),
                         data: YamlTokenData::FlowMapEnd,
@@ -250,6 +229,7 @@ impl YamlToken {
                 YAML_CHAR_TAG => {
                     iter.next();
                     ret.push(YamlToken {
+                        indent,
                         start: iter.pos(),
                         end: iter.pos(),
                         data: YamlTokenData::MapValueIndicator,
@@ -289,6 +269,7 @@ impl YamlToken {
                     let quoted_string = read_single_quoted_str(&mut iter)?;
 
                     ret.push(YamlToken {
+                        indent,
                         start,
                         end: iter.pos(),
                         data: YamlTokenData::Scalar(quoted_string),
@@ -300,6 +281,7 @@ impl YamlToken {
                     let quoted_string = read_double_quoted_str(&mut iter)?;
 
                     ret.push(YamlToken {
+                        indent,
                         start,
                         end: iter.pos(),
                         data: YamlTokenData::Scalar(quoted_string),
@@ -310,21 +292,35 @@ impl YamlToken {
                     iter.next();
                 }
                 _ => {
-                    ret.push(read_unquoted_str_token(&mut iter)?);
+                    ret.push(read_unquoted_str_token(
+                        &mut iter,
+                        indent,
+                        is_after_map_indicator(&ret),
+                    )?);
                 }
             }
         }
-
         Ok(ret)
     }
 }
 
+fn is_after_map_indicator(tokens: &[YamlToken]) -> bool {
+    tokens
+        .iter()
+        .last()
+        .map(|token| token.data == YamlTokenData::MapValueIndicator)
+        .unwrap_or_default()
+}
+
 fn read_unquoted_str_token(
     iter: &mut CharsIter,
+    indent: usize,
+    skip_line_folding: bool,
 ) -> Result<YamlToken, RmsdError> {
     let start = iter.next_pos();
-    let (unquoted_string, end) = read_unquoted_str(iter)?;
+    let (unquoted_string, end) = read_unquoted_str(iter, skip_line_folding)?;
     Ok(YamlToken {
+        indent,
         start,
         end,
         data: YamlTokenData::Scalar(unquoted_string),
@@ -341,6 +337,7 @@ mod tests {
         assert_eq!(
             YamlToken::parse("").unwrap(),
             vec![YamlToken {
+                indent: 0,
                 start: RmsdPosition::new(1, 0),
                 end: RmsdPosition::new(1, 0),
                 data: YamlTokenData::Null,
@@ -353,6 +350,7 @@ mod tests {
         assert_eq!(
             YamlToken::parse(r#""abc" # testing document"#).unwrap(),
             vec![YamlToken {
+                indent: 0,
                 start: RmsdPosition::new(1, 1),
                 end: RmsdPosition::new(1, 5),
                 data: YamlTokenData::Scalar("abc".to_string()),
@@ -366,44 +364,109 @@ mod tests {
             YamlToken::parse("- a\n- b\n- c \n- d").unwrap(),
             vec![
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(1, 1),
-                    end: RmsdPosition::new(1, 2),
+                    end: RmsdPosition::new(1, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(1, 3),
                     end: RmsdPosition::new(1, 3),
                     data: YamlTokenData::Scalar("a".into()),
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(2, 1),
-                    end: RmsdPosition::new(2, 2),
+                    end: RmsdPosition::new(2, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(2, 3),
                     end: RmsdPosition::new(2, 3),
                     data: YamlTokenData::Scalar("b".into()),
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(3, 1),
-                    end: RmsdPosition::new(3, 2),
+                    end: RmsdPosition::new(3, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(3, 3),
                     end: RmsdPosition::new(3, 3),
                     data: YamlTokenData::Scalar("c".into()),
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(4, 1),
-                    end: RmsdPosition::new(4, 2),
+                    end: RmsdPosition::new(4, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
+                    indent: 0,
                     start: RmsdPosition::new(4, 3),
                     end: RmsdPosition::new(4, 3),
                     data: YamlTokenData::Scalar("d".into()),
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_map_indented() {
+        assert_eq!(
+            YamlToken::parse("\n  abc : d\n  abd:\n    abe: f").unwrap(),
+            vec![
+                YamlToken {
+                    indent: 2,
+                    start: RmsdPosition::new(2, 3),
+                    end: RmsdPosition::new(2, 5),
+                    data: YamlTokenData::Scalar("abc".into()),
+                },
+                YamlToken {
+                    indent: 2,
+                    start: RmsdPosition::new(2, 7),
+                    end: RmsdPosition::new(2, 7),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 2,
+                    start: RmsdPosition::new(2, 9),
+                    end: RmsdPosition::new(2, 9),
+                    data: YamlTokenData::Scalar("d".into()),
+                },
+                YamlToken {
+                    indent: 2,
+                    start: RmsdPosition::new(3, 3),
+                    end: RmsdPosition::new(3, 5),
+                    data: YamlTokenData::Scalar("abd".into()),
+                },
+                YamlToken {
+                    indent: 2,
+                    start: RmsdPosition::new(3, 6),
+                    end: RmsdPosition::new(3, 6),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 4,
+                    start: RmsdPosition::new(4, 5),
+                    end: RmsdPosition::new(4, 7),
+                    data: YamlTokenData::Scalar("abe".into()),
+                },
+                YamlToken {
+                    indent: 4,
+                    start: RmsdPosition::new(4, 8),
+                    end: RmsdPosition::new(4, 8),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 4,
+                    start: RmsdPosition::new(4, 10),
+                    end: RmsdPosition::new(4, 10),
+                    data: YamlTokenData::Scalar("f".into()),
                 },
             ]
         )

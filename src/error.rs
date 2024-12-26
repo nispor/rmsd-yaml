@@ -6,8 +6,6 @@ use crate::RmsdPosition;
 pub enum ErrorKind {
     #[default]
     Bug,
-    /// Still have charters not parsed.
-    TrailingCharacters,
     /// Invalid position string
     InvalidPosition,
     /// YAML reserved indicators( @ or `) can't start a plain scalar.
@@ -17,7 +15,15 @@ pub enum ErrorKind {
     /// Unfinished quote
     UnfinishedQuote,
     /// Invalid ErrorKind
-    InvalidErrorKind,
+    InvalidErrorType,
+    /// Unexpected YAML node type, e.g. Expecting a scalar but got sequence.
+    UnexpectedYamlNodeType,
+    /// Invalid bool string, should be `true` or `false`
+    InvalidBool,
+    /// Invalid number
+    InvalidNumber,
+    /// Number overflow
+    NumberOverflow,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -27,13 +33,16 @@ impl std::fmt::Display for ErrorKind {
             "{}",
             match self {
                 Self::Bug => "bug",
-                Self::TrailingCharacters => "trailing_characters",
                 Self::InvalidPosition => "invalid_position",
                 Self::StartWithReservedIndicator =>
                     "start_with_reserved_indicator",
                 Self::InvalidEscapeScalar => "invalid_escape_scalar",
                 Self::UnfinishedQuote => "unfinished_quote",
-                Self::InvalidErrorKind => "invalid_error_kind",
+                Self::InvalidErrorType => "invalid_error_type",
+                Self::UnexpectedYamlNodeType => "unexpected_yaml_node_type",
+                Self::InvalidBool => "invalid_bool",
+                Self::InvalidNumber => "invalid_number",
+                Self::NumberOverflow => "number_overflow",
             }
         )
     }
@@ -43,22 +52,25 @@ impl TryFrom<&str> for ErrorKind {
     type Error = RmsdError;
 
     fn try_from(value: &str) -> Result<Self, RmsdError> {
-        match value {
-            "bug" => Ok(Self::Bug),
-            "trailing_characters" => Ok(Self::TrailingCharacters),
-            "invalid_position" => Ok(Self::InvalidPosition),
-            "start_with_reserved_indicator" => {
-                Ok(Self::StartWithReservedIndicator)
+        Ok(match value {
+            "bug" => Self::Bug,
+            "invalid_position" => Self::InvalidPosition,
+            "start_with_reserved_indicator" => Self::StartWithReservedIndicator,
+            "invalid_escape_scalar" => Self::InvalidEscapeScalar,
+            "unfinished_quote" => Self::UnfinishedQuote,
+            "invalid_error_type" => Self::InvalidErrorType,
+            "unexpected_yaml_node_type" => Self::UnexpectedYamlNodeType,
+            "invalid_bool" => Self::InvalidBool,
+            "invalid_number" => Self::InvalidNumber,
+            "number_overflow" => Self::NumberOverflow,
+            _ => {
+                return Err(RmsdError::new(
+                    ErrorKind::InvalidErrorType,
+                    format!("Invalid error type: {value}"),
+                    RmsdPosition::default(),
+                ))
             }
-            "invalid_escape_scalar" => Ok(Self::InvalidEscapeScalar),
-            "unfinished_quote" => Ok(Self::UnfinishedQuote),
-            "invalid_error_kind" => Ok(Self::InvalidErrorKind),
-            _ => Err(RmsdError::new(
-                ErrorKind::InvalidErrorKind,
-                format!("Invalid error kind: {value}"),
-                RmsdPosition::default(),
-            )),
-        }
+        })
     }
 }
 
@@ -66,6 +78,7 @@ impl TryFrom<&str> for ErrorKind {
 pub struct RmsdError {
     kind: ErrorKind,
     msg: String,
+    // TODO: Should we support pos range instead of single point?
     pos: RmsdPosition,
 }
 
@@ -122,19 +135,18 @@ impl serde::de::Error for RmsdError {
 }
 
 impl RmsdError {
-    /// Still have trailing charters not parsed
-    pub(crate) fn trailing_characters(pos: RmsdPosition) -> Self {
+    pub(crate) fn bug(msg: String, pos: RmsdPosition) -> Self {
         Self {
-            kind: ErrorKind::TrailingCharacters,
+            kind: ErrorKind::Bug,
+            msg,
             pos,
-            msg: "still have trailing charters".to_string(),
         }
     }
 
-    pub(crate) fn invalid_pos(msg: &str) -> Self {
+    pub(crate) fn invalid_pos(msg: String) -> Self {
         Self {
             kind: ErrorKind::InvalidPosition,
-            msg: msg.to_string(),
+            msg,
             ..Default::default()
         }
     }
@@ -162,6 +174,43 @@ impl RmsdError {
     pub(crate) fn unfinished_quote(msg: String, pos: RmsdPosition) -> Self {
         Self {
             kind: ErrorKind::UnfinishedQuote,
+            msg,
+            pos,
+        }
+    }
+
+    pub(crate) fn unexpected_yaml_node_type(
+        msg: String,
+        pos: RmsdPosition,
+    ) -> Self {
+        Self {
+            kind: ErrorKind::UnexpectedYamlNodeType,
+            msg,
+            pos,
+        }
+    }
+
+    pub(crate) fn invalid_bool(input: &str, pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::InvalidBool,
+            msg: format!(
+                "Invalid bool string `{input}`, should be true or false"
+            ),
+            pos,
+        }
+    }
+
+    pub(crate) fn invalid_number(input: &str, pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::InvalidNumber,
+            msg: format!("Invalid number string `{input}`"),
+            pos,
+        }
+    }
+
+    pub(crate) fn number_overflow(msg: String, pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::NumberOverflow,
             msg,
             pos,
         }

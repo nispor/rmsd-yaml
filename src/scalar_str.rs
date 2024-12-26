@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{node::YAML_CHAR_INDICATORS, CharsIter, RmsdError, RmsdPosition};
+use crate::{CharsIter, RmsdError, RmsdPosition, YAML_CHAR_INDICATORS};
 
 const YAML_CHAR_ESCAPE: char = '\\';
 
@@ -67,25 +67,44 @@ pub(crate) fn read_single_quoted_str(
 
 /// Read till end of line or any c-indicator defined in YAML 1.2.2
 /// White space trimmed both start and end.
+///
+/// For unquoted string after map value indicator `:`, we should not
+/// process line folding, so the string is limited before \n. Set
+/// skip_line_folding to true in this case.
+///
 /// The ending char might be new line, which should not be considered as
 /// position range, hence we return the final non-whitespace position.
 pub(crate) fn read_unquoted_str(
     iter: &mut CharsIter,
+    skip_line_folding: bool,
 ) -> Result<(String, RmsdPosition), RmsdError> {
     let mut ret = String::new();
-    // node.rs already has checks, so first char can be char.
+    let mut droped_first_newline = false;
+    let mut pending_whitespace: Vec<char> = Vec::new();
+    let mut pos;
+
+    // node.rs already has checks, so first char can be any(except new line will
+    // be discard).
     if let Some(c) = iter.next() {
-        ret.push(c);
+        pos = iter.pos();
+        if c == '\n' {
+            if skip_line_folding {
+                return Ok((ret, RmsdPosition::EOF));
+            } else {
+                droped_first_newline = true;
+            }
+        } else {
+            ret.push(c);
+        }
     } else {
         return Ok((ret, RmsdPosition::EOF));
     }
 
-    let mut droped_first_newline = false;
-    let mut pending_whitespace: Vec<char> = Vec::new();
-    let mut pos = iter.pos();
-
     while let Some(c) = iter.peek() {
         if YAML_CHAR_INDICATORS.contains(&c) {
+            return Ok((ret, pos));
+        } else if skip_line_folding && c == '\n' {
+            iter.next();
             return Ok((ret, pos));
         } else if let Some(p) = process_with_line_folding(
             &mut ret,
@@ -317,19 +336,40 @@ mod tests {
     #[test]
     fn test_unquoted_string() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc d");
-        let ret = read_unquoted_str(&mut iter)?;
+        let ret = read_unquoted_str(&mut iter, false)?;
         assert_eq!(ret.0, "abc d");
         assert_eq!(ret.1.line, 1);
         assert_eq!(ret.1.column, 5);
         Ok(())
     }
+
     #[test]
     fn test_unquoted_string_with_folding() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc\n\n\n \nabc\nd\n");
-        let ret = read_unquoted_str(&mut iter)?;
+        let ret = read_unquoted_str(&mut iter, false)?;
         assert_eq!(ret.0, "abc\n\n\nabc d");
         assert_eq!(ret.1.line, 6);
         assert_eq!(ret.1.column, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unquoted_string_with_leading_new_line() -> Result<(), RmsdError> {
+        let mut iter = CharsIter::new("\nabc");
+        let ret = read_unquoted_str(&mut iter, false)?;
+        assert_eq!(ret.0, "abc");
+        assert_eq!(ret.1.line, 2);
+        assert_eq!(ret.1.column, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unquoted_string_skip_line_folding() -> Result<(), RmsdError> {
+        let mut iter = CharsIter::new("abc\n  d");
+        let ret = read_unquoted_str(&mut iter, true)?;
+        assert_eq!(ret.0, "abc");
+        assert_eq!(ret.1.line, 1);
+        assert_eq!(ret.1.column, 3);
         Ok(())
     }
 }

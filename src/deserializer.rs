@@ -1,60 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 
-use crate::{RmsdError, RmsdPosition, YamlToken};
+use crate::{RmsdError, YamlValue, YamlValueData, YamlValueMapAccess};
 
 #[derive(Debug, Default)]
-pub struct RmsdDeserializer<'de> {
-    input: &'de str,
-    next_pos: RmsdPosition,
-}
-
-impl<'de> RmsdDeserializer<'de> {
-    pub fn from_str(input: &'de str) -> Self {
-        Self {
-            input,
-            ..Default::default()
-        }
-    }
+pub struct RmsdDeserializer {
+    pub(crate) parsed: YamlValue,
 }
 
 pub fn from_str<'a, T>(s: &'a str) -> Result<T, RmsdError>
 where
     T: Deserialize<'a>,
 {
-    let mut deserializer = RmsdDeserializer::from_str(s);
+    let parsed = YamlValue::from_str(s)?;
+    let mut deserializer = RmsdDeserializer { parsed };
 
-    let nodes = YamlToken::parse(s)?;
-    println!("HAHA {:?}", nodes);
-
-    let t = T::deserialize(&mut deserializer)?;
-    if deserializer.input.is_empty() {
-        Ok(t)
-    } else {
-        Err(RmsdError::trailing_characters(deserializer.next_pos))
-    }
+    T::deserialize(&mut deserializer)
 }
 
-impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
+impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
     type Error = RmsdError;
 
     // Look at the input data to decide what Serde data model type to
     // deserialize as. Not all data formats are able to support this operation.
     // Formats that support `deserialize_any` are known as self-describing.
-    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        match &self.parsed.data {
+            YamlValueData::Scalar(_) => self.deserialize_str(visitor),
+            YamlValueData::Sequence(_) => self.deserialize_seq(visitor),
+            YamlValueData::Map(_) => self.deserialize_map(visitor),
+            v => Err(RmsdError::bug(
+                format!("deserialize_any() got unexpected data {v:?}"),
+                self.parsed.start,
+            )),
+        }
     }
 
-    fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_bool(self.parsed.as_bool()?)
     }
 
     fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -85,32 +78,32 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
         todo!()
     }
 
-    fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_u8(self.parsed.as_u8()?)
     }
 
-    fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_u16(self.parsed.as_u16()?)
     }
 
-    fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_u32(self.parsed.as_u32()?)
     }
 
-    fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_u64(self.parsed.as_u64()?)
     }
 
     fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -127,25 +120,25 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
         todo!()
     }
 
-    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_char(self.parsed.as_char()?)
     }
 
-    fn deserialize_str<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_str(self.parsed.as_str()?)
     }
 
-    fn deserialize_string<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_string(self.parsed.as_str()?.to_string())
     }
 
     fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -231,11 +224,19 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
         todo!()
     }
 
-    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        if let YamlValueData::Map(v) = &self.parsed.data {
+            let access = YamlValueMapAccess::new(*v.clone());
+            visitor.visit_map(access)
+        } else {
+            Err(RmsdError::unexpected_yaml_node_type(
+                format!("Expecting a map, got {}", self.parsed.data),
+                self.parsed.start,
+            ))
+        }
     }
 
     fn deserialize_struct<V>(
@@ -264,21 +265,21 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer<'de> {
 
     fn deserialize_identifier<V>(
         self,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_str(visitor)
     }
 
     fn deserialize_ignored_any<V>(
         self,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_any(visitor)
     }
 }
