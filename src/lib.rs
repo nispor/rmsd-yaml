@@ -11,6 +11,7 @@ mod scalar_str;
 mod token;
 mod token_iter;
 mod value;
+mod variant;
 
 pub(crate) use self::array::{get_array, YamlValueSeqAccess};
 pub(crate) use self::char_iter::CharsIter;
@@ -21,9 +22,10 @@ pub(crate) use self::scalar_str::{
 };
 pub(crate) use self::token::{YamlToken, YamlTokenData, YAML_CHAR_INDICATORS};
 pub(crate) use self::token_iter::TokensIter;
+pub(crate) use self::variant::{get_tag, YamlValueEnumAccess};
 
 pub use self::deserializer::{from_str, RmsdDeserializer};
 pub use self::error::RmsdError;
 pub use self::map::YamlValueMap;
 pub use self::position::RmsdPosition;
-pub use self::value::{YamlValue, YamlValueData};
+pub use self::value::{YamlTag, YamlValue, YamlValueData};
