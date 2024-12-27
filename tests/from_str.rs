@@ -172,3 +172,19 @@ fn test_de_array_of_struct() -> Result<(), Box<dyn std::error::Error>> {
     );
     Ok(())
 }
+
+#[test]
+fn test_de_new_type_struct() -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct FooTest(String);
+
+    let yaml_str = r#"
+        ---
+        abcedfo
+    "#;
+
+    let value: FooTest = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(value, FooTest("abcedfo".to_string()));
+    Ok(())
+}
