@@ -142,6 +142,15 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_ENTRY
                 | YAML_CHAR_MAPPING_KEY
                 | YAML_CHAR_MAPPING_VALUE => {
+                    // We might be got `---` as document begin which we should
+                    // ignore
+                    if iter.as_str().starts_with("---") {
+                        iter.next();
+                        iter.next();
+                        iter.next();
+                        continue;
+                    }
+
                     let indicator = match c {
                         YAML_CHAR_SEQUENCE_ENTRY => {
                             YamlTokenData::BlockSequenceIndicator

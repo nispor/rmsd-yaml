@@ -67,4 +67,8 @@ impl<'s> CharsIter<'s> {
             }
         }
     }
+
+    pub(crate) fn as_str(&self) -> &str {
+        self.iter.as_str()
+    }
 }

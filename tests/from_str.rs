@@ -30,7 +30,7 @@ fn test_de_bool() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_de_unsign_number() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(123114u32, rmsd_yaml::from_str("123114")?);
+    assert_eq!(123114u32, rmsd_yaml::from_str("\n---\n123114")?);
 
     assert_eq!(1234u16, rmsd_yaml::from_str("+1234")?);
 
@@ -56,6 +56,7 @@ fn test_de_struct() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let yaml_str = r#"
+        ---
         uint_a: 500
         str_b: "abc"
         bar:
