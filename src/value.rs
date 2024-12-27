@@ -3,8 +3,8 @@
 use std::str::FromStr;
 
 use crate::{
-    get_array, get_map, RmsdError, RmsdPosition, TokensIter, YamlToken,
-    YamlTokenData, YamlValueMap,
+    get_array, get_map, get_tag, RmsdError, RmsdPosition, TokensIter,
+    YamlToken, YamlTokenData, YamlValueMap,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +12,7 @@ enum ContainerType {
     Map,
     Array,
     Scalar,
+    Tag,
     Null,
 }
 
@@ -61,6 +62,10 @@ impl YamlValue {
     pub fn as_str(&self) -> Result<&str, RmsdError> {
         if let YamlValueData::Scalar(v) = &self.data {
             Ok(v.as_str())
+        } else if let YamlValueData::Tag(tag) = &self.data {
+            // The `as_str()` is called to get tag name of enum instead of
+            // content.
+            Ok(tag.name.as_str())
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
                 format!("Expecting a string, but got {}", &self.data),
@@ -105,7 +110,7 @@ impl YamlValue {
             }
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
-                format!("Expecting a bool, but got {}", &self.data),
+                format!("Expecting a number, but got {}", &self.data),
                 self.start,
             ))
         }
@@ -186,10 +191,13 @@ impl TryFrom<Vec<YamlToken>> for YamlValue {
                 ret.data = YamlValueData::Sequence(get_array(&mut iter)?);
             }
             ContainerType::Scalar => {
-                if tokens.is_empty() {
-                } else {
+                if !tokens.is_empty() {
                     ret.data = get_scalar(tokens.pop().unwrap())?;
                 }
+            }
+            ContainerType::Tag => {
+                let mut iter = TokensIter::new(tokens);
+                ret.data = YamlValueData::Tag(Box::new(get_tag(&mut iter)?));
             }
             ContainerType::Null => (),
         }
@@ -212,6 +220,8 @@ fn get_container_type(tokens: &[YamlToken]) -> ContainerType {
                 == Some(true)
         {
             ContainerType::Map
+        } else if matches!(first_token.data, YamlTokenData::LocalTag(_)) {
+            ContainerType::Tag
         } else {
             ContainerType::Scalar
         }
@@ -244,7 +254,7 @@ pub enum YamlValueData {
     Scalar(String),
     Sequence(Vec<YamlValue>),
     Map(Box<YamlValueMap>),
-    // Tag(Box<YamlTag>),
+    Tag(Box<YamlTag>),
 }
 
 impl std::fmt::Display for YamlValueData {

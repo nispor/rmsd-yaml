@@ -6,7 +6,8 @@ use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 
 use crate::{
-    RmsdError, YamlValue, YamlValueData, YamlValueMapAccess, YamlValueSeqAccess,
+    RmsdError, YamlValue, YamlValueData, YamlValueEnumAccess,
+    YamlValueMapAccess, YamlValueSeqAccess,
 };
 
 #[derive(Debug, Default)]
@@ -201,6 +202,9 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         V: Visitor<'de>,
     {
         if let YamlValueData::Sequence(v) = &self.parsed.data {
+            // TODO: We cannot move data output of `&mut self`, so we use
+            // to_vec() to clone here. Maybe should use `Option<YamlValue>` for
+            // Self::parsed, where we can use `Option::take()` to move data out.
             let access = YamlValueSeqAccess::new(v.to_vec());
             visitor.visit_seq(access)
         } else {
@@ -239,6 +243,9 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         V: Visitor<'de>,
     {
         if let YamlValueData::Map(v) = &self.parsed.data {
+            // TODO: We cannot move data output of `&mut self`, so we use clone
+            // here. Maybe should use `Option<YamlValue>` for Self::parsed,
+            // where we can use `Option::take()` to move data out.
             let access = YamlValueMapAccess::new(*v.clone());
             visitor.visit_map(access)
         } else {
@@ -265,12 +272,17 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         self,
         _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        // TODO: We cannot move data output of `&mut self`, so we use clone
+        // here. Maybe should use `Option<YamlValue>` for Self::parsed,
+        // where we can use `Option::take()` to move data out.
+        let access = YamlValueEnumAccess::new(self.parsed.clone());
+
+        visitor.visit_enum(access)
     }
 
     fn deserialize_identifier<V>(

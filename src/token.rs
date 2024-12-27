@@ -71,11 +71,11 @@ pub(crate) enum YamlTokenData {
     // We need to convert escaped UTF-8 char like `\0001F600` to
     /// Scalar content
     Scalar(String),
+    /// Local tag using `!`
+    LocalTag(String),
     /*
     /// Global tag using `tag:`
     GlobalTag(String),
-    /// Local tag using `!`
-    LocalTag(String),
     /// Directive using `%TAG`
     DirectiveTag(String),
     /// Directive using `%YAML`
@@ -237,11 +237,36 @@ impl YamlToken {
                 }
                 YAML_CHAR_TAG => {
                     iter.next();
+                    let start = iter.pos();
+                    // `! ` means Non-Specific Tags means follow up should be
+                    // treated as string regardless its form.
+                    // Currently we just discard it as we store unquoted_string
+                    // as Scalar(String) anyways.
+                    if iter.peek() == Some(' ') {
+                        iter.next();
+                        continue;
+                    }
+                    let mut tag = String::new();
+                    let mut end = iter.pos();
+                    while let Some(c) = iter.next() {
+                        if c == ' ' || c == '\n' {
+                            break;
+                        } else {
+                            // TODO: handle these special tags
+                            // `tag:yaml.org,2002:seq`
+                            // `tag:yaml.org,2002:map`
+                            // `tag:yaml.org,2002:str`,
+                            // TODO: handle check on:
+                            //  c-verbatim-tag ::= "!<" ns-uri-char+ '>'
+                            end = iter.pos();
+                            tag.push(c)
+                        }
+                    }
                     ret.push(YamlToken {
                         indent,
-                        start: iter.pos(),
-                        end: iter.pos(),
-                        data: YamlTokenData::MapValueIndicator,
+                        start,
+                        end,
+                        data: YamlTokenData::LocalTag(tag),
                     })
                 }
 
@@ -476,6 +501,60 @@ mod tests {
                     start: RmsdPosition::new(4, 10),
                     end: RmsdPosition::new(4, 10),
                     data: YamlTokenData::Scalar("f".into()),
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_tag() {
+        assert_eq!(
+            YamlToken::parse("!Abc 128").unwrap(),
+            vec![
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(1, 1),
+                    end: RmsdPosition::new(1, 4),
+                    data: YamlTokenData::LocalTag("Abc".into()),
+                },
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(1, 6),
+                    end: RmsdPosition::new(1, 8),
+                    data: YamlTokenData::Scalar("128".into()),
+                },
+            ]
+        )
+    }
+
+    #[test]
+    fn test_tag_struct() {
+        assert_eq!(
+            YamlToken::parse("!Abc\na: 128").unwrap(),
+            vec![
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(1, 1),
+                    end: RmsdPosition::new(1, 4),
+                    data: YamlTokenData::LocalTag("Abc".into()),
+                },
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(2, 1),
+                    end: RmsdPosition::new(2, 1),
+                    data: YamlTokenData::Scalar("a".into()),
+                },
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(2, 2),
+                    end: RmsdPosition::new(2, 2),
+                    data: YamlTokenData::MapValueIndicator
+                },
+                YamlToken {
+                    indent: 0,
+                    start: RmsdPosition::new(2, 4),
+                    end: RmsdPosition::new(2, 6),
+                    data: YamlTokenData::Scalar("128".into()),
                 },
             ]
         )
