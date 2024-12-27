@@ -5,7 +5,9 @@ use std::str::FromStr;
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 
-use crate::{RmsdError, YamlValue, YamlValueData, YamlValueMapAccess};
+use crate::{
+    RmsdError, YamlValue, YamlValueData, YamlValueMapAccess, YamlValueSeqAccess,
+};
 
 #[derive(Debug, Default)]
 pub struct RmsdDeserializer {
@@ -194,34 +196,42 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         todo!()
     }
 
-    fn deserialize_seq<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        if let YamlValueData::Sequence(v) = &self.parsed.data {
+            let access = YamlValueSeqAccess::new(v.to_vec());
+            visitor.visit_seq(access)
+        } else {
+            Err(RmsdError::unexpected_yaml_node_type(
+                format!("Expecting a sequence, got {}", self.parsed.data),
+                self.parsed.start,
+            ))
+        }
     }
 
     fn deserialize_tuple<V>(
         self,
         _len: usize,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_tuple_struct<V>(
         self,
         _name: &'static str,
         _len: usize,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
