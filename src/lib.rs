@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+mod array;
 mod char_iter;
 mod deserializer;
 mod error;
@@ -11,9 +12,10 @@ mod token;
 mod token_iter;
 mod value;
 
+pub(crate) use self::array::{get_array, YamlValueSeqAccess};
 pub(crate) use self::char_iter::CharsIter;
 pub(crate) use self::indent::process_indent;
-pub(crate) use self::map::YamlValueMapAccess;
+pub(crate) use self::map::{get_map, YamlValueMapAccess};
 pub(crate) use self::scalar_str::{
     read_double_quoted_str, read_single_quoted_str, read_unquoted_str,
 };

@@ -75,3 +75,100 @@ fn test_de_struct() -> Result<(), Box<dyn std::error::Error>> {
     );
     Ok(())
 }
+
+#[test]
+fn test_de_array() -> Result<(), Box<dyn std::error::Error>> {
+    let yaml_str = r#"
+        ---
+        - 500
+        - 600
+        - 0xfe
+    "#;
+
+    let value: Vec<u32> = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(value, vec![500u32, 600, 0xfe,]);
+    Ok(())
+}
+
+#[test]
+fn test_de_tuple() -> Result<(), Box<dyn std::error::Error>> {
+    let yaml_str = r#"
+        ---
+        - 500
+        - 0xff
+    "#;
+
+    let value: (u32, u32) = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(value, (500u32, 0xff));
+    Ok(())
+}
+
+#[test]
+fn test_de_tuple_of_struct() -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct FooTest {
+        uint_a: u32,
+        str_b: String,
+    }
+
+    let yaml_str = r#"
+        ---
+        - uint_a: 36
+          str_b: item1
+        - uint_a: 37
+          str_b: item2
+    "#;
+
+    let value: (FooTest, FooTest) = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(
+        value,
+        (
+            FooTest {
+                uint_a: 36,
+                str_b: "item1".to_string(),
+            },
+            FooTest {
+                uint_a: 37,
+                str_b: "item2".to_string(),
+            },
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn test_de_array_of_struct() -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct FooTest {
+        uint_a: u32,
+        str_b: String,
+    }
+
+    let yaml_str = r#"
+        ---
+        - uint_a: 36
+          str_b: item1
+        - uint_a: 37
+          str_b: item2
+    "#;
+
+    let value: Vec<FooTest> = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(
+        value,
+        vec![
+            FooTest {
+                uint_a: 36,
+                str_b: "item1".to_string(),
+            },
+            FooTest {
+                uint_a: 37,
+                str_b: "item2".to_string(),
+            },
+        ]
+    );
+    Ok(())
+}

@@ -5,7 +5,10 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
-use crate::{RmsdDeserializer, RmsdError, RmsdPosition, YamlValue};
+use crate::{
+    RmsdDeserializer, RmsdError, RmsdPosition, TokensIter, YamlTokenData,
+    YamlValue, YamlValueData,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YamlValueMap(IndexMap<YamlValue, YamlValue>);
@@ -37,6 +40,10 @@ impl YamlValueMap {
 
     pub(crate) fn pop(&mut self) -> Option<(YamlValue, YamlValue)> {
         self.0.pop()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -78,8 +85,6 @@ impl<'de> MapAccess<'de> for YamlValueMapAccess {
             return Ok(None);
         };
 
-        println!("HAHA key {:?}", key);
-
         seed.deserialize(&mut RmsdDeserializer { parsed: key })
             .map(Some)
     }
@@ -100,8 +105,83 @@ impl<'de> MapAccess<'de> for YamlValueMapAccess {
             ));
         };
 
-        println!("HAHA val {:?}", value);
-
         seed.deserialize(&mut RmsdDeserializer { parsed: value })
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.data.len())
+    }
+}
+
+pub(crate) fn get_map(
+    iter: &mut TokensIter,
+) -> Result<YamlValueMap, RmsdError> {
+    let mut ret = YamlValueMap::new();
+
+    let indent = if let Some(first_token) = iter.peek() {
+        first_token.indent
+    } else {
+        return Ok(ret);
+    };
+
+    let mut key: Option<YamlValue> = None;
+    while let Some(token) = iter.peek() {
+        if token.indent < indent {
+            return Ok(ret);
+        }
+
+        match &token.data {
+            YamlTokenData::Scalar(_) => {
+                if let Some(k) = key.take() {
+                    if token.indent == indent {
+                        // The unwrap is safe here as the `peek()` already check
+                        // it is not None.
+                        let token = iter.next().unwrap();
+                        if let YamlTokenData::Scalar(s) = token.data {
+                            let value = YamlValue {
+                                data: YamlValueData::Scalar(s),
+                                start: token.start,
+                                end: token.end,
+                            };
+                            ret.insert(k, value);
+                        } else {
+                            unreachable!()
+                        }
+                    } else {
+                        // The value is nested
+                        let nested_tokens =
+                            iter.remove_tokens_with_the_same_indent();
+                        ret.insert(k, YamlValue::try_from(nested_tokens)?);
+                    }
+                } else {
+                    // The unwrap is safe here as the `peek()` already check
+                    // it is not None.
+                    let token = iter.next().unwrap();
+                    if let YamlTokenData::Scalar(s) = token.data {
+                        key = Some(YamlValue {
+                            data: YamlValueData::Scalar(s),
+                            start: token.start,
+                            end: token.end,
+                        });
+                    } else {
+                        unreachable!();
+                    }
+                }
+            }
+            YamlTokenData::MapValueIndicator => {
+                if key.is_none() {
+                    return Err(RmsdError::unexpected_yaml_node_type(
+                        "Got map value indicator `:` with \
+                        no key defined before"
+                            .to_string(),
+                        token.start,
+                    ));
+                }
+                iter.next();
+            }
+            // Support JSON format
+            _ => todo!(),
+        }
+    }
+    Ok(ret)
 }
