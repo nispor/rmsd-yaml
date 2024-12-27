@@ -25,6 +25,10 @@ where
     T::deserialize(&mut deserializer)
 }
 
+pub fn to_value(input: &str) -> Result<YamlValue, RmsdError> {
+    YamlValue::from_str(input)
+}
+
 impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
     type Error = RmsdError;
 
