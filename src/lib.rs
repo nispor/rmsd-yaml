@@ -25,7 +25,7 @@ pub(crate) use self::token_iter::TokensIter;
 pub(crate) use self::variant::{get_tag, YamlValueEnumAccess};
 
 pub use self::deserializer::{from_str, to_value, RmsdDeserializer};
-pub use self::error::RmsdError;
+pub use self::error::{ErrorKind, RmsdError};
 pub use self::map::YamlValueMap;
 pub use self::position::RmsdPosition;
 pub use self::value::{YamlTag, YamlValue, YamlValueData};
