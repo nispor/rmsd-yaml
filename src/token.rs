@@ -145,6 +145,17 @@ impl YamlToken {
                     // We might be got `---` as document begin which we should
                     // ignore
                     if iter.as_str().starts_with("---") {
+                        if !ret.is_empty() {
+                            return Err(RmsdError::unexpected_yaml_node_type(
+                                format!(
+                                    "The `---` should be placed at the \
+                                    beginning of document, but we have {} \
+                                    before it",
+                                    ret.pop().unwrap()
+                                ),
+                                iter.pos(),
+                            ));
+                        }
                         iter.next();
                         iter.next();
                         iter.next();
@@ -364,6 +375,7 @@ fn read_unquoted_str_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ErrorKind;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -558,5 +570,27 @@ mod tests {
                 },
             ]
         )
+    }
+
+    #[test]
+    fn test_doc_beging() {
+        assert_eq!(
+            YamlToken::parse("\n    ---\n128").unwrap(),
+            vec![YamlToken {
+                indent: 0,
+                start: RmsdPosition::new(3, 1),
+                end: RmsdPosition::new(3, 3),
+                data: YamlTokenData::Scalar("128".into()),
+            },]
+        )
+    }
+
+    #[test]
+    fn test_doc_invalid_beging() {
+        let result = YamlToken::parse("128\n    ---\n128");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::UnexpectedYamlNodeType);
+        }
     }
 }
