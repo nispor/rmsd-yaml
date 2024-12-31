@@ -6,8 +6,8 @@ use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::{
-    RmsdDeserializer, RmsdError, RmsdPosition, TokensIter, YamlTokenData,
-    YamlValue, YamlValueData,
+    get_array, get_tag, RmsdDeserializer, RmsdError, RmsdPosition, TokensIter,
+    YamlTokenData, YamlValue, YamlValueData,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,59 +113,48 @@ impl<'de> MapAccess<'de> for YamlValueMapAccess {
     }
 }
 
+// Should have leading { and ending } removed.
 pub(crate) fn get_map(
     iter: &mut TokensIter,
-) -> Result<YamlValueMap, RmsdError> {
-    let mut ret = YamlValueMap::new();
+    in_flow: bool,
+) -> Result<YamlValue, RmsdError> {
+    println!("HAHA GET_MAP {:?}", iter);
+    let mut map = YamlValueMap::new();
 
-    let indent = if let Some(first_token) = iter.peek() {
-        first_token.indent
+    let (start, mut end, indent) = if let Some(first_token) = iter.peek() {
+        (first_token.start, first_token.end, first_token.indent)
     } else {
-        return Ok(ret);
+        return Err(RmsdError::bug(
+            "get_map(): Got empty tokens".to_string(),
+            RmsdPosition::EOF,
+        ));
     };
 
     let mut key: Option<YamlValue> = None;
     while let Some(token) = iter.peek() {
-        if token.indent < indent {
-            return Ok(ret);
+        // Only break on indent if not inside of flow style
+        if (!in_flow) && token.indent < indent {
+            break;
         }
 
         match &token.data {
             YamlTokenData::Scalar(_) => {
-                if let Some(k) = key.take() {
-                    if token.indent == indent {
-                        // The unwrap is safe here as the `peek()` already check
-                        // it is not None.
-                        let token = iter.next().unwrap();
-                        if let YamlTokenData::Scalar(s) = token.data {
-                            let value = YamlValue {
-                                data: YamlValueData::Scalar(s),
-                                start: token.start,
-                                end: token.end,
-                            };
-                            ret.insert(k, value);
-                        } else {
-                            unreachable!()
-                        }
-                    } else {
-                        // The value is nested
-                        let nested_tokens =
-                            iter.remove_tokens_with_the_same_indent();
-                        ret.insert(k, YamlValue::try_from(nested_tokens)?);
-                    }
-                } else {
-                    // The unwrap is safe here as the `peek()` already check
-                    // it is not None.
+                let value = if in_flow || token.indent == indent {
                     let token = iter.next().unwrap();
-                    if let YamlTokenData::Scalar(s) = token.data {
-                        key = Some(YamlValue {
-                            data: YamlValueData::Scalar(s),
-                            start: token.start,
-                            end: token.end,
-                        });
-                    } else {
-                        unreachable!();
-                    }
+                    YamlValue::parse(&mut TokensIter::new(vec![token]))?
+                } else {
+                    // nested map
+                    YamlValue::parse(&mut TokensIter::new(
+                        iter.remove_tokens_with_the_same_indent(),
+                    ))?
+                };
+                println!("HAHA CUR KEY {:?}", key);
+                println!("HAHA GOT VALUE {:?}", value);
+                if let Some(k) = key.take() {
+                    end = value.end;
+                    map.insert(k, value);
+                } else {
+                    key = Some(value);
                 }
             }
             YamlTokenData::MapValueIndicator => {
@@ -179,9 +168,59 @@ pub(crate) fn get_map(
                 }
                 iter.next();
             }
-            // Support JSON format
-            _ => todo!(),
+            YamlTokenData::FlowMapStart => {
+                let mut sub_iter =
+                    TokensIter::new(iter.remove_tokens_of_map_flow()?);
+                let value = get_map(&mut sub_iter, true)?;
+                println!("HAHA K {:?}\n V {:?}", key, value);
+                if let Some(k) = key.take() {
+                    end = value.end;
+                    map.insert(k, value);
+                } else {
+                    key = Some(value);
+                }
+            }
+            YamlTokenData::FlowSequenceStart => {
+                let mut sub_iter =
+                    TokensIter::new(iter.remove_tokens_of_seq_flow()?);
+                let value = get_array(&mut sub_iter, true)?;
+                if let Some(k) = key.take() {
+                    end = value.end;
+                    map.insert(k, value);
+                } else {
+                    key = Some(value);
+                }
+            }
+            YamlTokenData::LocalTag(_) => {
+                let value = get_tag(iter)?;
+                if let Some(k) = key.take() {
+                    end = value.end;
+                    map.insert(k, value);
+                } else {
+                    key = Some(value);
+                }
+            }
+            YamlTokenData::CollectEntry => {
+                if !in_flow {
+                    return Err(RmsdError::bug(
+                        format!("get_map(): Unexpected token {}", token),
+                        token.start,
+                    ));
+                }
+                iter.next();
+            }
+            _ => {
+                return Err(RmsdError::bug(
+                    format!("get_map(): Unexpected token {}", token),
+                    token.start,
+                ));
+            }
         }
     }
-    Ok(ret)
+    println!("HAHA GOT MAP {:?}", map);
+    Ok(YamlValue {
+        start,
+        end,
+        data: YamlValueData::Map(Box::new(map)),
+    })
 }

@@ -24,6 +24,10 @@ pub enum ErrorKind {
     InvalidNumber,
     /// Number overflow
     NumberOverflow,
+    /// Unfinished map indicator `{`
+    UnfinishedMapIndicator,
+    /// Unfinished map indicator `[`
+    UnfinishedSequenceIndicator,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -43,6 +47,9 @@ impl std::fmt::Display for ErrorKind {
                 Self::InvalidBool => "invalid_bool",
                 Self::InvalidNumber => "invalid_number",
                 Self::NumberOverflow => "number_overflow",
+                Self::UnfinishedMapIndicator => "unfinished_map_indicator",
+                Self::UnfinishedSequenceIndicator =>
+                    "unfinished_sequence_indicator",
             }
         )
     }
@@ -63,6 +70,10 @@ impl TryFrom<&str> for ErrorKind {
             "invalid_bool" => Self::InvalidBool,
             "invalid_number" => Self::InvalidNumber,
             "number_overflow" => Self::NumberOverflow,
+            "unfinished_map_indicator" => Self::UnfinishedMapIndicator,
+            "unfinished_sequence_indicator" => {
+                Self::UnfinishedSequenceIndicator
+            }
             _ => {
                 return Err(RmsdError::new(
                     ErrorKind::InvalidErrorType,
@@ -212,6 +223,22 @@ impl RmsdError {
         Self {
             kind: ErrorKind::NumberOverflow,
             msg,
+            pos,
+        }
+    }
+
+    pub(crate) fn unfinished_map_indicator(pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::UnfinishedMapIndicator,
+            msg: "Unfinished map indicator `}`".to_string(),
+            pos,
+        }
+    }
+
+    pub(crate) fn unfinished_seq_indicator(pos: RmsdPosition) -> Self {
+        Self {
+            kind: ErrorKind::UnfinishedSequenceIndicator,
+            msg: "Unfinished sequence indicator `]`".to_string(),
             pos,
         }
     }

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::YamlToken;
+use crate::{RmsdError, RmsdPosition, YamlToken, YamlTokenData};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TokensIter {
-    data: Vec<Option<YamlToken>>,
+    pub(crate) data: Vec<Option<YamlToken>>,
     /// The index of data pending removal
     index: usize,
 }
@@ -61,5 +61,110 @@ impl TokensIter {
             }
         }
         ret
+    }
+
+    // The first token should be `{`
+    // Return tokens do not contains leading { and tailing }
+    pub(crate) fn remove_tokens_of_map_flow(
+        &mut self,
+    ) -> Result<Vec<YamlToken>, RmsdError> {
+        let mut ret = Vec::new();
+        let mut need_ends = 0;
+        let mut last_map_start_pos = RmsdPosition::EOF;
+
+        while let Some(token) = self.next() {
+            match token.data {
+                YamlTokenData::FlowMapStart => {
+                    last_map_start_pos = token.start;
+                    if need_ends != 0 {
+                        ret.push(token);
+                    }
+                    need_ends += 1;
+                }
+                YamlTokenData::FlowMapEnd => {
+                    if need_ends == 0 {
+                        return Err(RmsdError::unexpected_yaml_node_type(
+                            "Got } without leading {".to_string(),
+                            token.start,
+                        ));
+                    } else {
+                        need_ends -= 1;
+                        if need_ends == 0 {
+                            return Ok(ret);
+                        } else {
+                            ret.push(token);
+                        }
+                    }
+                }
+                _ => {
+                    ret.push(token);
+                }
+            }
+        }
+
+        if need_ends == 0 {
+            Err(RmsdError::bug(
+                format!(
+                    "remove_tokens_of_map_block() invoked against token \
+                    without map start indicator {{ {:?}",
+                    self
+                ),
+                RmsdPosition::EOF,
+            ))
+        } else {
+            Err(RmsdError::unfinished_map_indicator(last_map_start_pos))
+        }
+    }
+
+    // The first token should be `[`,
+    // Return tokens do not contains leading [ and tailing ]
+    pub(crate) fn remove_tokens_of_seq_flow(
+        &mut self,
+    ) -> Result<Vec<YamlToken>, RmsdError> {
+        let mut ret = Vec::new();
+        let mut need_ends = 0;
+        let mut last_seq_start_pos = RmsdPosition::EOF;
+        while let Some(token) = self.next() {
+            match token.data {
+                YamlTokenData::FlowSequenceStart => {
+                    last_seq_start_pos = token.start;
+                    if need_ends != 0 {
+                        ret.push(token);
+                    }
+                    need_ends += 1;
+                }
+                YamlTokenData::FlowSequenceEnd => {
+                    if need_ends == 0 {
+                        return Err(RmsdError::unexpected_yaml_node_type(
+                            "Got ] without leading [".to_string(),
+                            token.start,
+                        ));
+                    } else {
+                        need_ends -= 1;
+                        if need_ends == 0 {
+                            return Ok(ret);
+                        } else {
+                            ret.push(token);
+                        }
+                    }
+                }
+                _ => {
+                    ret.push(token);
+                }
+            }
+        }
+
+        if need_ends == 0 {
+            Err(RmsdError::bug(
+                format!(
+                    "remove_tokens_of_seq_block() invoked against token \
+                    without seq start indicator [ {:?}",
+                    self
+                ),
+                RmsdPosition::EOF,
+            ))
+        } else {
+            Err(RmsdError::unfinished_seq_indicator(last_seq_start_pos))
+        }
     }
 }

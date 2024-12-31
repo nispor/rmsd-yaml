@@ -7,15 +7,6 @@ use crate::{
     YamlToken, YamlTokenData, YamlValueMap,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ContainerType {
-    Map,
-    Array,
-    Scalar,
-    Tag,
-    Null,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct YamlValue {
     pub data: YamlValueData,
@@ -35,8 +26,8 @@ impl FromStr for YamlValue {
 
     fn from_str(input: &str) -> Result<Self, RmsdError> {
         let tokens = YamlToken::parse(input)?;
-        // TODO: Process Tag, Directive and Anchor
-        Self::try_from(tokens)
+        let mut iter = TokensIter::new(tokens);
+        Self::parse(&mut iter)
     }
 }
 
@@ -161,83 +152,66 @@ impl YamlValue {
     }
 }
 
-impl TryFrom<Vec<YamlToken>> for YamlValue {
-    type Error = RmsdError;
-
-    fn try_from(tokens: Vec<YamlToken>) -> Result<Self, Self::Error> {
-        let mut tokens = tokens;
-        let mut ret = Self {
-            data: YamlValueData::Null,
-            start: tokens
-                .as_slice()
-                .first()
-                .map(|t| t.start)
-                .unwrap_or(RmsdPosition::EOF),
-            end: tokens
-                .as_slice()
-                .get(tokens.len() - 1)
-                .map(|t| t.end)
-                .unwrap_or(RmsdPosition::EOF),
-        };
-
-        // Determine the container type
-        match get_container_type(&tokens) {
-            ContainerType::Map => {
-                let mut iter = TokensIter::new(tokens);
-                ret.data = YamlValueData::Map(Box::new(get_map(&mut iter)?));
-            }
-            ContainerType::Array => {
-                let mut iter = TokensIter::new(tokens);
-                ret.data = YamlValueData::Sequence(get_array(&mut iter)?);
-            }
-            ContainerType::Scalar => {
-                if !tokens.is_empty() {
-                    ret.data = get_scalar(tokens.pop().unwrap())?;
+impl YamlValue {
+    pub(crate) fn parse(iter: &mut TokensIter) -> Result<Self, RmsdError> {
+        let ret = if let Some(token) = iter.peek() {
+            match token.data {
+                YamlTokenData::FlowSequenceStart => {
+                    let mut iter =
+                        TokensIter::new(iter.remove_tokens_of_seq_flow()?);
+                    get_array(&mut iter, true)
+                }
+                YamlTokenData::BlockSequenceIndicator => get_array(iter, false),
+                YamlTokenData::FlowMapStart => {
+                    let mut iter =
+                        TokensIter::new(iter.remove_tokens_of_map_flow()?);
+                    get_map(&mut iter, true)
+                }
+                YamlTokenData::MapKeyIndicator => get_map(iter, false),
+                YamlTokenData::LocalTag(_) => get_tag(iter),
+                _ => {
+                    if iter.data.get(1).and_then(|t| {
+                        t.as_ref()
+                            .map(|t| t.data == YamlTokenData::MapValueIndicator)
+                    }) == Some(true)
+                    {
+                        get_map(iter, false)
+                    } else {
+                        get_scalar(iter)
+                    }
                 }
             }
-            ContainerType::Tag => {
-                let mut iter = TokensIter::new(tokens);
-                ret.data = YamlValueData::Tag(Box::new(get_tag(&mut iter)?));
-            }
-            ContainerType::Null => (),
-        }
-
-        Ok(ret)
-    }
-}
-
-fn get_container_type(tokens: &[YamlToken]) -> ContainerType {
-    if let Some(first_token) = tokens.first() {
-        if first_token.data == YamlTokenData::BlockSequenceIndicator
-            || first_token.data == YamlTokenData::FlowSequenceStart
-        {
-            ContainerType::Array
-        } else if first_token.data == YamlTokenData::FlowMapStart
-            || first_token.data == YamlTokenData::MapKeyIndicator
-            || tokens
-                .get(1)
-                .map(|t| t.data == YamlTokenData::MapValueIndicator)
-                == Some(true)
-        {
-            ContainerType::Map
-        } else if matches!(first_token.data, YamlTokenData::LocalTag(_)) {
-            ContainerType::Tag
         } else {
-            ContainerType::Scalar
-        }
-    } else {
-        ContainerType::Null
+            Ok(Self {
+                start: RmsdPosition::EOF,
+                end: RmsdPosition::EOF,
+                data: YamlValueData::Null,
+            })
+        };
+        ret
     }
 }
 
-fn get_scalar(token: YamlToken) -> Result<YamlValueData, RmsdError> {
-    if let YamlTokenData::Scalar(s) = token.data {
-        Ok(YamlValueData::Scalar(s))
+fn get_scalar(iter: &mut TokensIter) -> Result<YamlValue, RmsdError> {
+    if let Some(token) = iter.next() {
+        if let YamlTokenData::Scalar(s) = token.data {
+            Ok(YamlValue {
+                start: token.start,
+                end: token.end,
+                data: YamlValueData::Scalar(s),
+            })
+        } else {
+            Err(RmsdError::unexpected_yaml_node_type(
+                format!("Expecting scalar, but got {}", token.data),
+                token.start,
+            ))
+        }
     } else {
-        Err(RmsdError::unexpected_yaml_node_type(
-            format!("Expecting scalar but got {}", token.data),
-            token.start,
-        ))
+        Ok(YamlValue {
+            start: RmsdPosition::EOF,
+            end: RmsdPosition::EOF,
+            data: YamlValueData::Null,
+        })
     }
 }
 
