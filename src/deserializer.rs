@@ -20,6 +20,7 @@ where
     T: Deserialize<'a>,
 {
     let parsed = YamlValue::from_str(s)?;
+    println!("HAHA {:?}", parsed);
     let mut deserializer = RmsdDeserializer { parsed };
 
     T::deserialize(&mut deserializer)

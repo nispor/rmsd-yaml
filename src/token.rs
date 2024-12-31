@@ -58,6 +58,8 @@ pub(crate) enum YamlTokenData {
     BlockSequenceIndicator,
     /// The `[` character for sequence start in flow style
     FlowSequenceStart,
+    /// The `,` character for sequence collect entry
+    CollectEntry,
     /// The `]` character for sequence end in flow style
     FlowSequenceEnd,
     /// The `?` character for mapping key in block collection
@@ -142,68 +144,13 @@ impl YamlToken {
                 YAML_CHAR_SEQUENCE_ENTRY
                 | YAML_CHAR_MAPPING_KEY
                 | YAML_CHAR_MAPPING_VALUE => {
-                    // We might be got `---` as document begin which we should
-                    // ignore
-                    if iter.as_str().starts_with("---") {
-                        if !ret.is_empty() {
-                            return Err(RmsdError::unexpected_yaml_node_type(
-                                format!(
-                                    "The `---` should be placed at the \
-                                    beginning of document, but we have {} \
-                                    before it",
-                                    ret.pop().unwrap()
-                                ),
-                                iter.pos(),
-                            ));
-                        }
-                        iter.next();
-                        iter.next();
-                        iter.next();
-                        continue;
-                    }
-
-                    let indicator = match c {
-                        YAML_CHAR_SEQUENCE_ENTRY => {
-                            YamlTokenData::BlockSequenceIndicator
-                        }
-                        YAML_CHAR_MAPPING_KEY => YamlTokenData::MapKeyIndicator,
-                        YAML_CHAR_MAPPING_VALUE => {
-                            YamlTokenData::MapValueIndicator
-                        }
-                        _ => unreachable!(),
-                    };
-                    iter.next();
-                    if let Some(c) = iter.peek() {
-                        if c == ' ' || c == '\t' || c == '\n' {
-                            let start = iter.pos();
-                            iter.next();
-                            ret.push(YamlToken {
-                                indent,
-                                start,
-                                end: start,
-                                data: indicator,
-                            });
-                        } else {
-                            ret.push(read_unquoted_str_token(
-                                &mut iter,
-                                indent,
-                                is_after_map_indicator(&ret),
-                            )?);
-                        }
-                    } else {
-                        ret.push(YamlToken {
-                            indent,
-                            start: iter.pos(),
-                            end: iter.pos(),
-                            data: indicator,
-                        });
-                        ret.push(YamlToken {
-                            indent,
-                            start: RmsdPosition::EOF,
-                            end: RmsdPosition::EOF,
-                            data: YamlTokenData::Null,
-                        });
-                        break;
+                    if let Some(t) = process_map_seq_indicator(
+                        &mut iter,
+                        ret.is_empty(),
+                        &mut indent,
+                        is_after_map_indicator(&ret),
+                    )? {
+                        ret.push(t);
                     }
                 }
                 YAML_CHAR_SEQUENCE_START => {
@@ -217,6 +164,12 @@ impl YamlToken {
                 }
                 YAML_CHAR_COLLECT_ENTRY => {
                     iter.next();
+                    ret.push(YamlToken {
+                        indent,
+                        start: iter.pos(),
+                        end: iter.pos(),
+                        data: YamlTokenData::CollectEntry,
+                    })
                     // no special action required for `,`.
                 }
                 YAML_CHAR_SEQUENCE_END => {
@@ -349,6 +302,75 @@ impl YamlToken {
     }
 }
 
+fn process_map_seq_indicator(
+    iter: &mut CharsIter,
+    is_begining: bool,
+    indent: &mut usize,
+    is_after_map_indicator: bool,
+) -> Result<Option<YamlToken>, RmsdError> {
+    // We might be got `---` as document begin which we should
+    // ignore
+    if iter.as_str().starts_with("---") {
+        if !is_begining {
+            return Err(RmsdError::unexpected_yaml_node_type(
+                "The `---` should be placed at the beginning of document"
+                    .to_string(),
+                iter.pos(),
+            ));
+        }
+        iter.next();
+        iter.next();
+        iter.next();
+        return Ok(None);
+    }
+
+    let indicator = match iter.next().unwrap() {
+        YAML_CHAR_SEQUENCE_ENTRY => YamlTokenData::BlockSequenceIndicator,
+        YAML_CHAR_MAPPING_KEY => YamlTokenData::MapKeyIndicator,
+        YAML_CHAR_MAPPING_VALUE => YamlTokenData::MapValueIndicator,
+        _ => unreachable!(),
+    };
+    if let Some(c) = iter.peek() {
+        if c == ' ' || c == '\t' || c == '\n' {
+            let start = iter.pos();
+            iter.next();
+            let old_indent = *indent;
+            // For string like:
+            // ```yml
+            // - abc: 4
+            //   abd: 5
+            // ```
+            //
+            // The indent of `abc` should be considered as 2 instead of 0.
+            // So we use this variable fix the indent of follow up tokens before
+            // new line
+            if indicator == YamlTokenData::BlockSequenceIndicator && c == ' ' {
+                // \t can be used as indnent, we only fix indent for "- "
+                *indent += process_indent(iter) + 2;
+            }
+            Ok(Some(YamlToken {
+                indent: old_indent,
+                start,
+                end: start,
+                data: indicator,
+            }))
+        } else {
+            Ok(Some(read_unquoted_str_token(
+                iter,
+                *indent,
+                is_after_map_indicator,
+            )?))
+        }
+    } else {
+        Ok(Some(YamlToken {
+            indent: *indent,
+            start: iter.pos(),
+            end: iter.pos(),
+            data: indicator,
+        }))
+    }
+}
+
 fn is_after_map_indicator(tokens: &[YamlToken]) -> bool {
     tokens
         .iter()
@@ -416,7 +438,7 @@ mod tests {
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(1, 3),
                     end: RmsdPosition::new(1, 3),
                     data: YamlTokenData::Scalar("a".into()),
@@ -428,7 +450,7 @@ mod tests {
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(2, 3),
                     end: RmsdPosition::new(2, 3),
                     data: YamlTokenData::Scalar("b".into()),
@@ -440,7 +462,7 @@ mod tests {
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(3, 3),
                     end: RmsdPosition::new(3, 3),
                     data: YamlTokenData::Scalar("c".into()),
@@ -452,7 +474,7 @@ mod tests {
                     data: YamlTokenData::BlockSequenceIndicator,
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(4, 3),
                     end: RmsdPosition::new(4, 3),
                     data: YamlTokenData::Scalar("d".into()),
@@ -592,5 +614,108 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.kind(), ErrorKind::UnexpectedYamlNodeType);
         }
+    }
+
+    #[test]
+    fn test_indent_of_array_of_struct() {
+        let result = YamlToken::parse(
+            r#"
+        ---
+        -   uint_a: 36
+            str_b: item1
+        -   uint_a: 37
+            str_b: item2"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            vec![
+                YamlToken {
+                    indent: 8,
+                    start: RmsdPosition::new(3, 9),
+                    end: RmsdPosition::new(3, 9),
+                    data: YamlTokenData::BlockSequenceIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(3, 13),
+                    end: RmsdPosition::new(3, 18),
+                    data: YamlTokenData::Scalar("uint_a".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(3, 19),
+                    end: RmsdPosition::new(3, 19),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(3, 21),
+                    end: RmsdPosition::new(3, 22),
+                    data: YamlTokenData::Scalar("36".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(4, 13),
+                    end: RmsdPosition::new(4, 17),
+                    data: YamlTokenData::Scalar("str_b".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(4, 18),
+                    end: RmsdPosition::new(4, 18),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(4, 20),
+                    end: RmsdPosition::new(4, 24),
+                    data: YamlTokenData::Scalar("item1".into()),
+                },
+                YamlToken {
+                    indent: 8,
+                    start: RmsdPosition::new(5, 9),
+                    end: RmsdPosition::new(5, 9),
+                    data: YamlTokenData::BlockSequenceIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(5, 13),
+                    end: RmsdPosition::new(5, 18),
+                    data: YamlTokenData::Scalar("uint_a".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(5, 19),
+                    end: RmsdPosition::new(5, 19),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(5, 21),
+                    end: RmsdPosition::new(5, 22),
+                    data: YamlTokenData::Scalar("37".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(6, 13),
+                    end: RmsdPosition::new(6, 17),
+                    data: YamlTokenData::Scalar("str_b".into()),
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(6, 18),
+                    end: RmsdPosition::new(6, 18),
+                    data: YamlTokenData::MapValueIndicator,
+                },
+                YamlToken {
+                    indent: 12,
+                    start: RmsdPosition::new(6, 20),
+                    end: RmsdPosition::new(6, 24),
+                    data: YamlTokenData::Scalar("item2".into()),
+                },
+            ]
+        );
     }
 }

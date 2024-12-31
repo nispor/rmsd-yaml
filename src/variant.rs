@@ -102,18 +102,32 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
     }
 }
 
-pub(crate) fn get_tag(iter: &mut TokensIter) -> Result<YamlTag, RmsdError> {
+pub(crate) fn get_tag(iter: &mut TokensIter) -> Result<YamlValue, RmsdError> {
     if let Some(token) = iter.next() {
         if let YamlTokenData::LocalTag(name) = token.data {
             let data_tokens = iter.remove_tokens_with_the_same_indent();
-            Ok(YamlTag {
-                name,
-                data: YamlValue::try_from(data_tokens)?.data,
+            let end = if !data_tokens.is_empty() {
+                if let Some(end_token) = data_tokens.last() {
+                    end_token.end
+                } else {
+                    token.end
+                }
+            } else {
+                token.end
+            };
+            let mut data_iter = TokensIter::new(data_tokens);
+            Ok(YamlValue {
+                start: token.start,
+                end,
+                data: YamlValueData::Tag(Box::new(YamlTag {
+                    name,
+                    data: YamlValue::parse(&mut data_iter)?.data,
+                })),
             })
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
                 format!(
-                    "get_tag() been invoked against TokenIter not leading \
+                    "get_tag() been invoked against TokensIter not leading \
                     with LocalTag but {}",
                     token.data
                 ),
