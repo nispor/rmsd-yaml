@@ -290,7 +290,7 @@ fn test_de_array_of_enum_of_struct() -> Result<(), RmsdError> {
 fn test_de_struct_with_enum_member() -> Result<(), RmsdError> {
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct FooTest {
-        uint_a: EnumTest,
+        uint_a: Option<EnumTest>,
     }
 
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -305,7 +305,7 @@ fn test_de_struct_with_enum_member() -> Result<(), RmsdError> {
 
     assert_eq!(
         FooTest {
-            uint_a: EnumTest::Bar(BarTest { uint_b: 32 })
+            uint_a: Some(EnumTest::Bar(BarTest { uint_b: 32 }))
         },
         rmsd_yaml::from_str::<FooTest>(
             r#"

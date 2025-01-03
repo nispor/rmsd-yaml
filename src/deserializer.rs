@@ -170,11 +170,14 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         todo!()
     }
 
-    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        match self.parsed.data {
+            YamlValueData::Null => visitor.visit_none(),
+            _ => visitor.visit_some(self),
+        }
     }
 
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
