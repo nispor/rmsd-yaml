@@ -30,5 +30,7 @@ pub use self::deserializer::{from_str, to_value, RmsdDeserializer};
 pub use self::error::{ErrorKind, RmsdError};
 pub use self::map::YamlValueMap;
 pub use self::position::RmsdPosition;
-pub use self::serializer::{to_string, RmsdSerializeOption, RmsdSerializer};
+pub use self::serializer::{
+    to_string, to_string_with_opt, RmsdSerializeOption, RmsdSerializer,
+};
 pub use self::value::{YamlTag, YamlValue, YamlValueData};

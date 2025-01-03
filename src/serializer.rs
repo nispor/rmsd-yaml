@@ -39,7 +39,7 @@ pub struct RmsdSerializer {
     current_indent_level: usize,
 }
 
-pub fn to_string<T>(
+pub fn to_string_with_opt<T>(
     value: &T,
     option: RmsdSerializeOption,
 ) -> Result<String, RmsdError>
@@ -63,6 +63,13 @@ where
         serializer.output.pop();
     }
     Ok(serializer.output)
+}
+
+pub fn to_string<T>(value: &T) -> Result<String, RmsdError>
+where
+    T: Serialize,
+{
+    to_string_with_opt(value, RmsdSerializeOption::default())
 }
 
 impl RmsdSerializer {
@@ -516,7 +523,7 @@ mod tests {
             indent_count: 1,
             ..Default::default()
         };
-        let result = to_string(&"abc", opt);
+        let result = to_string_with_opt(&"abc", opt);
 
         assert!(result.is_err());
         if let Err(e) = result {

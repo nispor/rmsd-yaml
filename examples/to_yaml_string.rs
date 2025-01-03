@@ -27,6 +27,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             bar: BarTest { data: true },
         },
     ];
-    println!("{}", rmsd_yaml::to_string(&data, Default::default())?);
+    println!("{}", rmsd_yaml::to_string(&data)?);
     Ok(())
 }
