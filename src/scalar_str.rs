@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{CharsIter, RmsdError, RmsdPosition, YAML_CHAR_INDICATORS};
+use crate::{CharsIter, RmsdError, RmsdPosition};
 
 const YAML_CHAR_ESCAPE: char = '\\';
 
@@ -78,6 +78,7 @@ pub(crate) fn read_unquoted_str(
     indent: usize,
     iter: &mut CharsIter,
     skip_line_folding: bool,
+    in_flow: bool,
 ) -> Result<(String, RmsdPosition), RmsdError> {
     let mut ret = String::new();
     let mut droped_first_newline = false;
@@ -102,17 +103,49 @@ pub(crate) fn read_unquoted_str(
     }
 
     while let Some(c) = iter.peek() {
-        if YAML_CHAR_INDICATORS.contains(&c) {
+        if iter.as_str().starts_with(":\n")
+            || iter.as_str().starts_with(": ")
+            || iter.as_str().starts_with("- ")
+        {
             return Ok((ret, pos));
-        } else if c == '\n'
-            && (skip_line_folding
+        }
+
+        // YAML 1.2.2:
+        //      In addition, inside flow collections, or when used as implicit
+        //      keys, plain scalars must not contain the “[”, “]”, “{”, “}” and
+        //      “,” characters.
+        if in_flow && ['[', ']', '{', '}', ','].contains(&c) {
+            return Ok((ret, pos));
+        }
+
+        // When new line found, we finish reading when not intended as beginning
+        if c == '\n' {
+            if skip_line_folding
                 || !iter
                     .as_str()
-                    .starts_with(&format!("\n{}", " ".repeat(indent))))
-        {
-            iter.next();
-            return Ok((ret, pos));
-        } else if let Some(p) = process_with_line_folding(
+                    .starts_with(&format!("\n{}", " ".repeat(indent)))
+            {
+                iter.next();
+                return Ok((ret, pos));
+            }
+            if let Some(next_line) =
+                iter.as_str().lines().nth(1).map(|s| s.trim_start())
+            {
+                println!("HAHA {:?}", next_line);
+                if next_line.contains(": ")
+                    || next_line.starts_with("- ")
+                    || next_line.starts_with("---\n")
+                    || next_line.starts_with("---\t")
+                    || next_line.starts_with("--- ")
+                    || next_line == "---"
+                {
+                    iter.next();
+                    return Ok((ret, pos));
+                }
+            }
+        }
+
+        if let Some(p) = process_with_line_folding(
             &mut ret,
             iter,
             &mut pending_whitespace,
@@ -361,7 +394,7 @@ mod tests {
     #[test]
     fn test_unquoted_string() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc d");
-        let ret = read_unquoted_str(0, &mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false, false)?;
         assert_eq!(ret.0, "abc d");
         assert_eq!(ret.1.line, 1);
         assert_eq!(ret.1.column, 5);
@@ -371,7 +404,7 @@ mod tests {
     #[test]
     fn test_unquoted_string_with_folding() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc\n\n\n \nabc\nd\n");
-        let ret = read_unquoted_str(0, &mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false, false)?;
         assert_eq!(ret.0, "abc\n\n\nabc d");
         assert_eq!(ret.1.line, 6);
         assert_eq!(ret.1.column, 1);
@@ -381,7 +414,7 @@ mod tests {
     #[test]
     fn test_unquoted_string_with_leading_new_line() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("\nabc");
-        let ret = read_unquoted_str(0, &mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false, false)?;
         assert_eq!(ret.0, "abc");
         assert_eq!(ret.1.line, 2);
         assert_eq!(ret.1.column, 3);
@@ -391,10 +424,20 @@ mod tests {
     #[test]
     fn test_unquoted_string_skip_line_folding() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc\n  d");
-        let ret = read_unquoted_str(0, &mut iter, true)?;
+        let ret = read_unquoted_str(0, &mut iter, true, false)?;
         assert_eq!(ret.0, "abc");
         assert_eq!(ret.1.line, 1);
         assert_eq!(ret.1.column, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unquoted_string_allow_hyphen() -> Result<(), RmsdError> {
+        let mut iter = CharsIter::new("abc-d");
+        let ret = read_unquoted_str(0, &mut iter, true, false)?;
+        assert_eq!(ret.0, "abc-d");
+        assert_eq!(ret.1.line, 1);
+        assert_eq!(ret.1.column, 5);
         Ok(())
     }
 }
