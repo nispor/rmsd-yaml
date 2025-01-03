@@ -105,7 +105,7 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
 pub(crate) fn get_tag(iter: &mut TokensIter) -> Result<YamlValue, RmsdError> {
     if let Some(token) = iter.next() {
         if let YamlTokenData::LocalTag(name) = token.data {
-            let data_tokens = iter.remove_tokens_with_the_same_indent();
+            let data_tokens = iter.remove_tokens_with_the_same_or_more_indent();
             let end = if !data_tokens.is_empty() {
                 if let Some(end_token) = data_tokens.last() {
                     end_token.end

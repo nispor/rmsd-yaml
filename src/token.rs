@@ -335,18 +335,19 @@ fn process_map_seq_indicator(
             let start = iter.pos();
             iter.next();
             let old_indent = *indent;
+            //
             // For string like:
             // ```yml
-            // - abc: 4
-            //   abd: 5
+            // -   abc: 4
+            //     abd: 5
             // ```
             //
-            // The indent of `abc` should be considered as 2 instead of 0.
+            // The indent of `abc` should be considered as 4 instead of 0.
             // So we use this variable fix the indent of follow up tokens before
             // new line
             if indicator == YamlTokenData::BlockSequenceIndicator && c == ' ' {
-                // \t can be used as indnent, we only fix indent for "- "
-                *indent += process_indent(iter) + 2;
+                // \t can not be used as indent, we only fix indent for "- "
+                *indent += process_indent(iter);
             }
             Ok(Some(YamlToken {
                 indent: old_indent,
@@ -385,7 +386,8 @@ fn read_unquoted_str_token(
     skip_line_folding: bool,
 ) -> Result<YamlToken, RmsdError> {
     let start = iter.next_pos();
-    let (unquoted_string, end) = read_unquoted_str(iter, skip_line_folding)?;
+    let (unquoted_string, end) =
+        read_unquoted_str(indent, iter, skip_line_folding)?;
     Ok(YamlToken {
         indent,
         start,
@@ -432,7 +434,7 @@ mod tests {
             YamlToken::parse("- a\n- b\n- c \n- d").unwrap(),
             vec![
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(1, 1),
                     end: RmsdPosition::new(1, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
@@ -444,7 +446,7 @@ mod tests {
                     data: YamlTokenData::Scalar("a".into()),
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(2, 1),
                     end: RmsdPosition::new(2, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
@@ -456,7 +458,7 @@ mod tests {
                     data: YamlTokenData::Scalar("b".into()),
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(3, 1),
                     end: RmsdPosition::new(3, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
@@ -468,7 +470,7 @@ mod tests {
                     data: YamlTokenData::Scalar("c".into()),
                 },
                 YamlToken {
-                    indent: 0,
+                    indent: 2,
                     start: RmsdPosition::new(4, 1),
                     end: RmsdPosition::new(4, 1),
                     data: YamlTokenData::BlockSequenceIndicator,
@@ -632,7 +634,7 @@ mod tests {
             result,
             vec![
                 YamlToken {
-                    indent: 8,
+                    indent: 10,
                     start: RmsdPosition::new(3, 9),
                     end: RmsdPosition::new(3, 9),
                     data: YamlTokenData::BlockSequenceIndicator,
@@ -674,7 +676,7 @@ mod tests {
                     data: YamlTokenData::Scalar("item1".into()),
                 },
                 YamlToken {
-                    indent: 8,
+                    indent: 10,
                     start: RmsdPosition::new(5, 9),
                     end: RmsdPosition::new(5, 9),
                     data: YamlTokenData::BlockSequenceIndicator,

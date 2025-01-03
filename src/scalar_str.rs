@@ -75,6 +75,7 @@ pub(crate) fn read_single_quoted_str(
 /// The ending char might be new line, which should not be considered as
 /// position range, hence we return the final non-whitespace position.
 pub(crate) fn read_unquoted_str(
+    indent: usize,
     iter: &mut CharsIter,
     skip_line_folding: bool,
 ) -> Result<(String, RmsdPosition), RmsdError> {
@@ -103,7 +104,12 @@ pub(crate) fn read_unquoted_str(
     while let Some(c) = iter.peek() {
         if YAML_CHAR_INDICATORS.contains(&c) {
             return Ok((ret, pos));
-        } else if skip_line_folding && c == '\n' {
+        } else if c == '\n'
+            && (skip_line_folding
+                || !iter
+                    .as_str()
+                    .starts_with(&format!("\n{}", " ".repeat(indent))))
+        {
             iter.next();
             return Ok((ret, pos));
         } else if let Some(p) = process_with_line_folding(
@@ -242,6 +248,25 @@ pub(crate) fn read_escaped_char(
     })
 }
 
+/// Prefer unquoted string and use double quoted string if any of below:
+///     * Line is longer than `max_width`
+///     * Has non-printable character
+///     * Has NS_ESC_XXX characters
+pub(crate) fn to_scalar_string(
+    indent_count: usize,
+    input: &str,
+    max_width: usize,
+) -> String {
+    // TODO: Escape non-printable character
+    // TODO: Escape NS_ESC_XXX characters
+    // TODO: Break long line
+    if indent_count + input.chars().count() < max_width {
+        input.to_string()
+    } else {
+        format!("\"{input}\"")
+    }
+}
+
 // YAML 1.2.2: 6.5. Line Folding:
 //      Line folding allows long lines to be broken for readability, while
 //      retaining the semantics of the original long line. If a line break is
@@ -336,7 +361,7 @@ mod tests {
     #[test]
     fn test_unquoted_string() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc d");
-        let ret = read_unquoted_str(&mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false)?;
         assert_eq!(ret.0, "abc d");
         assert_eq!(ret.1.line, 1);
         assert_eq!(ret.1.column, 5);
@@ -346,7 +371,7 @@ mod tests {
     #[test]
     fn test_unquoted_string_with_folding() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc\n\n\n \nabc\nd\n");
-        let ret = read_unquoted_str(&mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false)?;
         assert_eq!(ret.0, "abc\n\n\nabc d");
         assert_eq!(ret.1.line, 6);
         assert_eq!(ret.1.column, 1);
@@ -356,7 +381,7 @@ mod tests {
     #[test]
     fn test_unquoted_string_with_leading_new_line() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("\nabc");
-        let ret = read_unquoted_str(&mut iter, false)?;
+        let ret = read_unquoted_str(0, &mut iter, false)?;
         assert_eq!(ret.0, "abc");
         assert_eq!(ret.1.line, 2);
         assert_eq!(ret.1.column, 3);
@@ -366,7 +391,7 @@ mod tests {
     #[test]
     fn test_unquoted_string_skip_line_folding() -> Result<(), RmsdError> {
         let mut iter = CharsIter::new("abc\n  d");
-        let ret = read_unquoted_str(&mut iter, true)?;
+        let ret = read_unquoted_str(0, &mut iter, true)?;
         assert_eq!(ret.0, "abc");
         assert_eq!(ret.1.line, 1);
         assert_eq!(ret.1.column, 3);
