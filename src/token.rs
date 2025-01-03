@@ -25,28 +25,6 @@ const YAML_CHAR_DIRECTIVE: char = '%';
 const YAML_CHAR_RESERVED: char = '@';
 const YAML_CHAR_RESERVED2: char = '`';
 
-pub(crate) const YAML_CHAR_INDICATORS: [char; 19] = [
-    YAML_CHAR_SEQUENCE_ENTRY,
-    YAML_CHAR_MAPPING_KEY,
-    YAML_CHAR_MAPPING_VALUE,
-    YAML_CHAR_COLLECT_ENTRY,
-    YAML_CHAR_SEQUENCE_START,
-    YAML_CHAR_SEQUENCE_END,
-    YAML_CHAR_MAPPING_START,
-    YAML_CHAR_MAPPING_END,
-    YAML_CHAR_COMMENT,
-    YAML_CHAR_ANCHOR,
-    YAML_CHAR_ALIAS,
-    YAML_CHAR_TAG,
-    YAML_CHAR_LITERAL,
-    YAML_CHAR_FOLDED,
-    YAML_CHAR_SINGLE_QUOTE,
-    YAML_CHAR_DOUBLE_QUOTE,
-    YAML_CHAR_DIRECTIVE,
-    YAML_CHAR_RESERVED,
-    YAML_CHAR_RESERVED2,
-];
-
 /// YAML Token Data
 /// Tokenization input data with white spaces and comments removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +102,8 @@ impl YamlToken {
         let mut iter = CharsIter::new(input);
         let mut ret: Vec<Self> = Vec::new();
         let mut indent = 0usize;
+        let mut flow_map_count = 0;
+        let mut flow_seq_count = 0;
 
         while let Some(mut c) = iter.peek() {
             if iter.next_pos().column == 1 {
@@ -149,11 +129,13 @@ impl YamlToken {
                         ret.is_empty(),
                         &mut indent,
                         is_after_map_indicator(&ret),
+                        flow_map_count > 0 || flow_seq_count > 0,
                     )? {
                         ret.push(t);
                     }
                 }
                 YAML_CHAR_SEQUENCE_START => {
+                    flow_seq_count += 1;
                     iter.next();
                     ret.push(YamlToken {
                         indent,
@@ -173,6 +155,9 @@ impl YamlToken {
                     // no special action required for `,`.
                 }
                 YAML_CHAR_SEQUENCE_END => {
+                    if flow_seq_count > 0 {
+                        flow_seq_count -= 1;
+                    }
                     iter.next();
                     ret.push(YamlToken {
                         indent,
@@ -182,6 +167,7 @@ impl YamlToken {
                     })
                 }
                 YAML_CHAR_MAPPING_START => {
+                    flow_map_count += 1;
                     iter.next();
                     ret.push(YamlToken {
                         indent,
@@ -191,6 +177,9 @@ impl YamlToken {
                     })
                 }
                 YAML_CHAR_MAPPING_END => {
+                    if flow_map_count > 0 {
+                        flow_map_count -= 1;
+                    }
                     iter.next();
                     ret.push(YamlToken {
                         indent,
@@ -294,9 +283,13 @@ impl YamlToken {
                         &mut iter,
                         indent,
                         is_after_map_indicator(&ret),
+                        flow_map_count > 0 || flow_seq_count > 0,
                     )?);
                 }
             }
+        }
+        for token in &ret {
+            println!("HAHA {:?}", token.data);
         }
         Ok(ret)
     }
@@ -307,6 +300,7 @@ fn process_map_seq_indicator(
     is_begining: bool,
     indent: &mut usize,
     is_after_map_indicator: bool,
+    in_flow: bool,
 ) -> Result<Option<YamlToken>, RmsdError> {
     // We might be got `---` as document begin which we should
     // ignore
@@ -360,6 +354,7 @@ fn process_map_seq_indicator(
                 iter,
                 *indent,
                 is_after_map_indicator,
+                in_flow,
             )?))
         }
     } else {
@@ -384,10 +379,11 @@ fn read_unquoted_str_token(
     iter: &mut CharsIter,
     indent: usize,
     skip_line_folding: bool,
+    in_flow: bool,
 ) -> Result<YamlToken, RmsdError> {
     let start = iter.next_pos();
     let (unquoted_string, end) =
-        read_unquoted_str(indent, iter, skip_line_folding)?;
+        read_unquoted_str(indent, iter, skip_line_folding, in_flow)?;
     Ok(YamlToken {
         indent,
         start,

@@ -22,7 +22,7 @@ pub(crate) use self::scalar_str::{
     read_double_quoted_str, read_single_quoted_str, read_unquoted_str,
     to_scalar_string,
 };
-pub(crate) use self::token::{YamlToken, YamlTokenData, YAML_CHAR_INDICATORS};
+pub(crate) use self::token::{YamlToken, YamlTokenData};
 pub(crate) use self::token_iter::TokensIter;
 pub(crate) use self::variant::{get_tag, YamlValueEnumAccess};
 

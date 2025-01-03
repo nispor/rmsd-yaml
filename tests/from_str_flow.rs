@@ -165,9 +165,10 @@ fn test_de_yaml_flow_array_of_struct() -> Result<(), RmsdError> {
 fn test_de_yaml_flow_struct_of_array() -> Result<(), RmsdError> {
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct FooTest {
+        #[serde(rename = "uint-a")]
         uint_a: Vec<u32>,
     }
-    let yaml_str = r#"{uint_a: [1, 2, 3, 4]}"#;
+    let yaml_str = r#"{uint-a: [1, 2, 3, 4]}"#;
 
     let foo_test: FooTest = rmsd_yaml::from_str(yaml_str)?;
 
