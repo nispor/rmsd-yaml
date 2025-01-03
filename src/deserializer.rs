@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// Code here is based on example code in
+//      https://serde.rs/impl-serializer.html
+//      (https://github.com/serde-rs/serde-rs.github.io)
+// which is licensed under CC-BY-SA-4.0 license
+
 use std::str::FromStr;
 
 use serde::de::{Deserializer, Visitor};
@@ -20,7 +25,6 @@ where
     T: Deserialize<'a>,
 {
     let parsed = YamlValue::from_str(s)?;
-    println!("HAHA {:?}", parsed);
     let mut deserializer = RmsdDeserializer { parsed };
 
     T::deserialize(&mut deserializer)
@@ -212,6 +216,19 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
             // Self::parsed, where we can use `Option::take()` to move data out.
             let access = YamlValueSeqAccess::new(v.to_vec());
             visitor.visit_seq(access)
+        } else if let YamlValueData::Tag(tag) = &self.parsed.data {
+            if let YamlValueData::Sequence(v) = &tag.data {
+                let access = YamlValueSeqAccess::new(v.to_vec());
+                visitor.visit_seq(access)
+            } else {
+                Err(RmsdError::unexpected_yaml_node_type(
+                    format!(
+                        "Expecting a sequence in tag, got {}",
+                        self.parsed.data
+                    ),
+                    self.parsed.start,
+                ))
+            }
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
                 format!("Expecting a sequence, got {}", self.parsed.data),

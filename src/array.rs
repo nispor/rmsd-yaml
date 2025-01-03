@@ -3,7 +3,7 @@
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    get_map, get_tag, RmsdDeserializer, RmsdError, RmsdPosition, TokensIter,
+    get_map, RmsdDeserializer, RmsdError, RmsdPosition, TokensIter,
     YamlTokenData, YamlValue, YamlValueData,
 };
 
@@ -38,12 +38,14 @@ pub(crate) fn get_array(
                         token.start,
                     ));
                 } else {
-                    if !previous_element_tokens.is_empty() {
+                    let token = iter.next().unwrap();
+                    if token.indent > indent {
+                        previous_element_tokens.push(token);
+                    } else if !previous_element_tokens.is_empty() {
                         items.push(YamlValue::parse(&mut TokensIter::new(
                             std::mem::take(&mut previous_element_tokens),
                         ))?);
                     }
-                    iter.next();
                 }
             }
             YamlTokenData::FlowSequenceStart => {
@@ -59,10 +61,18 @@ pub(crate) fn get_array(
             YamlTokenData::CollectEntry => {
                 // We will have empty previous_element_tokens for `,` after `{}`
                 // or `[]`.
-                if !previous_element_tokens.is_empty() {
-                    items.push(YamlValue::parse(&mut TokensIter::new(
-                        std::mem::take(&mut previous_element_tokens),
-                    ))?);
+                if in_flow {
+                    if !previous_element_tokens.is_empty() {
+                        items.push(YamlValue::parse(&mut TokensIter::new(
+                            std::mem::take(&mut previous_element_tokens),
+                        ))?);
+                    }
+                } else {
+                    return Err(RmsdError::unexpected_yaml_node_type(
+                        "Cannot use `,` in sequence/array without [ ]"
+                            .to_string(),
+                        token.start,
+                    ));
                 }
                 iter.next();
             }
@@ -73,7 +83,7 @@ pub(crate) fn get_array(
                 previous_element_tokens.push(iter.next().unwrap());
             }
             YamlTokenData::LocalTag(_) => {
-                items.push(get_tag(iter)?);
+                previous_element_tokens.push(iter.next().unwrap());
             }
             _ => {
                 return Err(RmsdError::bug(

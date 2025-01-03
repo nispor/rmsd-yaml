@@ -40,8 +40,10 @@ impl TokensIter {
         }
     }
 
-    /// Remove the follow up tokens with the same indent level as next one.
-    pub(crate) fn remove_tokens_with_the_same_indent(
+    /// Remove the follow up tokens with the same or more indent level
+    /// as token got from `self.next()`.
+    /// Return if we see a `- ` with the same indent level.
+    pub(crate) fn remove_tokens_with_the_same_or_more_indent(
         &mut self,
     ) -> Vec<YamlToken> {
         let mut ret = Vec::new();
@@ -54,7 +56,7 @@ impl TokensIter {
         }
 
         while let Some(token) = self.peek() {
-            if token.indent == indent {
+            if token.indent >= indent {
                 ret.push(self.next().unwrap());
             } else {
                 return ret;

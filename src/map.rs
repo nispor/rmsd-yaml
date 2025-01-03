@@ -118,7 +118,6 @@ pub(crate) fn get_map(
     iter: &mut TokensIter,
     in_flow: bool,
 ) -> Result<YamlValue, RmsdError> {
-    println!("HAHA GET_MAP {:?}", iter);
     let mut map = YamlValueMap::new();
 
     let (start, mut end, indent) = if let Some(first_token) = iter.peek() {
@@ -145,11 +144,9 @@ pub(crate) fn get_map(
                 } else {
                     // nested map
                     YamlValue::parse(&mut TokensIter::new(
-                        iter.remove_tokens_with_the_same_indent(),
+                        iter.remove_tokens_with_the_same_or_more_indent(),
                     ))?
                 };
-                println!("HAHA CUR KEY {:?}", key);
-                println!("HAHA GOT VALUE {:?}", value);
                 if let Some(k) = key.take() {
                     end = value.end;
                     map.insert(k, value);
@@ -172,7 +169,17 @@ pub(crate) fn get_map(
                 let mut sub_iter =
                     TokensIter::new(iter.remove_tokens_of_map_flow()?);
                 let value = get_map(&mut sub_iter, true)?;
-                println!("HAHA K {:?}\n V {:?}", key, value);
+                if let Some(k) = key.take() {
+                    end = value.end;
+                    map.insert(k, value);
+                } else {
+                    key = Some(value);
+                }
+            }
+            YamlTokenData::BlockSequenceIndicator => {
+                let value = YamlValue::parse(&mut TokensIter::new(
+                    iter.remove_tokens_with_the_same_or_more_indent(),
+                ))?;
                 if let Some(k) = key.take() {
                     end = value.end;
                     map.insert(k, value);
@@ -217,7 +224,6 @@ pub(crate) fn get_map(
             }
         }
     }
-    println!("HAHA GOT MAP {:?}", map);
     Ok(YamlValue {
         start,
         end,

@@ -28,6 +28,9 @@ pub enum ErrorKind {
     UnfinishedMapIndicator,
     /// Unfinished map indicator `[`
     UnfinishedSequenceIndicator,
+    /// Desired indent count should be bigger or equal to minimum indent count
+    /// 2.
+    IndentTooSmall,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -50,6 +53,7 @@ impl std::fmt::Display for ErrorKind {
                 Self::UnfinishedMapIndicator => "unfinished_map_indicator",
                 Self::UnfinishedSequenceIndicator =>
                     "unfinished_sequence_indicator",
+                Self::IndentTooSmall => "indent_too_small",
             }
         )
     }
@@ -74,6 +78,7 @@ impl TryFrom<&str> for ErrorKind {
             "unfinished_sequence_indicator" => {
                 Self::UnfinishedSequenceIndicator
             }
+            "indent_too_small" => Self::IndentTooSmall,
             _ => {
                 return Err(RmsdError::new(
                     ErrorKind::InvalidErrorType,
@@ -122,6 +127,29 @@ impl std::fmt::Display for RmsdError {
 
 impl std::error::Error for RmsdError {}
 
+impl serde::ser::Error for RmsdError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        let msg = msg.to_string();
+        if let Some((pos_kind_str, msg_str)) = msg.split_once("error: ") {
+            if let Some((pos_str, kind_str)) = pos_kind_str.split_once("kind: ")
+            {
+                return Self {
+                    pos: RmsdPosition::try_from(pos_str).unwrap_or_default(),
+                    msg: msg_str.to_string(),
+                    kind: ErrorKind::try_from(kind_str).unwrap_or_default(),
+                };
+            }
+        }
+        Self {
+            msg,
+            ..Default::default()
+        }
+    }
+}
+
 impl serde::de::Error for RmsdError {
     fn custom<T>(msg: T) -> Self
     where
@@ -143,6 +171,20 @@ impl serde::de::Error for RmsdError {
             ..Default::default()
         }
     }
+
+    fn invalid_type(
+        unexp: serde::de::Unexpected<'_>,
+        exp: &dyn serde::de::Expected,
+    ) -> Self {
+        // TODO: Find postion of this unexpected property
+        Self::unexpected_yaml_node_type(
+            format!("Expecting {exp} but got {unexp}"),
+            Default::default(),
+        )
+    }
+
+    // TOOD: Implement more functions of this trait with position stored in
+    // error.
 }
 
 impl RmsdError {
@@ -240,6 +282,14 @@ impl RmsdError {
             kind: ErrorKind::UnfinishedSequenceIndicator,
             msg: "Unfinished sequence indicator `]`".to_string(),
             pos,
+        }
+    }
+
+    pub(crate) fn indent_to_small() -> Self {
+        Self {
+            kind: ErrorKind::IndentTooSmall,
+            msg: "Desired indent count is smaller than minimum(2)".to_string(),
+            pos: RmsdPosition::EOF,
         }
     }
 }
