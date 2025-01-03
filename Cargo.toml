@@ -1,5 +1,5 @@
 [package]
-name = "rmsd-yaml"
+name = "rmsd_yaml"
 version = "0.1.0"
 edition = "2021"
 
