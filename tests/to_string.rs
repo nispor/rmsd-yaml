@@ -19,7 +19,7 @@ fn test_struct_to_string() -> Result<(), RmsdError> {
         bool_c: false,
     };
 
-    let yaml_str = rmsd_yaml::to_string(&data, Default::default())?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, Default::default())?;
 
     assert_eq!(
         yaml_str,
@@ -35,7 +35,7 @@ bool_c: false"#
 #[test]
 fn test_array_to_string() -> Result<(), RmsdError> {
     let data = vec![1u8, 2, 3, 4];
-    let yaml_str = rmsd_yaml::to_string(&data, Default::default())?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, Default::default())?;
 
     assert_eq!(yaml_str, "- 1\n- 2\n- 3\n- 4");
 
@@ -67,7 +67,7 @@ fn test_array_of_map() -> Result<(), RmsdError> {
     let mut opt = RmsdSerializeOption::default();
     opt.leading_start_indicator = true;
 
-    let yaml_str = rmsd_yaml::to_string(&data, opt)?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, opt)?;
 
     assert_eq!(
         yaml_str,
@@ -99,7 +99,7 @@ fn test_array_in_map() -> Result<(), RmsdError> {
     let mut opt = RmsdSerializeOption::default();
     opt.leading_start_indicator = true;
 
-    let yaml_str = rmsd_yaml::to_string(&data, opt)?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, opt)?;
 
     assert_eq!(
         yaml_str,
@@ -120,7 +120,7 @@ fn test_nested_array() -> Result<(), RmsdError> {
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct FooTest(Vec<Vec<u32>>);
     let data = FooTest(vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
-    let yaml_str = rmsd_yaml::to_string(&data, Default::default())?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, Default::default())?;
 
     assert_eq!(
         yaml_str,
@@ -160,7 +160,7 @@ fn test_nested_map() -> Result<(), RmsdError> {
         },
     };
 
-    let yaml_str = rmsd_yaml::to_string(&data, Default::default())?;
+    let yaml_str = rmsd_yaml::to_string_with_opt(&data, Default::default())?;
 
     assert_eq!(
         yaml_str,
