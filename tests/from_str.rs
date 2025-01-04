@@ -319,3 +319,22 @@ fn test_de_struct_with_enum_member() -> Result<(), RmsdError> {
 
     Ok(())
 }
+
+#[test]
+fn test_signed_interger() -> Result<(), RmsdError> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct FooTest {
+        uint_a: i32,
+    }
+
+    assert_eq!(
+        FooTest { uint_a: -128 },
+        rmsd_yaml::from_str::<FooTest>(
+            r#"
+            ---
+            uint_a: -128
+            "#
+        )?
+    );
+    Ok(())
+}
