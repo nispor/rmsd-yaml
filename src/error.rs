@@ -172,17 +172,6 @@ impl serde::de::Error for RmsdError {
         }
     }
 
-    fn invalid_type(
-        unexp: serde::de::Unexpected<'_>,
-        exp: &dyn serde::de::Expected,
-    ) -> Self {
-        // TODO: Find postion of this unexpected property
-        Self::unexpected_yaml_node_type(
-            format!("Expecting {exp} but got {unexp}"),
-            Default::default(),
-        )
-    }
-
     // TOOD: Implement more functions of this trait with position stored in
     // error.
 }

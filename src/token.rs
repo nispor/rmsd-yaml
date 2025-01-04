@@ -288,9 +288,6 @@ impl YamlToken {
                 }
             }
         }
-        for token in &ret {
-            println!("HAHA {:?}", token.data);
-        }
         Ok(ret)
     }
 }

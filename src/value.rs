@@ -157,15 +157,35 @@ impl YamlValue {
         let ret = if let Some(token) = iter.peek() {
             match token.data {
                 YamlTokenData::FlowSequenceStart => {
-                    let mut iter =
-                        TokensIter::new(iter.remove_tokens_of_seq_flow()?);
-                    get_array(&mut iter, true)
+                    let start = token.start;
+                    let tokens = iter.remove_tokens_of_seq_flow(false)?;
+                    if tokens.is_empty() {
+                        return Ok(Self {
+                            start,
+                            end: iter.end,
+                            data: YamlValueData::Sequence(Vec::new()),
+                        });
+                    } else {
+                        let mut sub_iter = TokensIter::new(tokens);
+                        get_array(&mut sub_iter, true)
+                    }
                 }
                 YamlTokenData::BlockSequenceIndicator => get_array(iter, false),
                 YamlTokenData::FlowMapStart => {
-                    let mut iter =
-                        TokensIter::new(iter.remove_tokens_of_map_flow()?);
-                    get_map(&mut iter, true)
+                    let start = token.start;
+                    let tokens = iter.remove_tokens_of_map_flow(false)?;
+                    if tokens.is_empty() {
+                        return Ok(Self {
+                            start,
+                            end: iter.end,
+                            data: YamlValueData::Map(Box::new(
+                                YamlValueMap::new(),
+                            )),
+                        });
+                    } else {
+                        let mut iter = TokensIter::new(tokens);
+                        get_map(&mut iter, true)
+                    }
                 }
                 YamlTokenData::MapKeyIndicator => get_map(iter, false),
                 YamlTokenData::LocalTag(_) => get_tag(iter),
