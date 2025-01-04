@@ -280,6 +280,9 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
             // where we can use `Option::take()` to move data out.
             let access = YamlValueMapAccess::new(*v.clone());
             visitor.visit_map(access)
+        } else if let YamlValueData::Null = &self.parsed.data {
+            let access = YamlValueMapAccess::new(Default::default());
+            visitor.visit_map(access)
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
                 format!("Expecting a map, got {}", self.parsed.data),

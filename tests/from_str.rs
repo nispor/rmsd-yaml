@@ -338,3 +338,15 @@ fn test_signed_interger() -> Result<(), RmsdError> {
     );
     Ok(())
 }
+
+#[test]
+fn test_empty_input() -> Result<(), RmsdError> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct FooTest {
+        #[serde(default)]
+        uint_a: u32,
+    }
+
+    assert_eq!(FooTest { uint_a: 0 }, rmsd_yaml::from_str::<FooTest>("")?);
+    Ok(())
+}
