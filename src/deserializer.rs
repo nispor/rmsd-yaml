@@ -329,4 +329,8 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
     {
         self.deserialize_any(visitor)
     }
+
+    fn is_human_readable(&self) -> bool {
+        true
+    }
 }

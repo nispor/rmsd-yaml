@@ -131,7 +131,6 @@ pub(crate) fn read_unquoted_str(
             if let Some(next_line) =
                 iter.as_str().lines().nth(1).map(|s| s.trim_start())
             {
-                println!("HAHA {:?}", next_line);
                 if next_line.contains(": ")
                     || next_line.starts_with("- ")
                     || next_line.starts_with("---\n")

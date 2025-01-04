@@ -7,13 +7,22 @@ pub(crate) struct TokensIter {
     pub(crate) data: Vec<Option<YamlToken>>,
     /// The index of data pending removal
     index: usize,
+    /// The start position of recent removed token
+    pub(crate) start: RmsdPosition,
+    /// The end position of recent removed token
+    pub(crate) end: RmsdPosition,
 }
 
 impl TokensIter {
     pub(crate) fn new(tokens: Vec<YamlToken>) -> Self {
         let data: Vec<Option<YamlToken>> =
             tokens.into_iter().map(Some).collect();
-        Self { data, index: 0 }
+        Self {
+            data,
+            index: 0,
+            start: RmsdPosition::EOF,
+            end: RmsdPosition::EOF,
+        }
     }
 
     /// Remove the next token
@@ -24,7 +33,13 @@ impl TokensIter {
         if let Some(token) = self.data.get_mut(self.index) {
             self.index += 1;
 
-            token.take()
+            if let Some(token) = token.take() {
+                self.start = token.start;
+                self.end = token.end;
+                Some(token)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -66,9 +81,11 @@ impl TokensIter {
     }
 
     // The first token should be `{`
-    // Return tokens do not contains leading { and tailing }
+    // With need_container: true, returned tokens will contains leading { and
+    // tailing }
     pub(crate) fn remove_tokens_of_map_flow(
         &mut self,
+        need_container: bool,
     ) -> Result<Vec<YamlToken>, RmsdError> {
         let mut ret = Vec::new();
         let mut need_ends = 0;
@@ -78,7 +95,7 @@ impl TokensIter {
             match token.data {
                 YamlTokenData::FlowMapStart => {
                     last_map_start_pos = token.start;
-                    if need_ends != 0 {
+                    if need_ends != 0 || need_container {
                         ret.push(token);
                     }
                     need_ends += 1;
@@ -92,6 +109,9 @@ impl TokensIter {
                     } else {
                         need_ends -= 1;
                         if need_ends == 0 {
+                            if need_container {
+                                ret.push(token);
+                            }
                             return Ok(ret);
                         } else {
                             ret.push(token);
@@ -119,9 +139,11 @@ impl TokensIter {
     }
 
     // The first token should be `[`,
-    // Return tokens do not contains leading [ and tailing ]
+    // With need_container: true, returned tokens will contain leading [ and
+    // tailing ].
     pub(crate) fn remove_tokens_of_seq_flow(
         &mut self,
+        need_container: bool,
     ) -> Result<Vec<YamlToken>, RmsdError> {
         let mut ret = Vec::new();
         let mut need_ends = 0;
@@ -130,7 +152,7 @@ impl TokensIter {
             match token.data {
                 YamlTokenData::FlowSequenceStart => {
                     last_seq_start_pos = token.start;
-                    if need_ends != 0 {
+                    if need_ends != 0 || need_container {
                         ret.push(token);
                     }
                     need_ends += 1;
@@ -144,6 +166,9 @@ impl TokensIter {
                     } else {
                         need_ends -= 1;
                         if need_ends == 0 {
+                            if need_container {
+                                ret.push(token);
+                            }
                             return Ok(ret);
                         } else {
                             ret.push(token);

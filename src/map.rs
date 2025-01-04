@@ -114,6 +114,8 @@ impl<'de> MapAccess<'de> for YamlValueMapAccess {
 }
 
 // Should have leading { and ending } removed.
+// Since we cannot tell the start and end for empty iter, please
+// check it before call this function, otherwise an error will emit.
 pub(crate) fn get_map(
     iter: &mut TokensIter,
     in_flow: bool,
@@ -166,9 +168,18 @@ pub(crate) fn get_map(
                 iter.next();
             }
             YamlTokenData::FlowMapStart => {
-                let mut sub_iter =
-                    TokensIter::new(iter.remove_tokens_of_map_flow()?);
-                let value = get_map(&mut sub_iter, true)?;
+                let start = token.start;
+                let sub_tokens = iter.remove_tokens_of_map_flow(false)?;
+                let value = if sub_tokens.is_empty() {
+                    YamlValue {
+                        data: YamlValueData::Map(Box::new(YamlValueMap::new())),
+                        start,
+                        end: iter.end,
+                    }
+                } else {
+                    let mut sub_iter = TokensIter::new(sub_tokens);
+                    get_map(&mut sub_iter, true)?
+                };
                 if let Some(k) = key.take() {
                     end = value.end;
                     map.insert(k, value);
@@ -188,9 +199,18 @@ pub(crate) fn get_map(
                 }
             }
             YamlTokenData::FlowSequenceStart => {
-                let mut sub_iter =
-                    TokensIter::new(iter.remove_tokens_of_seq_flow()?);
-                let value = get_array(&mut sub_iter, true)?;
+                let start = token.start;
+                let sub_tokens = iter.remove_tokens_of_seq_flow(false)?;
+                let value = if sub_tokens.is_empty() {
+                    YamlValue {
+                        start,
+                        end: iter.end,
+                        data: YamlValueData::Sequence(Vec::new()),
+                    }
+                } else {
+                    let mut sub_iter = TokensIter::new(sub_tokens);
+                    get_array(&mut sub_iter, true)?
+                };
                 if let Some(k) = key.take() {
                     end = value.end;
                     map.insert(k, value);

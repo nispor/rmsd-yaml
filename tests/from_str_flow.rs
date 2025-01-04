@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
@@ -177,6 +179,104 @@ fn test_de_yaml_flow_struct_of_array() -> Result<(), RmsdError> {
         FooTest {
             uint_a: vec![1, 2, 3, 4]
         }
+    );
+    Ok(())
+}
+
+#[test]
+fn test_de_yaml_flow_empty_array() -> Result<(), RmsdError> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct Iface {
+        name: String,
+        ethernet: EthernetIface,
+    }
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct EthernetIface {
+        #[serde(rename = "sr-iov")]
+        sr_iov: SriovConf,
+    }
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct SriovConf {
+        #[serde(rename = "total-vfs")]
+        total_vfs: u32,
+        vfs: Vec<VfsConf>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct VfsConf {
+        mac: String,
+    }
+
+    let yaml_str = r#"
+    - name: eth1
+      ethernet:
+        sr-iov:
+          total-vfs: 2
+          vfs: []
+    "#;
+
+    let iface_test: Vec<Iface> = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(
+        iface_test,
+        vec![Iface {
+            name: "eth1".into(),
+            ethernet: EthernetIface {
+                sr_iov: SriovConf {
+                    total_vfs: 2,
+                    vfs: Vec::new(),
+                }
+            }
+        }]
+    );
+    Ok(())
+}
+
+#[test]
+fn test_de_yaml_flow_empty_map() -> Result<(), RmsdError> {
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct Iface {
+        name: String,
+        ethernet: EthernetIface,
+    }
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct EthernetIface {
+        #[serde(rename = "sr-iov")]
+        sr_iov: SriovConf,
+    }
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct SriovConf {
+        #[serde(rename = "total-vfs")]
+        total_vfs: u32,
+        vfs: HashMap<u32, VfsConf>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+    struct VfsConf {
+        mac: String,
+    }
+
+    let yaml_str = r#"
+    - name: eth1
+      ethernet:
+        sr-iov:
+          total-vfs: 2
+          vfs: {}
+    "#;
+
+    let iface_test: Vec<Iface> = rmsd_yaml::from_str(yaml_str)?;
+
+    assert_eq!(
+        iface_test,
+        vec![Iface {
+            name: "eth1".into(),
+            ethernet: EthernetIface {
+                sr_iov: SriovConf {
+                    total_vfs: 2,
+                    vfs: HashMap::new(),
+                }
+            }
+        }]
     );
     Ok(())
 }

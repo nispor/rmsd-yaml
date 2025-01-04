@@ -3,13 +3,15 @@
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    get_map, RmsdDeserializer, RmsdError, RmsdPosition, TokensIter,
-    YamlTokenData, YamlValue, YamlValueData,
+    RmsdDeserializer, RmsdError, RmsdPosition, TokensIter, YamlTokenData,
+    YamlValue, YamlValueData,
 };
 
 // Should have leading [ and tailing ] removed.
 // With `in_flow` set to true, we will read till end of iter without checking
 // indents.
+// Because we don't the start and ends when iter is empty, this function will
+// raise error if so, please handle it before calling this function.
 pub(crate) fn get_array(
     iter: &mut TokensIter,
     in_flow: bool,
@@ -49,14 +51,14 @@ pub(crate) fn get_array(
                 }
             }
             YamlTokenData::FlowSequenceStart => {
-                let mut element_iter =
-                    TokensIter::new(iter.remove_tokens_of_seq_flow()?);
-                items.push(get_array(&mut element_iter, true)?);
+                let mut element_tokens =
+                    iter.remove_tokens_of_seq_flow(true)?;
+                previous_element_tokens.append(&mut element_tokens);
             }
             YamlTokenData::FlowMapStart => {
-                let mut element_iter =
-                    TokensIter::new(iter.remove_tokens_of_map_flow()?);
-                items.push(get_map(&mut element_iter, true)?);
+                let mut element_tokens =
+                    iter.remove_tokens_of_map_flow(true)?;
+                previous_element_tokens.append(&mut element_tokens);
             }
             YamlTokenData::CollectEntry => {
                 // We will have empty previous_element_tokens for `,` after `{}`
@@ -76,20 +78,8 @@ pub(crate) fn get_array(
                 }
                 iter.next();
             }
-            YamlTokenData::Scalar(_) => {
-                previous_element_tokens.push(iter.next().unwrap());
-            }
-            YamlTokenData::MapValueIndicator => {
-                previous_element_tokens.push(iter.next().unwrap());
-            }
-            YamlTokenData::LocalTag(_) => {
-                previous_element_tokens.push(iter.next().unwrap());
-            }
             _ => {
-                return Err(RmsdError::bug(
-                    format!("get_array(): Unexpected token {token:?}"),
-                    token.start,
-                ));
+                previous_element_tokens.push(iter.next().unwrap());
             }
         }
     }
