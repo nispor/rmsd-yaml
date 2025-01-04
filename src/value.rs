@@ -60,7 +60,7 @@ impl YamlValue {
             // The `as_str()` is called to get tag name of enum instead of
             // content.
             Ok(tag.name.as_str())
-        } else if &self.data == &YamlValueData::Null {
+        } else if self.data == YamlValueData::Null {
             Ok("")
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
@@ -307,6 +307,11 @@ impl YamlValue {
                 }
                 YamlTokenData::MapKeyIndicator => get_map(iter, false),
                 YamlTokenData::LocalTag(_) => get_tag(iter),
+                YamlTokenData::Null => Ok(YamlValue {
+                    start: token.start,
+                    end: token.end,
+                    data: YamlValueData::Null,
+                }),
                 _ => {
                     if iter.data.get(1).and_then(|t| {
                         t.as_ref()

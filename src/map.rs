@@ -10,7 +10,7 @@ use crate::{
     YamlTokenData, YamlValue, YamlValueData,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct YamlValueMap(IndexMap<YamlValue, YamlValue>);
 
 impl std::hash::Hash for YamlValueMap {
