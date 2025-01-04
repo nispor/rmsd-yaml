@@ -37,15 +37,22 @@ pub fn to_value(input: &str) -> Result<YamlValue, RmsdError> {
 impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
     type Error = RmsdError;
 
-    // Look at the input data to decide what Serde data model type to
-    // deserialize as. Not all data formats are able to support this operation.
-    // Formats that support `deserialize_any` are known as self-describing.
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
         match &self.parsed.data {
-            YamlValueData::Scalar(_) => self.deserialize_str(visitor),
+            YamlValueData::Scalar(_) => {
+                if self.parsed.is_bool() {
+                    self.deserialize_bool(visitor)
+                } else if self.parsed.is_integer() {
+                    self.deserialize_u64(visitor)
+                } else if self.parsed.is_signed_integer() {
+                    self.deserialize_i64(visitor)
+                } else {
+                    self.deserialize_str(visitor)
+                }
+            }
             YamlValueData::Sequence(_) => self.deserialize_seq(visitor),
             YamlValueData::Map(_) => self.deserialize_map(visitor),
             v => Err(RmsdError::bug(
@@ -62,32 +69,32 @@ impl<'de> Deserializer<'de> for &mut RmsdDeserializer {
         visitor.visit_bool(self.parsed.as_bool()?)
     }
 
-    fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_i8(self.parsed.as_i8()?)
     }
 
-    fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_i16(self.parsed.as_i16()?)
     }
 
-    fn deserialize_i32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_i32(self.parsed.as_i32()?)
     }
 
-    fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_i64(self.parsed.as_i64()?)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>

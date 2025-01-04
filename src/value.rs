@@ -26,6 +26,9 @@ impl FromStr for YamlValue {
 
     fn from_str(input: &str) -> Result<Self, RmsdError> {
         let tokens = YamlToken::parse(input)?;
+        for token in &tokens {
+            println!("HAHA {:?}", token);
+        }
         let mut iter = TokensIter::new(tokens);
         Self::parse(&mut iter)
     }
@@ -80,6 +83,30 @@ impl YamlValue {
         }
     }
 
+    pub fn is_bool(&self) -> bool {
+        self.as_bool().is_ok()
+    }
+
+    pub fn is_integer(&self) -> bool {
+        if let YamlValueData::Scalar(s) = &self.data {
+            str_is_integer(s)
+        } else {
+            false
+        }
+    }
+
+    pub fn is_signed_integer(&self) -> bool {
+        if let YamlValueData::Scalar(s) = &self.data {
+            if s.starts_with("-") || s.starts_with("+") {
+                str_is_integer(&s[1..])
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn as_u64(&self) -> Result<u64, RmsdError> {
         if let YamlValueData::Scalar(s) = &self.data {
             if s.starts_with("0x") | s.starts_with("0X") {
@@ -90,7 +117,7 @@ impl YamlValue {
                 u64::from_str_radix(&s[2..], 8).map_err(|_| {
                     RmsdError::invalid_number(s.as_str(), self.start)
                 })
-            } else if s.starts_with("0b") | s.starts_with("0b") {
+            } else if s.starts_with("0b") | s.starts_with("0B") {
                 u64::from_str_radix(&s[2..], 2).map_err(|_| {
                     RmsdError::invalid_number(s.as_str(), self.start)
                 })
@@ -112,7 +139,7 @@ impl YamlValue {
         if num > u32::MAX as u64 {
             Err(RmsdError::number_overflow(
                 format!(
-                    "Specified number {} overflow u32:MAX {}",
+                    "Specified number {} overflow u32::MAX {}",
                     num,
                     u32::MAX
                 ),
@@ -128,7 +155,7 @@ impl YamlValue {
         if num > u16::MAX as u64 {
             Err(RmsdError::number_overflow(
                 format!(
-                    "Specified number {} overflow u16:MAX {}",
+                    "Specified number {} overflow u16::MAX {}",
                     num,
                     u16::MAX
                 ),
@@ -143,11 +170,100 @@ impl YamlValue {
         let num = self.as_u64()?;
         if num > u8::MAX as u64 {
             Err(RmsdError::number_overflow(
-                format!("Specified number {} overflow u8:MAX {}", num, u8::MAX),
+                format!(
+                    "Specified number {} overflow u8::MAX {}",
+                    num,
+                    u8::MAX
+                ),
                 self.start,
             ))
         } else {
             Ok(num as u8)
+        }
+    }
+
+    pub fn as_i64(&self) -> Result<i64, RmsdError> {
+        if let YamlValueData::Scalar(s) = &self.data {
+            let positive: bool = !s.starts_with("-");
+
+            let s = s.as_str().strip_prefix("-").unwrap_or(s.as_str());
+
+            let s = s.strip_prefix("+").unwrap_or(s);
+
+            let number = if s.starts_with("0x") | s.starts_with("0X") {
+                i64::from_str_radix(&s[2..], 16)
+                    .map_err(|_| RmsdError::invalid_number(s, self.start))?
+            } else if s.starts_with("0o") | s.starts_with("0O") {
+                i64::from_str_radix(&s[2..], 8)
+                    .map_err(|_| RmsdError::invalid_number(s, self.start))?
+            } else if s.starts_with("0b") | s.starts_with("0B") {
+                i64::from_str_radix(&s[2..], 2)
+                    .map_err(|_| RmsdError::invalid_number(s, self.start))?
+            } else {
+                i64::from_str(s)
+                    .map_err(|_| RmsdError::invalid_number(s, self.start))?
+            };
+            if positive {
+                Ok(number)
+            } else {
+                Ok(0 - number)
+            }
+        } else {
+            Err(RmsdError::unexpected_yaml_node_type(
+                format!("Expecting a number, but got {}", &self.data),
+                self.start,
+            ))
+        }
+    }
+
+    pub fn as_i32(&self) -> Result<i32, RmsdError> {
+        let num = self.as_i64()?;
+        if num > i32::MAX as i64 || num < i32::MIN as i64 {
+            Err(RmsdError::number_overflow(
+                format!(
+                    "Specified number {} overflow i32 range [{}, {}]",
+                    num,
+                    i32::MIN,
+                    i32::MAX
+                ),
+                self.start,
+            ))
+        } else {
+            Ok(num as i32)
+        }
+    }
+
+    pub fn as_i16(&self) -> Result<i16, RmsdError> {
+        let num = self.as_i64()?;
+        if num > i16::MAX as i64 || num < i16::MIN as i64 {
+            Err(RmsdError::number_overflow(
+                format!(
+                    "Specified number {} overflow i16 range [{}, {}]",
+                    num,
+                    i16::MIN,
+                    i16::MAX
+                ),
+                self.start,
+            ))
+        } else {
+            Ok(num as i16)
+        }
+    }
+
+    pub fn as_i8(&self) -> Result<i8, RmsdError> {
+        let num = self.as_i64()?;
+        if num > i8::MAX as i64 || num < i8::MIN as i64 {
+            Err(RmsdError::number_overflow(
+                format!(
+                    "Specified number {} overflow u8 range [{}, {}]",
+                    num,
+                    i8::MIN,
+                    i8::MAX
+                ),
+                self.start,
+            ))
+        } else {
+            Ok(num as i8)
         }
     }
 }
@@ -255,5 +371,17 @@ impl std::fmt::Display for YamlValueData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: Improve this
         write!(f, "{self:?}")
+    }
+}
+
+fn str_is_integer(s: &str) -> bool {
+    if s.starts_with("0x") | s.starts_with("0X") {
+        s[2..].chars().all(|c| c.is_ascii_hexdigit())
+    } else if s.starts_with("0o") | s.starts_with("0O") {
+        s[2..].chars().all(|c| c.is_digit(8))
+    } else if s.starts_with("0b") | s.starts_with("0B") {
+        s[2..].chars().all(|c| c.is_digit(2))
+    } else {
+        s.chars().all(|c| c.is_ascii_digit())
     }
 }

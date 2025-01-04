@@ -315,7 +315,9 @@ fn process_map_seq_indicator(
         return Ok(None);
     }
 
-    let indicator = match iter.next().unwrap() {
+    let indicator_char = iter.next().unwrap();
+
+    let indicator = match indicator_char {
         YAML_CHAR_SEQUENCE_ENTRY => YamlTokenData::BlockSequenceIndicator,
         YAML_CHAR_MAPPING_KEY => YamlTokenData::MapKeyIndicator,
         YAML_CHAR_MAPPING_VALUE => YamlTokenData::MapValueIndicator,
@@ -347,12 +349,21 @@ fn process_map_seq_indicator(
                 data: indicator,
             }))
         } else {
-            Ok(Some(read_unquoted_str_token(
-                iter,
+            let start = iter.pos();
+            let (unquoted_string, end) = read_unquoted_str(
                 *indent,
+                iter,
                 is_after_map_indicator,
                 in_flow,
-            )?))
+            )?;
+            let unquoted_string =
+                format!("{indicator_char}{}", unquoted_string);
+            Ok(Some(YamlToken {
+                indent: *indent,
+                start,
+                end,
+                data: YamlTokenData::Scalar(unquoted_string),
+            }))
         }
     } else {
         Ok(Some(YamlToken {
