@@ -59,8 +59,11 @@ where
         ..Default::default()
     };
     value.serialize(&mut serializer)?;
-    if serializer.output.ends_with("\n") {
+    if serializer.output.ends_with("\n\n") {
         serializer.output.pop();
+    }
+    if !serializer.output.ends_with("\n") {
+        serializer.output.push('\n');
     }
     Ok(serializer.output)
 }
