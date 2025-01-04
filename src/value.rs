@@ -60,6 +60,8 @@ impl YamlValue {
             // The `as_str()` is called to get tag name of enum instead of
             // content.
             Ok(tag.name.as_str())
+        } else if &self.data == &YamlValueData::Null {
+            Ok("")
         } else {
             Err(RmsdError::unexpected_yaml_node_type(
                 format!("Expecting a string, but got {}", &self.data),

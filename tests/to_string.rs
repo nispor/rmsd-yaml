@@ -25,7 +25,8 @@ fn test_struct_to_string() -> Result<(), RmsdError> {
         yaml_str,
         r#"uint_a: 129
 str_b: abc
-bool_c: false"#
+bool_c: false
+"#
     );
 
     assert_eq!(rmsd_yaml::from_str::<FooTest>(&yaml_str)?, data);
@@ -37,7 +38,7 @@ fn test_array_to_string() -> Result<(), RmsdError> {
     let data = vec![1u8, 2, 3, 4];
     let yaml_str = rmsd_yaml::to_string_with_opt(&data, Default::default())?;
 
-    assert_eq!(yaml_str, "- 1\n- 2\n- 3\n- 4");
+    assert_eq!(yaml_str, "- 1\n- 2\n- 3\n- 4\n");
 
     assert_eq!(rmsd_yaml::from_str::<Vec<u8>>(&yaml_str)?, data);
     Ok(())
@@ -77,7 +78,8 @@ fn test_array_of_map() -> Result<(), RmsdError> {
   bool_c: false
 - uint_a: 128
   str_b: abd
-  bool_c: true"#
+  bool_c: true
+"#
     );
 
     assert_eq!(rmsd_yaml::from_str::<Vec<FooTest>>(&yaml_str)?, data);
@@ -108,7 +110,8 @@ uint_a:
   - 129
   - 128
   - 127
-str_b: abc"#
+str_b: abc
+"#
     );
 
     assert_eq!(rmsd_yaml::from_str::<FooTest>(&yaml_str)?, data);
@@ -132,7 +135,8 @@ fn test_nested_array() -> Result<(), RmsdError> {
 - - 5
   - 6
   - 7
-  - 8"#
+  - 8
+"#
     );
 
     assert_eq!(rmsd_yaml::from_str::<FooTest>(&yaml_str)?, data);
@@ -171,7 +175,8 @@ bar:
     - 1
     - 2
     - 3
-    - 4"#
+    - 4
+"#
     );
 
     assert_eq!(rmsd_yaml::from_str::<FooTest>(&yaml_str)?, data);
