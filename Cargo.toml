@@ -1,0 +1,16 @@
+[package]
+name = "rmsd_yaml"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Rust Minimized Serializer and Deserializer of YAML"
+repository = "https://github.com/nispor/rdsm-yaml"
+
+
+[dependencies]
+indexmap = "2.7.0"
+serde = { version = "1.0" }
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+pretty_assertions = "1.4.1"

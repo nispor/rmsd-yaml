@@ -1,0 +1,5 @@
+/target
+/tags
+*.swp
+Cargo.lock
+index.html
