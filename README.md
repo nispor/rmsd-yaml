@@ -10,4 +10,4 @@ Work in progress, do not use yet.
 ## Credits
 
 This project is greatly inspired by https://github.com/chyh1990/yaml-rust on
-event driven parsing.
+state machine tracking.

@@ -42,8 +42,7 @@ impl TryFrom<&str> for YamlPosition {
 
     fn try_from(value: &str) -> Result<Self, YamlError> {
         let err_msg = format!(
-            "Expecting format `line [0-9]+ column [0-9]+`, \
-            but got: {value}"
+            "Expecting format `line [0-9]+ column [0-9]+`, but got: {value}"
         );
         let splited: Vec<&str> = value.split(" ").take(4).collect();
 
@@ -88,6 +87,12 @@ impl YamlPosition {
 
     pub fn next_column(&mut self) {
         self.column += 1;
+    }
+
+    pub fn pre_column(&mut self) {
+        if self.column > 0 {
+            self.column -= 1;
+        }
     }
 
     pub fn next_line(&mut self) {

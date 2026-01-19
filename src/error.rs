@@ -48,6 +48,10 @@ pub enum ErrorKind {
     AmbiguityPlainScalar,
     /// Implicit key should contains ": " within single line
     InvalidImplicitKey,
+    /// Expecting '-\n' or '- ' as sequence start Indicator
+    InvalidSequnceStartIndicator,
+    /// Got less indented data without parent container
+    LessIndentedWithoutParent,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -77,6 +81,10 @@ impl std::fmt::Display for ErrorKind {
                 Self::InvalidPlainScalarStart => "invalid_plain_scalar_start",
                 Self::AmbiguityPlainScalar => "ambiguity_plain_scalar",
                 Self::InvalidImplicitKey => "invalid_implicit_key",
+                Self::InvalidSequnceStartIndicator =>
+                    "invalid_sequence_start_indicator",
+                Self::LessIndentedWithoutParent =>
+                    "less_indented_without_parent",
             }
         )
     }

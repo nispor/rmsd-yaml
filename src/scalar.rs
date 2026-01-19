@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlPosition, YamlState, YamlTreeParser,
+    ErrorKind, YamlError, YamlEvent, YamlTreeParser,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -13,27 +13,49 @@ enum ChompingMethod {
 }
 
 impl<'a> YamlTreeParser<'a> {
-    pub(crate) fn handle_in_scalar(&mut self) -> Result<(), YamlError> {
-        if let Some(next_char) = self.scanner.peek_char() {
+    /// Advance the scanner till scalar ends.
+    pub(crate) fn handle_scalar(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+    ) -> Result<(), YamlError> {
+        eprintln!(
+            "handle_scalar {first_indent_count} {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
+        if let Some(line) = self.scanner.peek_line()
+            && let Some(next_char) =
+                line.trim_start_matches(' ').chars().next()
+        {
+            if line == "..." {
+                return Ok(());
+            }
             match next_char {
                 '|' => {
+                    self.scanner.advance_till_non_space();
                     self.scanner.next_char();
                     self.handle_literal_block_scalar()?;
                 }
                 '>' => {
+                    self.scanner.advance_till_non_space();
                     self.scanner.next_char();
                     self.handle_folded_block_scalar()?;
                 }
                 '\'' => {
+                    self.scanner.advance_till_non_space();
                     self.scanner.next_char();
                     self.handle_single_quoted_flow_scalar()?;
                 }
                 '"' => {
+                    self.scanner.advance_till_non_space();
                     self.scanner.next_char();
                     self.handle_double_quoted_flow_scalar()?;
                 }
                 _ => {
-                    self.handle_plain_flow_scalar()?;
+                    self.handle_plain_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                    )?;
                 }
             }
         } else {
@@ -49,6 +71,7 @@ impl<'a> YamlTreeParser<'a> {
     pub(crate) fn handle_literal_block_scalar(
         &mut self,
     ) -> Result<(), YamlError> {
+        eprintln!("handle_literal_block_scalar {:?}", self.scanner.remains());
         let mut ret = String::new();
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
@@ -115,19 +138,11 @@ impl<'a> YamlTreeParser<'a> {
                 let leading_space =
                     line.chars().take_while(|c| c == &' ').count();
                 if leading_space < desired_indent {
-                    if self.cur_state().is_container() {
-                        self.states.pop();
-                        self.events.push(YamlEvent::Scalar(
-                            ret,
-                            start_pos,
-                            self.scanner.done_pos,
-                        ));
-                        return Ok(());
-                    } else {
-                        // If we don't have parent container(map/sequence),
-                        // less indented line are treated as empty line.
+                    if line.trim_start_matches(' ').is_empty() {
                         self.scanner.next_line();
                         ret.push('\n');
+                    } else {
+                        break;
                     }
                 } else if let Some(line) = self.scanner.next_line() {
                     // Remove indent then append
@@ -158,7 +173,7 @@ impl<'a> YamlTreeParser<'a> {
                 // the final line break and any trailing empty lines are
                 // excluded from the scalar’s content.
                 ret = ret
-                    .trim_end_matches(|c| matches!(c, '\n' | '\r'))
+                    .trim_end_matches(['\n', '\r'])
                     .to_string();
             }
             ChompingMethod::Clip => {
@@ -166,18 +181,16 @@ impl<'a> YamlTreeParser<'a> {
                 // content. However, any trailing empty lines are excluded from
                 // the scalar’s content.
                 ret = ret
-                    .trim_end_matches(|c| matches!(c, '\n' | '\r'))
+                    .trim_end_matches(['\n', '\r'])
                     .to_string();
                 ret.push('\n');
             }
             ChompingMethod::Keep => (),
         }
 
-        self.events.push(YamlEvent::Scalar(
-            ret,
-            start_pos,
-            self.scanner.done_pos,
-        ));
+        let end_pos = self.scanner.done_pos;
+
+        self.events.push(YamlEvent::Scalar(ret, start_pos, end_pos));
         self.states.pop();
         Ok(())
     }
@@ -204,15 +217,130 @@ impl<'a> YamlTreeParser<'a> {
         todo!()
     }
 
-    pub(crate) fn handle_plain_flow_scalar(&mut self) -> Result<(), YamlError> {
-        let start_pos = self.scanner.next_pos;
+    pub(crate) fn handle_plain_scalar(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+    ) -> Result<(), YamlError> {
+        eprintln!(
+            "handle_plain_scalar {first_indent_count} {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
+        let mut start_pos = self.scanner.next_pos;
+        let mut string_to_fold: Vec<&str> = Vec::new();
+        let mut is_first_line = true;
+        while let Some(line) = self.scanner.peek_line() {
+            let pre_pos = self.scanner.done_pos;
+            let cur_indent_count =
+                line.chars().take_while(|c| *c == ' ').count();
+
+            let expected_indent_count = if is_first_line {
+                first_indent_count
+            } else {
+                rest_indent_count
+            };
+
+            if cur_indent_count < expected_indent_count {
+                break;
+            }
+            if is_first_line {
+                start_pos.column += cur_indent_count;
+                is_first_line = false;
+            }
+
+            // document end indicator
+            if line == "..." {
+                break;
+            }
+
+            let trimmed = line.trim_start_matches(' ');
+
+            if self.cur_state().is_block_seq() && trimmed.starts_with("- ") {
+                break;
+            }
+
+            self.validate_plain_scalar(line)?;
+
+            if self.cur_state().is_block_map_key() {
+                // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
+                //      Plain scalars are further restricted to a single line
+                //      when contained inside an implicit key.
+                if let Some(offset) = line.find(": ") {
+                    self.scanner.advance_offset(offset);
+                    self.events.push(YamlEvent::Scalar(
+                        line[expected_indent_count..offset].to_string(),
+                        start_pos,
+                        self.scanner.done_pos,
+                    ));
+                    return Ok(());
+                } else if line.ends_with(":")
+                    && line != ":"
+                    && let Some(offset) = line.find(":")
+                {
+                    self.scanner.advance_offset(offset);
+                    self.events.push(YamlEvent::Scalar(
+                        line[expected_indent_count..line.len() - 1].to_string(),
+                        start_pos,
+                        self.scanner.done_pos,
+                    ));
+                    return Ok(());
+                } else {
+                    self.scanner.advance_till_linebreak();
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidImplicitKey,
+                        "Implicit key should contains ': ' within single line \
+                         or ending with :"
+                            .to_string(),
+                        pre_pos,
+                        self.scanner.done_pos,
+                    ));
+                }
+            } else {
+                // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
+                //      All leading and trailing white space characters are
+                //      excluded from the content. Each continuation line must
+                //      therefore contain at least one non-space character.
+                //      Empty lines, if any, are consumed as part of the
+                //      line folding.
+                self.scanner.next_line();
+                string_to_fold
+                    .push(line.trim_matches(|c: char| matches!(c, '\t' | ' ')));
+
+                if self.scanner.done_pos == pre_pos {
+                    return Err(YamlError::new(
+                        ErrorKind::Bug,
+                        format!(
+                            "handle_plain_scalar (): dead loop, remains {:?}",
+                            self.scanner.remains(),
+                        ),
+                        pre_pos,
+                        pre_pos,
+                    ));
+                }
+            }
+        }
+        let str_val = fold_string(string_to_fold);
+        let mut end_pos = self.scanner.done_pos;
+        if !str_val.contains('\n') && end_pos.line == start_pos.line {
+            end_pos.column = start_pos.column + str_val.chars().count() - 1;
+        }
+
+        self.events
+            .push(YamlEvent::Scalar(str_val, start_pos, end_pos));
+        self.states.pop();
+        Ok(())
+    }
+
+    fn validate_plain_scalar(&mut self, line: &str) -> Result<(), YamlError> {
         // YAML SPEC 1.2, 7.3.3. Plain Style:
         //      Plain scalars must not begin with most indicators, as this
         //      would cause ambiguity with other YAML constructs.  However,
         //      the “:”, “?” and “-” indicators may be used as the first
         //      character if followed by a non-space “safe” character, as
         //      this causes no ambiguity.
-        if let Some(first_char) = self.scanner.peek_char() {
+        if let Some(first_char) =
+            line.trim_start_matches(' ').chars().next()
+        {
             match first_char {
                 ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
                 | '>' | '\'' | '"' | '%' | '@' | '`' => {
@@ -222,13 +350,13 @@ impl<'a> YamlTreeParser<'a> {
                             "Plain scalar should not start with '{first_char} \
                              '"
                         ),
-                        start_pos,
+                        self.scanner.next_pos,
                         self.scanner.next_pos,
                     ));
                 }
                 ':' | '?' | '-' => {
                     if Some(' ')
-                        == self.scanner.remains().chars().skip(1).next()
+                        == self.scanner.remains().chars().nth(1)
                     {
                         return Err(YamlError::new(
                             ErrorKind::InvalidPlainScalarStart,
@@ -236,7 +364,7 @@ impl<'a> YamlTreeParser<'a> {
                                 "Plain scalar should not start with \
                                  '{first_char} '"
                             ),
-                            start_pos,
+                            self.scanner.next_pos,
                             self.scanner.next_pos,
                         ));
                     }
@@ -245,107 +373,60 @@ impl<'a> YamlTreeParser<'a> {
             }
         }
 
-        let mut string_to_fold: Vec<&str> = Vec::new();
-        while let Some(line) = self.scanner.peek_line() {
+        // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
+        //      Plain scalars must never contain the “: ” and “ #”
+        //      character combinations.
+        if !self.cur_state().is_block_map_key()
+            && let Some(offset) = line.find(": ")
+        {
             let pre_pos = self.scanner.done_pos;
+            self.scanner.advance_offset(offset);
+            return Err(YamlError::new(
+                ErrorKind::AmbiguityPlainScalar,
+                format!(
+                    "Plain style scalar should not contains ': ' as it will \
+                     cause ambiguity for mapping key: {line}"
+                ),
+                pre_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        if let Some(offset) = line.find(" #") {
+            let pre_pos = self.scanner.done_pos;
+            self.scanner.advance_offset(offset);
+            return Err(YamlError::new(
+                ErrorKind::AmbiguityPlainScalar,
+                format!(
+                    "Plain style scalar should not contains ' #' as it will \
+                     cause ambiguity for comment: {line}"
+                ),
+                pre_pos,
+                self.scanner.done_pos,
+            ));
+        }
 
-            // document end indicator
-            if line == "..." {
-                break;
-            }
-
-            // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
-            //      Plain scalars must never contain the “: ” and “ #”
-            //      character combinations.
-            if let Some(offset) = line.find(": ").or_else(|| line.find(" #")) {
+        // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
+        //      In addition, inside flow collections, or when used as
+        //      implicit keys, plain scalars must not contain the “[”, “]”,
+        //      “{”, “}” and “,” characters.
+        if self.cur_state().is_flow() || self.cur_state().is_block_map_key() {
+            let pre_pos = self.scanner.done_pos;
+            if let Some(offset) =
+                line.find(['[', ']', '{', '}'])
+            {
                 self.scanner.advance_offset(offset);
                 return Err(YamlError::new(
                     ErrorKind::AmbiguityPlainScalar,
-                    format!(
-                        "Plain style scalar should not contains ': ' or ' #' \
-                         as it will cause ambiguity for mapping key or \
-                         comment: {line}"
-                    ),
+                    "Inside flow collections, or when used as implicit keys, \
+                     plain scalars must not contain the '[', ']', '{', and \
+                     '}' characters"
+                        .to_string(),
                     pre_pos,
                     self.scanner.done_pos,
                 ));
             }
-
-            // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
-            //      In addition, inside flow collections, or when used as
-            //      implicit keys, plain scalars must not contain the “[”, “]”,
-            //      “{”, “}” and “,” characters.
-            if self.pre_state().is_flow() || self.pre_state().is_block_map_key()
-            {
-                if let Some(offset) =
-                    line.find(|c: char| matches!(c, '[' | ']' | '{' | '}'))
-                {
-                    self.scanner.advance_offset(offset);
-                    return Err(YamlError::new(
-                        ErrorKind::AmbiguityPlainScalar,
-                        "Inside flow collections, or when used as implicit \
-                         keys, plain scalars must not contain the '[', ']', \
-                         '{', and '}' characters"
-                            .to_string(),
-                        pre_pos,
-                        self.scanner.done_pos,
-                    ));
-                }
-            }
-
-            if self.pre_state().is_block_map_key() {
-                // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
-                //      Plain scalars are further restricted to a single line
-                //      when contained inside an implicit key.
-                if let Some(offset) = line.find(": ") {
-                    self.scanner.advance_offset(offset);
-                    self.events.push(YamlEvent::Scalar(
-                        line[..offset].to_string(),
-                        start_pos,
-                        self.scanner.done_pos,
-                    ));
-                    self.states.pop();
-                    return Ok(());
-                } else {
-                    self.scanner.advance_till_linebreak();
-                    return Err(YamlError::new(
-                        ErrorKind::InvalidImplicitKey,
-                        "Implicit key should contains ': ' within single line"
-                            .to_string(),
-                        pre_pos,
-                        self.scanner.done_pos,
-                    ));
-                }
-            }
-
-            // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
-            //      All leading and trailing white space characters are
-            //      excluded from the content. Each continuation line must
-            //      therefore contain at least one non-space character. Empty
-            //      lines, if any, are consumed as part of the line folding.
-            self.scanner.next_line();
-            string_to_fold
-                .push(line.trim_matches(|c: char| matches!(c, '\t' | ' ')));
-
-            if self.scanner.done_pos == pre_pos {
-                return Err(YamlError::new(
-                    ErrorKind::Bug,
-                    format!(
-                        "handle_plain_flow_scalar (): dead loop, remains {:?}",
-                        self.scanner.remains(),
-                    ),
-                    pre_pos,
-                    pre_pos,
-                ));
-            }
         }
 
-        self.events.push(YamlEvent::Scalar(
-            fold_string(string_to_fold),
-            start_pos,
-            self.scanner.done_pos,
-        ));
-        self.states.pop();
         Ok(())
     }
 }
@@ -358,7 +439,6 @@ impl<'a> YamlTreeParser<'a> {
 //      converted to a single space (x20).
 //      A folded non-empty line may end with either of the above line breaks.
 fn fold_string(string_to_fold: Vec<&str>) -> String {
-    println!("HAHA41 {:?}", string_to_fold);
     let mut ret = String::new();
     let mut iter = string_to_fold.into_iter().peekable();
     // the first line break is discarded and the rest are retained as content.
@@ -366,7 +446,7 @@ fn fold_string(string_to_fold: Vec<&str>) -> String {
         ret.push_str(first_line);
     }
     let mut has_new_line_break = false;
-    while let Some(line) = iter.next() {
+    for line in iter {
         if line.is_empty() {
             has_new_line_break = true;
             ret.push('\n');
@@ -409,21 +489,20 @@ mod test {
 
     #[test]
     fn test_block_scalar_literal_block_clip_fixed_ident() {
-        let expected = vec![
-            YamlEvent::StreamStart,
-            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-            YamlEvent::Scalar(
-                " abc \n def\n".to_string(),
-                YamlPosition::new(2, 4),
-                YamlPosition::new(5, 3),
-            ),
-            YamlEvent::DocumentEnd(false, YamlPosition::new(5, 3)),
-            YamlEvent::StreamEnd,
-        ];
         assert_eq!(
             YamlTreeParser::parse("--- |3\n    abc \n    def\n   \n  \n")
                 .unwrap(),
-            expected,
+            vec![
+                YamlEvent::StreamStart,
+                YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+                YamlEvent::Scalar(
+                    " abc \n def\n".to_string(),
+                    YamlPosition::new(2, 4),
+                    YamlPosition::new(5, 3),
+                ),
+                YamlEvent::DocumentEnd(false, YamlPosition::new(5, 3)),
+                YamlEvent::StreamEnd,
+            ]
         );
     }
 
@@ -473,6 +552,24 @@ mod test {
                 .unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn test_block_scalar_literal_all_indented() {
+        assert_eq!(
+            YamlTreeParser::parse("---\n   |\n   abc\n   def\n\n").unwrap(),
+            vec![
+                YamlEvent::StreamStart,
+                YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+                YamlEvent::Scalar(
+                    "abc\ndef\n".to_string(),
+                    YamlPosition::new(3, 4),
+                    YamlPosition::new(5, 1)
+                ),
+                YamlEvent::DocumentEnd(false, YamlPosition::new(5, 1)),
+                YamlEvent::StreamEnd,
+            ]
+        )
     }
 
     #[test]

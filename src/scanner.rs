@@ -29,6 +29,10 @@ impl<'a> YamlScanner<'a> {
         }
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.iter.as_str().is_empty()
+    }
+
     pub(crate) fn remains(&self) -> &'a str {
         self.iter.as_str()
     }
@@ -38,27 +42,17 @@ impl<'a> YamlScanner<'a> {
     }
 
     pub(crate) fn peek_till_linebreak_or_space(&self) -> &str {
-        if let Some(i) = self
+        self
             .remains()
-            .split(|s: char| matches!(s, '\r' | '\n' | ' '))
-            .next()
-        {
-            i
-        } else {
-            ""
-        }
+            .split(['\r', '\n', ' '])
+            .next().unwrap_or_default()
     }
 
     pub(crate) fn peek_till_linebreak(&self) -> &str {
-        if let Some(i) = self
+        self
             .remains()
-            .split(|s: char| matches!(s, '\r' | '\n'))
-            .next()
-        {
-            i
-        } else {
-            ""
-        }
+            .split(['\r', '\n'])
+            .next().unwrap_or_default()
     }
 
     /// Count leading spaces of the first non-empty line
@@ -72,7 +66,7 @@ impl<'a> YamlScanner<'a> {
         let mut max_indent = 0usize;
         // The rust str::lines() will not take standalone `\r` as new line, but
         // YAML spec says `\r` is new line. So we use split here.
-        for line in self.remains().split(|c| matches!(c, '\n' | '\r')) {
+        for line in self.remains().split(['\n', '\r']) {
             if line.chars().all(|c| c == ' ') {
                 let cur_indent = line.chars().count();
                 if max_indent < cur_indent {
@@ -91,7 +85,7 @@ impl<'a> YamlScanner<'a> {
         } else {
             Some(
                 self.remains()
-                    .split_once(|c| matches!(c, '\n' | '\r'))
+                    .split_once(['\n', '\r'])
                     .map(|(s, _)| s)
                     .unwrap_or(self.remains()),
             )
@@ -100,21 +94,23 @@ impl<'a> YamlScanner<'a> {
 
     pub(crate) fn next_line(&mut self) -> Option<&'a str> {
         let ret = self.peek_line();
-        println!("HAHA966 next line {:?}", ret);
+        eprintln!("next line {:?}", ret);
         self.advance_till_linebreak();
         ret
     }
 
+    /// Advance character counts
     pub(crate) fn advance(&mut self, count: usize) {
         for _ in 0..count {
             self.next_char();
         }
     }
 
+    /// Advance byte counts
     pub(crate) fn advance_offset(&mut self, offset: usize) {
         let end_offset = self.iter.offset() + offset;
-        if self.remains().len() < offset {
-            while self.iter.offset() >= end_offset {
+        if self.remains().len() > offset {
+            while self.iter.offset() < end_offset {
                 self.next_char();
             }
         }
@@ -130,6 +126,14 @@ impl<'a> YamlScanner<'a> {
         self.next_char();
     }
 
+    pub(crate) fn advance_till_non_space(&mut self) {
+        while let Some(next_char) = self.peek_char()
+            && next_char == ' '
+        {
+            self.next_char();
+        }
+    }
+
     pub(crate) fn advance_if_starts_with(&mut self, prefix: &str) -> bool {
         if self.remains().starts_with(prefix) {
             for _ in 0..prefix.chars().count() {
@@ -143,7 +147,7 @@ impl<'a> YamlScanner<'a> {
 
     pub(crate) fn next_char(&mut self) -> Option<char> {
         let c = self.iter.next()?.1;
-        println!("HAHA966 next char {:?}", c);
+        eprintln!("next char {:?}", c);
         // Windows use `\r\n` for single line break, so we should not increase
         // line number if found `\r` and next one is `\n`.
         if c == '\n' || (c == '\r' && self.peek_char() != Some('\n')) {

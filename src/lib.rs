@@ -7,6 +7,7 @@
 //mod value;
 mod error;
 mod event;
+mod map;
 mod position;
 mod scalar;
 mod scanner;
@@ -24,10 +25,8 @@ pub use self::{
     //        RmsdSerializeOption, RmsdSerializer, to_string,
     // to_string_with_opt,    },
     //    value::{YamlValue, YamlValueData},
-    tree::YamlTreeParser,
 };
-
 pub(crate) use self::{
     event::YamlEvent, scanner::YamlScanner, state::YamlState,
-    yaml_char::YamlChar,
+    tree::YamlTreeParser,
 };

@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ErrorKind, YamlChar, YamlError, YamlEvent, YamlPosition, YamlScanner,
+    ErrorKind, YamlError, YamlEvent, YamlPosition, YamlScanner,
     YamlState,
 };
 
 #[derive(Debug)]
-pub struct YamlTreeParser<'a> {
+pub(crate) struct YamlTreeParser<'a> {
     pub(crate) scanner: YamlScanner<'a>,
     pub(crate) states: Vec<YamlState>,
     pub(crate) events: Vec<YamlEvent>,
-    pub(crate) cur_idents: usize,
 }
-
-const MAX_LOOP_COUNT: usize = 10;
 
 impl<'a> YamlTreeParser<'a> {
     /// Current state
@@ -21,134 +18,159 @@ impl<'a> YamlTreeParser<'a> {
         self.states.last().unwrap_or(&YamlState::EndOfFile)
     }
 
-    /// Previous state
-    pub(crate) fn pre_state(&self) -> &YamlState {
-        if self.states.len() >= 2 {
-            self.states
-                .get(self.states.len() - 2)
-                .unwrap_or(&YamlState::EndOfFile)
-        } else {
-            &YamlState::EndOfFile
-        }
-    }
-
-    pub fn parse(input: &'a str) -> Result<Vec<YamlEvent>, YamlError> {
+    pub(crate) fn parse(input: &'a str) -> Result<Vec<YamlEvent>, YamlError> {
         let mut parser = Self {
             scanner: YamlScanner::new(input),
-            states: vec![YamlState::InStream],
-            events: vec![YamlEvent::StreamStart],
-            cur_idents: 0,
+            states: Vec::new(),
+            events: Vec::new(),
         };
-        let mut loop_counter = 0;
-        while !parser.cur_state().eof() {
+        while !parser.scanner.is_empty() {
             let cur_pos = parser.scanner.done_pos;
-            match parser.cur_state() {
-                YamlState::InStream => parser.handle_in_stream()?,
-                YamlState::InDocument => parser.handle_in_doc()?,
-                YamlState::InBlockSequnce(_) => parser.handle_in_block_seq()?,
-                YamlState::InScalar => parser.handle_in_scalar()?,
-                YamlState::EndOfFile => break,
-                _ => todo!(),
-            }
+            parser.handle_stream()?;
             if parser.scanner.done_pos == cur_pos {
-                loop_counter += 1;
-                if loop_counter >= MAX_LOOP_COUNT {
-                    return Err(YamlError::new(
-                        ErrorKind::Bug,
-                        format!(
-                            "Dead-loop in parser: remains {:?}",
-                            parser.scanner.remains()
-                        ),
-                        cur_pos,
-                        cur_pos,
-                    ));
-                }
-            } else {
-                loop_counter = 0;
+                return Err(YamlError::new(
+                    ErrorKind::Bug,
+                    format!(
+                        "YamlTreeParser::parse(): dead-loop: remains {:?}",
+                        parser.scanner.remains()
+                    ),
+                    cur_pos,
+                    cur_pos,
+                ));
             }
         }
 
-        return Ok(parser.events);
+        Ok(parser.events)
     }
 
     /// Stream started, but not `---` or string other than `b-break` found yet.
-    fn handle_in_stream(&mut self) -> Result<(), YamlError> {
-        if let Some(next_char) = self.scanner.peek_char().map(YamlChar::from) {
-            if next_char.is_line_break() {
-                self.scanner.next_char();
-            } else if self.scanner.peek_till_linebreak_or_space().trim_end()
-                == "---"
-            {
+    fn handle_stream(&mut self) -> Result<(), YamlError> {
+        self.events.push(YamlEvent::StreamStart);
+        eprintln!("handle_stream {:?}", self.scanner.remains());
+        while let Some(line) = self.scanner.peek_line() {
+            let trimmed = line.trim_start_matches(' ');
+            if trimmed.is_empty() {
+                self.scanner.advance_till_linebreak();
+                continue;
+            }
+            if line.starts_with("---") {
                 self.events.push(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
                 ));
                 self.scanner.advance_till_linebreak_or_space();
-                self.states.push(YamlState::InDocument);
+                self.handle_node(0, 0)?;
+            } else if line == "..." {
+                self.events
+                    .push(YamlEvent::DocumentEnd(true, self.scanner.next_pos));
+                self.scanner.advance_till_linebreak_or_space();
             } else {
                 self.events.push(YamlEvent::DocumentStart(
                     false,
                     self.scanner.next_pos,
                 ));
-                self.states.push(YamlState::InDocument);
+                self.handle_node(0, 0)?;
             }
-        } else {
-            if !self
-                .events
-                .iter()
-                .any(|e| matches!(e, YamlEvent::DocumentEnd(_, _)))
-            {
-                // Empty content
-                self.events
-                    .push(YamlEvent::DocumentStart(false, YamlPosition::EOF));
-                self.events
-                    .push(YamlEvent::DocumentEnd(false, YamlPosition::EOF));
-                self.states.pop();
-            }
-            self.events.push(YamlEvent::StreamEnd);
-            self.states.pop();
         }
+
+        if !self
+            .events
+            .iter()
+            .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)))
+        {
+            // Empty content
+            self.events
+                .push(YamlEvent::DocumentStart(false, YamlPosition::EOF));
+        }
+        // No explicit document end `...`
+        if !self
+            .events
+            .iter()
+            .any(|e| matches!(e, YamlEvent::DocumentEnd(_, _)))
+        {
+            self.events
+                .push(YamlEvent::DocumentEnd(false, self.scanner.done_pos));
+        }
+        self.events.push(YamlEvent::StreamEnd);
         Ok(())
     }
 
-    fn handle_in_doc(&mut self) -> Result<(), YamlError> {
-        let pos = self.scanner.next_pos;
-        if let Some(next_char) = self.scanner.peek_char().map(YamlChar::from) {
-            if next_char.is_line_break() {
-                self.cur_idents += 0;
-                self.scanner.next_char();
-            } else if next_char.is_indent() {
-                self.cur_idents += 1;
-                self.scanner.next_char();
-            } else if next_char.as_ref() == &'\t' {
+    /// Handle a container or scalar
+    pub(crate) fn handle_node(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+    ) -> Result<(), YamlError> {
+        eprintln!(
+            "handle_node {} {}, {:?}",
+            first_indent_count,
+            rest_indent_count,
+            self.scanner.remains()
+        );
+        // Ignore less indented empty line and comment line
+        while let Some(line) = self.scanner.peek_line() {
+            let trimmed = line.trim_start_matches(' ');
+            let indent_count = line.chars().take_while(|c| *c == ' ').count();
+            if trimmed.is_empty() && indent_count <= first_indent_count {
+                self.scanner.advance_till_linebreak();
+                continue;
+            } else if trimmed.starts_with("# ") {
+                self.scanner.advance_till_linebreak();
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        if let Some(line) = self.scanner.peek_line() {
+            let indent_count = line.chars().take_while(|c| *c == ' ').count();
+
+            if indent_count < first_indent_count {
+                if self.cur_state().is_container() {
+                    return Ok(());
+                } else {
+                    return Err(YamlError::new(
+                        ErrorKind::LessIndentedWithoutParent,
+                        format!("Less indented but without parent: {:?}", line),
+                        self.scanner.next_pos,
+                        {
+                            self.scanner.next_line();
+                            self.scanner.done_pos
+                        },
+                    ));
+                }
+            }
+
+            let trimmed = line.trim_start_matches(' ');
+            let mut trimmed_pos = self.scanner.next_pos;
+            trimmed_pos.column += indent_count;
+
+            if trimmed.starts_with("- ") || trimmed == "-" {
+                let expected_indent_count =
+                    rest_indent_count + indent_count - first_indent_count;
+                self.handle_block_seq(expected_indent_count)?;
+            } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
+                // Flow style does not care indentation
+                self.handle_scalar(0, 0)?;
+            } else if trimmed.contains(": ") {
+                self.handle_block_map(rest_indent_count)?;
+            } else if trimmed.ends_with(":") {
+                self.handle_block_map(rest_indent_count)?;
+            } else if trimmed.starts_with("[") {
+                self.handle_flow_seq()?;
+            } else if trimmed.starts_with("{") {
+                self.handle_flow_map()?;
+            } else if line.trim_start_matches(' ').starts_with('\t')
+            {
                 return Err(YamlError::new(
                     ErrorKind::InvalidStartOfToken,
-                    format!("Tab(\\t) cannot be used as start of any token"),
+                    "Tab(\\t) cannot be used as start of any YAML node".to_string(),
                     self.scanner.next_pos,
                     self.scanner.next_pos,
                 ));
-            } else if next_char.is_comment() {
-                self.scanner.advance_till_linebreak();
-            } else if next_char.as_ref() == &'-'
-                && self.scanner.advance_if_starts_with("- ")
-            {
-                self.events.push(YamlEvent::SequenceStart(pos));
-                self.states.push(YamlState::InBlockSequnce(self.cur_idents));
-            } else if self.scanner.peek_till_linebreak_or_space().trim_end()
-                == "..."
-            {
-                self.states.pop();
-                self.events
-                    .push(YamlEvent::DocumentEnd(true, self.scanner.next_pos));
-                self.scanner.advance_till_linebreak_or_space();
-                self.cur_idents = 0;
             } else {
-                self.states.push(YamlState::InScalar);
+                self.handle_scalar(first_indent_count, rest_indent_count)?;
             }
-        } else {
-            self.events
-                .push(YamlEvent::DocumentEnd(false, self.scanner.done_pos));
-            self.states.pop();
         }
         Ok(())
     }
@@ -156,9 +178,16 @@ impl<'a> YamlTreeParser<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    const TEST_DATA_FOLDER_PATH: &str = "yaml-test-suit-data";
+    const DESCRIPTION_FILE_NAME: &str = "===";
+    const INPUT_YAML_FILE_NAME: &str = "in.yaml";
+    const TEST_EVENT_FILE_NAME: &str = "test.event";
 
     #[test]
     fn test_document_explcitly_start() {
@@ -183,7 +212,7 @@ mod test {
                 YamlEvent::Scalar(
                     "a".to_string(),
                     YamlPosition::new(4, 1),
-                    YamlPosition::new(4, 2)
+                    YamlPosition::new(4, 1)
                 ),
                 YamlEvent::DocumentEnd(true, YamlPosition::new(5, 1)),
                 YamlEvent::StreamEnd,
@@ -202,5 +231,55 @@ mod test {
                 YamlEvent::StreamEnd,
             ]
         )
+    }
+
+    #[test]
+    fn yaml_test_suit() {
+        let test_data_dir =
+            std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+                .join(TEST_DATA_FOLDER_PATH);
+
+        for entry in std::fs::read_dir(test_data_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                if path.join(DESCRIPTION_FILE_NAME).exists() {
+                    run_test(&path);
+                } else {
+                    for dir_entry in std::fs::read_dir(&path).unwrap() {
+                        let entry = dir_entry.unwrap();
+                        let path = entry.path();
+                        if path.join(DESCRIPTION_FILE_NAME).exists() {
+                            run_test(&path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn run_test(path: &Path) {
+        let test_name = read_file(&path.join(DESCRIPTION_FILE_NAME));
+        let input_yaml = read_file(&path.join(INPUT_YAML_FILE_NAME));
+        let expected_events = read_file(&path.join(TEST_EVENT_FILE_NAME));
+
+        let result = YamlTreeParser::parse(&input_yaml);
+        eprintln!("{}: {test_name}", path.file_name().unwrap().display());
+
+        if path.join("error").exists() {
+            assert!(result.is_err());
+        } else {
+            let mut events_str = String::new();
+            for event in result.unwrap() {
+                events_str.push_str(&event.to_string());
+                events_str.push('\n');
+            }
+
+            assert_eq!(expected_events, events_str);
+        }
+    }
+
+    fn read_file(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
     }
 }

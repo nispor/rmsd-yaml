@@ -2,59 +2,50 @@
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub(crate) enum YamlState {
-    InStream,
-    InDocument,
-    InBlockMapKey(usize),
+    InBlockMapKey,
     InBlockMapValue,
-    InBlockSequnce(usize),
-    InFlowMapKey(usize),
+    InBlockSequnce,
+    InFlowMapKey,
     InFlowMapValue,
-    InFlowSequnce(usize),
-    InScalar,
+    InFlowSequnce,
     #[default]
     EndOfFile,
 }
 
 impl YamlState {
-    pub(crate) fn is_stream(&self) -> bool {
-        self == &Self::InDocument
-    }
-
-    pub(crate) fn is_document(&self) -> bool {
-        self == &Self::InDocument
-    }
-
     pub(crate) fn is_flow(&self) -> bool {
         matches!(
             self,
-            &Self::InFlowMapKey(_)
-                | &Self::InFlowMapValue
-                | &Self::InFlowSequnce(_)
+            &Self::InFlowMapKey | &Self::InFlowMapValue | &Self::InFlowSequnce
         )
     }
 
     pub(crate) fn is_block_map_key(&self) -> bool {
-        matches!(self, &Self::InBlockMapKey(_))
+        self == &Self::InBlockMapKey
+    }
+
+    pub(crate) fn is_block_map_value(&self) -> bool {
+        self == &Self::InBlockMapValue
     }
 
     pub(crate) fn is_seq(&self) -> bool {
-        matches!(self, &Self::InBlockSequnce(_) | &Self::InFlowSequnce(_))
+        matches!(self, &Self::InBlockSequnce | &Self::InFlowSequnce)
     }
 
-    pub(crate) fn is_scalar(&self) -> bool {
-        self == &Self::InScalar
+    pub(crate) fn is_block_seq(&self) -> bool {
+        self == &Self::InBlockSequnce
     }
 
     /// In map or sequence
     pub(crate) fn is_container(&self) -> bool {
         matches!(
             self,
-            &Self::InBlockMapKey(_)
+            &Self::InBlockMapKey
                 | &Self::InBlockMapValue
-                | &Self::InBlockSequnce(_)
-                | &Self::InFlowMapKey(_)
+                | &Self::InBlockSequnce
+                | &Self::InFlowMapKey
                 | &Self::InFlowMapValue
-                | &Self::InFlowSequnce(_)
+                | &Self::InFlowSequnce
         )
     }
 
