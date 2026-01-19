@@ -16,6 +16,9 @@ mod state;
 mod tag;
 mod tree;
 
+#[cfg(test)]
+pub(crate) mod testlib;
+
 pub use self::{
     //   deserializer::{RmsdDeserializer, from_str, to_value},
     error::{ErrorKind, YamlError},

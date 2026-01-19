@@ -1,28 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{YamlError, YamlEvent, YamlState, YamlTreeParser};
+use crate::{ErrorKind, YamlError, YamlEvent, YamlState, YamlTreeParser};
 
 impl<'a> YamlTreeParser<'a> {
     /// Consume the scanner till a block map is finished.
     pub(crate) fn handle_block_map(
         &mut self,
-        indent_count: usize,
+        first_indent_count: usize,
+        rest_indent_count: usize,
     ) -> Result<(), YamlError> {
         log::trace!(
-            "handle_block_map {} {:?}",
-            indent_count,
+            "handle_block_map {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
         self.push_event(YamlEvent::MapStart(self.scanner.next_pos));
-        let _next_indent_count = indent_count;
-        let mut value_first_indent_count = 0;
-        let mut value_rest_indent_count = 0;
+        self.push_state(YamlState::InBlockMapKey);
+        let mut value_first_indent_count = first_indent_count;
+        let mut value_rest_indent_count = first_indent_count;
+        let mut is_first_line = true;
         while let Some(line) = self.scanner.peek_line() {
+            let pre_pos = self.scanner.done_pos;
             if line.is_empty() {
+                self.scanner.next_line();
                 continue;
             }
             let cur_indent = line.chars().take_while(|c| *c == ' ').count();
-            if cur_indent < indent_count {
+            let desired_indent_count = if is_first_line {
+                is_first_line = false;
+                first_indent_count
+            } else {
+                rest_indent_count
+            };
+
+            if cur_indent < desired_indent_count {
                 break;
             }
 
@@ -30,28 +40,83 @@ impl<'a> YamlTreeParser<'a> {
                 self.handle_node(
                     value_first_indent_count,
                     value_rest_indent_count,
-                );
+                )?;
                 self.pop_state();
             } else {
+                if !self.cur_state().is_block_map_key() {
+                    self.push_state(YamlState::InBlockMapKey);
+                }
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                self.push_state(YamlState::InBlockMapKey);
-                self.handle_plain_scalar(indent_count, indent_count)?;
-                self.pop_state();
-                self.push_state(YamlState::InBlockMapValue);
-                if line.ends_with(":") {
+                self.handle_plain_scalar(
+                    desired_indent_count,
+                    desired_indent_count,
+                )?;
+                let trimmed_line = line.trim_end_matches(' ');
+                // TODO: Handle comment after `:`
+                if trimmed_line.ends_with(":") {
                     self.scanner.next_line();
-                    value_first_indent_count = indent_count + 1;
-                    value_rest_indent_count = indent_count + 1;
-                } else if let Some(offset) = line.find(": ") {
+                    if let Some(next_line) = self.scanner.peek_line() {
+                        let next_line_indent_count =
+                            next_line.chars().take_while(|c| *c == ' ').count();
+                        if next_line_indent_count < desired_indent_count {
+                            return Err(YamlError::new(
+                                ErrorKind::Bug,
+                                format!(
+                                    "Got less indented than parent: {}",
+                                    self.scanner.remains()
+                                ),
+                                self.scanner.done_pos,
+                                self.scanner.done_pos,
+                            ));
+                        } else {
+                            value_first_indent_count = next_line_indent_count;
+                            value_rest_indent_count = next_line_indent_count;
+                        }
+                    } else {
+                        // No next line after ':\n', so empty value
+                        self.push_event(YamlEvent::Scalar(
+                            None,
+                            String::new(),
+                            self.scanner.done_pos,
+                            self.scanner.done_pos,
+                        ));
+                    }
+                } else if trimmed_line.contains(": ") {
                     self.scanner.advance_offset(2);
                     value_first_indent_count = 0;
-                    value_rest_indent_count =
-                        line[..offset].chars().count() + 2;
+                    value_rest_indent_count = desired_indent_count + 2;
+                } else {
+                    return Err(YamlError::new(
+                        ErrorKind::Bug,
+                        format!(
+                            "Expecting ending with : or contains ': ', but \
+                             got {}",
+                            line
+                        ),
+                        self.scanner.done_pos,
+                        self.scanner.done_pos,
+                    ));
                 }
                 self.pop_state();
                 self.push_state(YamlState::InBlockMapValue);
+                self.handle_node(
+                    value_first_indent_count,
+                    value_rest_indent_count,
+                )?;
+                self.pop_state();
+            }
+            if pre_pos == self.scanner.done_pos {
+                return Err(YamlError::new(
+                    ErrorKind::Bug,
+                    format!(
+                        "handle_block_map(): Dead loop on: {:?}",
+                        self.scanner.remains()
+                    ),
+                    self.scanner.done_pos,
+                    self.scanner.done_pos,
+                ));
             }
         }
 
@@ -76,6 +141,8 @@ mod test {
 
     #[test]
     fn test_map_of_plain_scalar() {
+        crate::testlib::init_logger();
+
         assert_eq!(
             YamlTreeParser::parse("a: 1\nb: 2\n").unwrap(),
             vec![

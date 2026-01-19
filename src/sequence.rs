@@ -28,10 +28,24 @@ impl<'a> YamlTreeParser<'a> {
 
             if trimmed == "-" {
                 self.scanner.next_line();
-                self.handle_node(indent_count + 1, indent_count + 1)?;
+                if let Some(next_line) = self.scanner.peek_line() {
+                    let next_indent =
+                        next_line.chars().take_while(|c| *c == ' ').count();
+                    self.handle_node(next_indent, next_indent)?;
+                } else {
+                    if self.scanner.remains().is_empty() {
+                        // Empty array
+                        self.push_event(YamlEvent::Scalar(
+                            None,
+                            String::new(),
+                            self.scanner.done_pos,
+                            self.scanner.done_pos,
+                        ));
+                    }
+                }
             } else if trimmed.starts_with("- ") {
-                self.scanner.advance(indent_count + 2);
-                self.handle_node(0, indent_count)?;
+                self.scanner.advance(cur_indent + 2);
+                self.handle_node(0, cur_indent + 2)?;
             } else {
                 return Err(YamlError::new(
                     ErrorKind::InvalidSequnceStartIndicator,

@@ -31,7 +31,10 @@ impl<'a> YamlTreeParser<'a> {
                 '|' => {
                     self.scanner.advance_till_non_space();
                     self.scanner.next_char();
-                    self.handle_literal_block_scalar()?;
+                    self.handle_literal_block_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                    )?;
                 }
                 '>' => {
                     self.scanner.advance_till_non_space();
@@ -65,8 +68,14 @@ impl<'a> YamlTreeParser<'a> {
     /// 3. Less indention
     pub(crate) fn handle_literal_block_scalar(
         &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
     ) -> Result<(), YamlError> {
-        log::trace!("handle_literal_block_scalar {:?}", self.scanner.remains());
+        log::trace!(
+            "handle_literal_block_scalar {first_indent_count} \
+             {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
         let mut ret = String::new();
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
@@ -122,7 +131,7 @@ impl<'a> YamlTreeParser<'a> {
 
             let leading_space_count = self.scanner.count_block_identation();
             let desired_indent = if let Some(d) = indentation_indicator {
-                d
+                d + rest_indent_count
             } else {
                 leading_space_count
             };
@@ -139,6 +148,10 @@ impl<'a> YamlTreeParser<'a> {
                     } else {
                         break;
                     }
+                } else if self.cur_state().is_block_map_value()
+                    && line.contains(": ")
+                {
+                    break;
                 } else if let Some(line) = self.scanner.next_line() {
                     // Remove indent then append
                     ret.push_str(&line[desired_indent..]);
@@ -272,16 +285,26 @@ impl<'a> YamlTreeParser<'a> {
                     ));
                     return Ok(());
                 } else if line.ends_with(":")
-                    && line != ":"
                     && let Some(offset) = line.find(":")
                 {
                     self.scanner.advance_offset(offset);
-                    self.push_event(YamlEvent::Scalar(
-                        tag,
-                        line[expected_indent_count..line.len() - 1].to_string(),
-                        start_pos,
-                        self.scanner.done_pos,
-                    ));
+                    if line == ":" {
+                        // Empty key
+                        self.push_event(YamlEvent::Scalar(
+                            tag,
+                            String::new(),
+                            start_pos,
+                            self.scanner.done_pos,
+                        ));
+                    } else {
+                        self.push_event(YamlEvent::Scalar(
+                            tag,
+                            line[expected_indent_count..line.len() - 1]
+                                .to_string(),
+                            start_pos,
+                            self.scanner.done_pos,
+                        ));
+                    }
                     return Ok(());
                 } else {
                     self.scanner.advance_till_linebreak();
@@ -449,8 +472,7 @@ fn fold_string(string_to_fold: Vec<&str>) -> String {
             has_new_line_break = false;
         }
     }
-
-    ret
+    ret.trim_end_matches('\n').to_string()
 }
 
 #[cfg(test)]

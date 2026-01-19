@@ -32,11 +32,19 @@ impl std::fmt::Display for YamlEvent {
             Self::MapEnd(_) => write!(f, "-MAP"),
             Self::Scalar(tag, v, _, _) => {
                 if let Some(tag) = tag {
-                    write!(f, "=VAL {tag} :{v}")
+                    write!(f, "=VAL {tag} {}", show_scalar_str(v))
                 } else {
-                    write!(f, "=VAL :{v}")
+                    write!(f, "=VAL {}", show_scalar_str(v))
                 }
             }
         }
+    }
+}
+
+fn show_scalar_str(v: &str) -> String {
+    if v.contains("\n") {
+        format!("|{}", v.replace("\n", "\\n"))
+    } else {
+        format!(":{}", v)
     }
 }
