@@ -13,8 +13,8 @@ mod scalar;
 mod scanner;
 mod sequence;
 mod state;
+mod tag;
 mod tree;
-mod yaml_char;
 
 pub use self::{
     //   deserializer::{RmsdDeserializer, from_str, to_value},
@@ -27,6 +27,6 @@ pub use self::{
     //    value::{YamlValue, YamlValueData},
 };
 pub(crate) use self::{
-    event::YamlEvent, scanner::YamlScanner, state::YamlState,
+    event::YamlEvent, scanner::YamlScanner, state::YamlState, tag::YamlTag,
     tree::YamlTreeParser,
 };

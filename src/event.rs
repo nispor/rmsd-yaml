@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::YamlPosition;
+use crate::{YamlPosition, YamlTag};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum YamlEvent {
+pub(crate) enum YamlEvent {
     StreamStart,
     StreamEnd,
     /// Whether document start with `---`
@@ -14,7 +14,7 @@ pub enum YamlEvent {
     SequenceEnd(YamlPosition),
     MapStart(YamlPosition),
     MapEnd(YamlPosition),
-    Scalar(String, YamlPosition, YamlPosition),
+    Scalar(Option<YamlTag>, String, YamlPosition, YamlPosition),
 }
 
 impl std::fmt::Display for YamlEvent {
@@ -30,7 +30,13 @@ impl std::fmt::Display for YamlEvent {
             Self::SequenceEnd(_) => write!(f, "-SEQ"),
             Self::MapStart(_) => write!(f, "+MAP"),
             Self::MapEnd(_) => write!(f, "-MAP"),
-            Self::Scalar(v, _, _) => write!(f, "=VAL :{v}"),
+            Self::Scalar(tag, v, _, _) => {
+                if let Some(tag) = tag {
+                    write!(f, "=VAL {tag} :{v}")
+                } else {
+                    write!(f, "=VAL :{v}")
+                }
+            }
         }
     }
 }

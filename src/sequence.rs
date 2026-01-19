@@ -9,14 +9,13 @@ impl<'a> YamlTreeParser<'a> {
         &mut self,
         indent_count: usize,
     ) -> Result<(), YamlError> {
-        eprintln!(
+        log::trace!(
             "handle_block_seq {} {:?}",
             indent_count,
             self.scanner.remains()
         );
-        self.events
-            .push(YamlEvent::SequenceStart(self.scanner.next_pos));
-        self.states.push(YamlState::InBlockSequnce);
+        self.push_event(YamlEvent::SequenceStart(self.scanner.next_pos));
+        self.push_state(YamlState::InBlockSequnce);
         while let Some(line) = self.scanner.peek_line() {
             if line.is_empty() {
                 continue;
@@ -44,9 +43,8 @@ impl<'a> YamlTreeParser<'a> {
             }
         }
 
-        self.events
-            .push(YamlEvent::SequenceEnd(self.scanner.done_pos));
-        self.states.pop();
+        self.push_event(YamlEvent::SequenceEnd(self.scanner.done_pos));
+        self.pop_state();
         Ok(())
     }
 
@@ -71,11 +69,13 @@ mod test {
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
                 YamlEvent::SequenceStart(YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "abc".to_string(),
                     YamlPosition::new(1, 5),
                     YamlPosition::new(1, 7)
                 ),
                 YamlEvent::Scalar(
+                    None,
                     "def".to_string(),
                     YamlPosition::new(2, 5),
                     YamlPosition::new(2, 7)

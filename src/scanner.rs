@@ -42,17 +42,17 @@ impl<'a> YamlScanner<'a> {
     }
 
     pub(crate) fn peek_till_linebreak_or_space(&self) -> &str {
-        self
-            .remains()
+        self.remains()
             .split(['\r', '\n', ' '])
-            .next().unwrap_or_default()
+            .next()
+            .unwrap_or_default()
     }
 
     pub(crate) fn peek_till_linebreak(&self) -> &str {
-        self
-            .remains()
+        self.remains()
             .split(['\r', '\n'])
-            .next().unwrap_or_default()
+            .next()
+            .unwrap_or_default()
     }
 
     /// Count leading spaces of the first non-empty line
@@ -94,7 +94,7 @@ impl<'a> YamlScanner<'a> {
 
     pub(crate) fn next_line(&mut self) -> Option<&'a str> {
         let ret = self.peek_line();
-        eprintln!("next line {:?}", ret);
+        log::trace!("next line {:?}", ret);
         self.advance_till_linebreak();
         ret
     }
@@ -147,7 +147,7 @@ impl<'a> YamlScanner<'a> {
 
     pub(crate) fn next_char(&mut self) -> Option<char> {
         let c = self.iter.next()?.1;
-        eprintln!("next char {:?}", c);
+        log::trace!("next char {:?}", c);
         // Windows use `\r\n` for single line break, so we should not increase
         // line number if found `\r` and next one is `\n`.
         if c == '\n' || (c == '\r' && self.peek_char() != Some('\n')) {

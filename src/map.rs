@@ -8,12 +8,12 @@ impl<'a> YamlTreeParser<'a> {
         &mut self,
         indent_count: usize,
     ) -> Result<(), YamlError> {
-        eprintln!(
+        log::trace!(
             "handle_block_map {} {:?}",
             indent_count,
             self.scanner.remains()
         );
-        self.events.push(YamlEvent::MapStart(self.scanner.next_pos));
+        self.push_event(YamlEvent::MapStart(self.scanner.next_pos));
         let _next_indent_count = indent_count;
         let mut value_first_indent_count = 0;
         let mut value_rest_indent_count = 0;
@@ -31,15 +31,15 @@ impl<'a> YamlTreeParser<'a> {
                     value_first_indent_count,
                     value_rest_indent_count,
                 );
-                self.states.pop();
+                self.pop_state();
             } else {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                self.states.push(YamlState::InBlockMapKey);
+                self.push_state(YamlState::InBlockMapKey);
                 self.handle_plain_scalar(indent_count, indent_count)?;
-                self.states.pop();
-                self.states.push(YamlState::InBlockMapValue);
+                self.pop_state();
+                self.push_state(YamlState::InBlockMapValue);
                 if line.ends_with(":") {
                     self.scanner.next_line();
                     value_first_indent_count = indent_count + 1;
@@ -50,13 +50,13 @@ impl<'a> YamlTreeParser<'a> {
                     value_rest_indent_count =
                         line[..offset].chars().count() + 2;
                 }
-                self.states.pop();
-                self.states.push(YamlState::InBlockMapValue);
+                self.pop_state();
+                self.push_state(YamlState::InBlockMapValue);
             }
         }
 
-        self.events.push(YamlEvent::MapEnd(self.scanner.done_pos));
-        self.states.pop();
+        self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
+        self.pop_state();
         Ok(())
     }
 
@@ -83,21 +83,25 @@ mod test {
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
                 YamlEvent::MapStart(YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "a".to_string(),
                     YamlPosition::new(1, 1),
                     YamlPosition::new(1, 1)
                 ),
                 YamlEvent::Scalar(
+                    None,
                     "1".to_string(),
                     YamlPosition::new(1, 4),
                     YamlPosition::new(1, 4)
                 ),
                 YamlEvent::Scalar(
+                    None,
                     "b".to_string(),
                     YamlPosition::new(2, 1),
                     YamlPosition::new(2, 1)
                 ),
                 YamlEvent::Scalar(
+                    None,
                     "2".to_string(),
                     YamlPosition::new(2, 4),
                     YamlPosition::new(2, 4)
@@ -118,11 +122,13 @@ mod test {
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
                 YamlEvent::MapStart(YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "a".to_string(),
                     YamlPosition::new(1, 1),
                     YamlPosition::new(1, 1)
                 ),
                 YamlEvent::Scalar(
+                    None,
                     "b".to_string(),
                     YamlPosition::new(2, 3),
                     YamlPosition::new(2, 3)

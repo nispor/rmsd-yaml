@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlTreeParser,
-};
+use crate::{ErrorKind, YamlError, YamlEvent, YamlTag, YamlTreeParser};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 enum ChompingMethod {
@@ -19,13 +17,12 @@ impl<'a> YamlTreeParser<'a> {
         first_indent_count: usize,
         rest_indent_count: usize,
     ) -> Result<(), YamlError> {
-        eprintln!(
+        log::trace!(
             "handle_scalar {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
         if let Some(line) = self.scanner.peek_line()
-            && let Some(next_char) =
-                line.trim_start_matches(' ').chars().next()
+            && let Some(next_char) = line.trim_start_matches(' ').chars().next()
         {
             if line == "..." {
                 return Ok(());
@@ -58,8 +55,6 @@ impl<'a> YamlTreeParser<'a> {
                     )?;
                 }
             }
-        } else {
-            self.states.pop();
         }
         Ok(())
     }
@@ -71,7 +66,7 @@ impl<'a> YamlTreeParser<'a> {
     pub(crate) fn handle_literal_block_scalar(
         &mut self,
     ) -> Result<(), YamlError> {
-        eprintln!("handle_literal_block_scalar {:?}", self.scanner.remains());
+        log::trace!("handle_literal_block_scalar {:?}", self.scanner.remains());
         let mut ret = String::new();
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
@@ -172,17 +167,13 @@ impl<'a> YamlTreeParser<'a> {
             ChompingMethod::Strip => {
                 // the final line break and any trailing empty lines are
                 // excluded from the scalar’s content.
-                ret = ret
-                    .trim_end_matches(['\n', '\r'])
-                    .to_string();
+                ret = ret.trim_end_matches(['\n', '\r']).to_string();
             }
             ChompingMethod::Clip => {
                 // the final line break character is preserved in the scalar’s
                 // content. However, any trailing empty lines are excluded from
                 // the scalar’s content.
-                ret = ret
-                    .trim_end_matches(['\n', '\r'])
-                    .to_string();
+                ret = ret.trim_end_matches(['\n', '\r']).to_string();
                 ret.push('\n');
             }
             ChompingMethod::Keep => (),
@@ -190,8 +181,7 @@ impl<'a> YamlTreeParser<'a> {
 
         let end_pos = self.scanner.done_pos;
 
-        self.events.push(YamlEvent::Scalar(ret, start_pos, end_pos));
-        self.states.pop();
+        self.push_event(YamlEvent::Scalar(None, ret, start_pos, end_pos));
         Ok(())
     }
 
@@ -222,13 +212,14 @@ impl<'a> YamlTreeParser<'a> {
         first_indent_count: usize,
         rest_indent_count: usize,
     ) -> Result<(), YamlError> {
-        eprintln!(
+        log::trace!(
             "handle_plain_scalar {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
         let mut start_pos = self.scanner.next_pos;
         let mut string_to_fold: Vec<&str> = Vec::new();
         let mut is_first_line = true;
+        let mut tag: Option<YamlTag> = None;
         while let Some(line) = self.scanner.peek_line() {
             let pre_pos = self.scanner.done_pos;
             let cur_indent_count =
@@ -254,10 +245,16 @@ impl<'a> YamlTreeParser<'a> {
             }
 
             let trimmed = line.trim_start_matches(' ');
-
             if self.cur_state().is_block_seq() && trimmed.starts_with("- ") {
                 break;
             }
+
+            if trimmed.starts_with("!") {
+                tag = self.handle_tag();
+            }
+            let Some(line) = self.scanner.peek_line() else {
+                continue;
+            };
 
             self.validate_plain_scalar(line)?;
 
@@ -267,7 +264,8 @@ impl<'a> YamlTreeParser<'a> {
                 //      when contained inside an implicit key.
                 if let Some(offset) = line.find(": ") {
                     self.scanner.advance_offset(offset);
-                    self.events.push(YamlEvent::Scalar(
+                    self.push_event(YamlEvent::Scalar(
+                        tag,
                         line[expected_indent_count..offset].to_string(),
                         start_pos,
                         self.scanner.done_pos,
@@ -278,7 +276,8 @@ impl<'a> YamlTreeParser<'a> {
                     && let Some(offset) = line.find(":")
                 {
                     self.scanner.advance_offset(offset);
-                    self.events.push(YamlEvent::Scalar(
+                    self.push_event(YamlEvent::Scalar(
+                        tag,
                         line[expected_indent_count..line.len() - 1].to_string(),
                         start_pos,
                         self.scanner.done_pos,
@@ -325,9 +324,7 @@ impl<'a> YamlTreeParser<'a> {
             end_pos.column = start_pos.column + str_val.chars().count() - 1;
         }
 
-        self.events
-            .push(YamlEvent::Scalar(str_val, start_pos, end_pos));
-        self.states.pop();
+        self.push_event(YamlEvent::Scalar(tag, str_val, start_pos, end_pos));
         Ok(())
     }
 
@@ -338,9 +335,7 @@ impl<'a> YamlTreeParser<'a> {
         //      the “:”, “?” and “-” indicators may be used as the first
         //      character if followed by a non-space “safe” character, as
         //      this causes no ambiguity.
-        if let Some(first_char) =
-            line.trim_start_matches(' ').chars().next()
-        {
+        if let Some(first_char) = line.trim_start_matches(' ').chars().next() {
             match first_char {
                 ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
                 | '>' | '\'' | '"' | '%' | '@' | '`' => {
@@ -355,9 +350,7 @@ impl<'a> YamlTreeParser<'a> {
                     ));
                 }
                 ':' | '?' | '-' => {
-                    if Some(' ')
-                        == self.scanner.remains().chars().nth(1)
-                    {
+                    if Some(' ') == self.scanner.remains().chars().nth(1) {
                         return Err(YamlError::new(
                             ErrorKind::InvalidPlainScalarStart,
                             format!(
@@ -411,9 +404,7 @@ impl<'a> YamlTreeParser<'a> {
         //      “{”, “}” and “,” characters.
         if self.cur_state().is_flow() || self.cur_state().is_block_map_key() {
             let pre_pos = self.scanner.done_pos;
-            if let Some(offset) =
-                line.find(['[', ']', '{', '}'])
-            {
+            if let Some(offset) = line.find(['[', ']', '{', '}']) {
                 self.scanner.advance_offset(offset);
                 return Err(YamlError::new(
                     ErrorKind::AmbiguityPlainScalar,
@@ -477,6 +468,7 @@ mod test {
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "abc \ndef\n".to_string(),
                     YamlPosition::new(2, 2),
                     YamlPosition::new(3, 5)
@@ -496,6 +488,7 @@ mod test {
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     " abc \n def\n".to_string(),
                     YamlPosition::new(2, 4),
                     YamlPosition::new(5, 3),
@@ -512,6 +505,7 @@ mod test {
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
+                None,
                 " abc \n def".to_string(),
                 YamlPosition::new(2, 4),
                 YamlPosition::new(3, 8),
@@ -535,6 +529,7 @@ mod test {
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
+                None,
                 " abc \n def  \n\n\n".to_string(),
                 YamlPosition::new(2, 4),
                 YamlPosition::new(5, 1),
@@ -562,6 +557,7 @@ mod test {
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "abc\ndef\n".to_string(),
                     YamlPosition::new(3, 4),
                     YamlPosition::new(5, 1)
@@ -583,6 +579,7 @@ mod test {
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
+                    None,
                     "1st non-empty\n2nd non-empty 3rd non-empty".to_string(),
                     YamlPosition::new(1, 1),
                     YamlPosition::new(4, 14)
