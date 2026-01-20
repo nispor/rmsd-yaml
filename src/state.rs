@@ -28,10 +28,6 @@ impl YamlState {
         self == &Self::InBlockMapValue
     }
 
-    pub(crate) fn is_seq(&self) -> bool {
-        matches!(self, &Self::InBlockSequnce | &Self::InFlowSequnce)
-    }
-
     pub(crate) fn is_block_seq(&self) -> bool {
         self == &Self::InBlockSequnce
     }
@@ -47,9 +43,5 @@ impl YamlState {
                 | &Self::InFlowMapValue
                 | &Self::InFlowSequnce
         )
-    }
-
-    pub(crate) fn eof(&self) -> bool {
-        self == &Self::EndOfFile
     }
 }

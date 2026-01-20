@@ -7,13 +7,13 @@
 
 use std::fmt::Write;
 
-use serde::{ser, Serialize};
+use serde::{Serialize, ser};
 
-use crate::{to_scalar_string, YamlError};
+use crate::{ErrorKind, YamlError, YamlPosition, to_scalar_string};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct RmsdSerializeOption {
+pub struct YamlSerializeOption {
     /// Whether include `---\n` at the beginning. Default is false.
     pub leading_start_indicator: bool,
     /// How many space should be used for each indent level. Default is 2.
@@ -22,7 +22,7 @@ pub struct RmsdSerializeOption {
     pub max_width: usize,
 }
 
-impl Default for RmsdSerializeOption {
+impl Default for YamlSerializeOption {
     fn default() -> Self {
         Self {
             leading_start_indicator: false,
@@ -33,23 +33,28 @@ impl Default for RmsdSerializeOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct RmsdSerializer {
-    option: RmsdSerializeOption,
+pub struct YamlSerializer {
+    option: YamlSerializeOption,
     output: String,
     current_indent_level: usize,
 }
 
 pub fn to_string_with_opt<T>(
     value: &T,
-    option: RmsdSerializeOption,
+    option: YamlSerializeOption,
 ) -> Result<String, YamlError>
 where
     T: Serialize,
 {
     if option.indent_count < 2 {
-        return Err(YamlError::indent_to_small());
+        return Err(YamlError::new(
+            ErrorKind::IndentTooSmall,
+            "Minimum supported indent count is 2".to_string(),
+            YamlPosition::EOF,
+            YamlPosition::EOF,
+        ));
     }
-    let mut serializer = RmsdSerializer {
+    let mut serializer = YamlSerializer {
         output: if option.leading_start_indicator {
             "---\n".to_string()
         } else {
@@ -72,10 +77,10 @@ pub fn to_string<T>(value: &T) -> Result<String, YamlError>
 where
     T: Serialize,
 {
-    to_string_with_opt(value, RmsdSerializeOption::default())
+    to_string_with_opt(value, YamlSerializeOption::default())
 }
 
-impl RmsdSerializer {
+impl YamlSerializer {
     fn get_indent_count(&self) -> usize {
         if !self.output.ends_with("\n")
             || self.output.ends_with("- ")
@@ -92,7 +97,7 @@ impl RmsdSerializer {
     }
 }
 
-impl ser::Serializer for &mut RmsdSerializer {
+impl ser::Serializer for &mut YamlSerializer {
     type Ok = ();
 
     type Error = YamlError;
@@ -349,7 +354,7 @@ impl ser::Serializer for &mut RmsdSerializer {
 //
 // This impl is SerializeSeq so these methods are called after `serialize_seq`
 // is called on the Serializer.
-impl ser::SerializeSeq for &mut RmsdSerializer {
+impl ser::SerializeSeq for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -375,7 +380,7 @@ impl ser::SerializeSeq for &mut RmsdSerializer {
     }
 }
 
-impl ser::SerializeTuple for &mut RmsdSerializer {
+impl ser::SerializeTuple for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -395,7 +400,7 @@ impl ser::SerializeTuple for &mut RmsdSerializer {
     }
 }
 
-impl ser::SerializeTupleStruct for &mut RmsdSerializer {
+impl ser::SerializeTupleStruct for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -415,7 +420,7 @@ impl ser::SerializeTupleStruct for &mut RmsdSerializer {
     }
 }
 
-impl ser::SerializeTupleVariant for &mut RmsdSerializer {
+impl ser::SerializeTupleVariant for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -431,7 +436,7 @@ impl ser::SerializeTupleVariant for &mut RmsdSerializer {
     }
 }
 
-impl ser::SerializeMap for &mut RmsdSerializer {
+impl ser::SerializeMap for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -465,7 +470,7 @@ impl ser::SerializeMap for &mut RmsdSerializer {
 
 // Structs are like maps in which the keys are constrained to be compile-time
 // constant strings.
-impl ser::SerializeStruct for &mut RmsdSerializer {
+impl ser::SerializeStruct for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -494,7 +499,7 @@ impl ser::SerializeStruct for &mut RmsdSerializer {
     }
 }
 
-impl ser::SerializeStructVariant for &mut RmsdSerializer {
+impl ser::SerializeStructVariant for &mut YamlSerializer {
     type Ok = ();
     type Error = YamlError;
 
@@ -517,12 +522,11 @@ impl ser::SerializeStructVariant for &mut RmsdSerializer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ErrorKind;
 
     #[test]
     fn test_indent_too_small() {
-        let opt = RmsdSerializeOption {
+        let opt = YamlSerializeOption {
             indent_count: 1,
             ..Default::default()
         };

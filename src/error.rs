@@ -52,6 +52,8 @@ pub enum ErrorKind {
     InvalidSequnceStartIndicator,
     /// Got less indented data without parent container
     LessIndentedWithoutParent,
+    /// No support of multiple documents
+    NoSupportMultipleDocuments,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -85,6 +87,8 @@ impl std::fmt::Display for ErrorKind {
                     "invalid_sequence_start_indicator",
                 Self::LessIndentedWithoutParent =>
                     "less_indented_without_parent",
+                Self::NoSupportMultipleDocuments =>
+                    "no_support_mulitple_documents",
             }
         )
     }
@@ -95,21 +99,7 @@ impl TryFrom<&str> for ErrorKind {
 
     fn try_from(value: &str) -> Result<Self, YamlError> {
         Ok(match value {
-            "bug" => Self::Bug,
-            "invalid_position" => Self::InvalidPosition,
-            "start_with_reserved_indicator" => Self::StartWithReservedIndicator,
-            "invalid_escape_scalar" => Self::InvalidEscapeScalar,
-            "unfinished_quote" => Self::UnfinishedQuote,
-            "invalid_error_type" => Self::InvalidErrorType,
-            "unexpected_yaml_node_type" => Self::UnexpectedYamlNodeType,
-            "invalid_bool" => Self::InvalidBool,
-            "invalid_number" => Self::InvalidNumber,
-            "number_overflow" => Self::NumberOverflow,
-            "unfinished_map_indicator" => Self::UnfinishedMapIndicator,
-            "unfinished_sequence_indicator" => {
-                Self::UnfinishedSequenceIndicator
-            }
-            "indent_too_small" => Self::IndentTooSmall,
+            s if s == Self::Bug.to_string() => Self::Bug,
             _ => {
                 return Err(YamlError::new(
                     ErrorKind::InvalidErrorType,

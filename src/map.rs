@@ -1,19 +1,133 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ErrorKind, YamlError, YamlEvent, YamlState, YamlTreeParser};
+use std::hash::{DefaultHasher, Hasher};
 
-impl<'a> YamlTreeParser<'a> {
+use indexmap::IndexMap;
+use serde::de::{DeserializeSeed, MapAccess};
+
+use crate::{
+    ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser,
+    YamlPosition, YamlState, YamlValue,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct YamlValueMap(IndexMap<YamlValue, YamlValue>);
+
+impl std::hash::Hash for YamlValueMap {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        let mut h: u64 = 0;
+        for (k, v) in &self.0 {
+            let mut hasher = DefaultHasher::new();
+            k.hash(&mut hasher);
+            v.hash(&mut hasher);
+            h ^= hasher.finish();
+        }
+        state.write_u64(h);
+    }
+}
+
+impl YamlValueMap {
+    pub(crate) fn new() -> Self {
+        Self(IndexMap::new())
+    }
+
+    pub(crate) fn insert(&mut self, key: YamlValue, val: YamlValue) {
+        self.0.insert(key, val);
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<(YamlValue, YamlValue)> {
+        self.0.pop()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YamlValueMapAccess {
+    data: YamlValueMap,
+    // Used to cache key drained from data
+    cached_key: Option<YamlValue>,
+    // Used to cache value drained from data
+    cached_value: Option<YamlValue>,
+}
+
+impl YamlValueMapAccess {
+    pub(crate) fn new(data: YamlValueMap) -> Self {
+        Self {
+            data,
+            cached_key: None,
+            cached_value: None,
+        }
+    }
+}
+
+impl<'de> MapAccess<'de> for YamlValueMapAccess {
+    type Error = YamlError;
+
+    fn next_key_seed<K>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: DeserializeSeed<'de>,
+    {
+        let key = if let Some(k) = self.cached_key.take() {
+            k
+        } else if let Some((k, v)) = self.data.pop() {
+            self.cached_value = Some(v);
+            k
+        } else {
+            return Ok(None);
+        };
+
+        seed.deserialize(&mut YamlDeserializer { parsed: key })
+            .map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: DeserializeSeed<'de>,
+    {
+        let value = if let Some(v) = self.cached_value.take() {
+            v
+        } else if let Some((k, v)) = self.data.pop() {
+            self.cached_key = Some(k);
+            v
+        } else {
+            return Err(YamlError::new(
+                ErrorKind::UnexpectedYamlNodeType,
+                "Expecting a map value, but none".to_string(),
+                YamlPosition::EOF,
+                YamlPosition::EOF,
+            ));
+        };
+
+        seed.deserialize(&mut YamlDeserializer { parsed: value })
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.data.len())
+    }
+}
+
+impl<'a> YamlParser<'a> {
     /// Consume the scanner till a block map is finished.
     pub(crate) fn handle_block_map(
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
             "handle_block_map {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
-        self.push_event(YamlEvent::MapStart(self.scanner.next_pos));
+        self.push_event(YamlEvent::MapStart(tag, self.scanner.next_pos));
         self.push_state(YamlState::InBlockMapKey);
         let mut value_first_indent_count = first_indent_count;
         let mut value_rest_indent_count = first_indent_count;
@@ -40,6 +154,7 @@ impl<'a> YamlTreeParser<'a> {
                 self.handle_node(
                     value_first_indent_count,
                     value_rest_indent_count,
+                    None,
                 )?;
                 self.pop_state();
             } else {
@@ -49,10 +164,17 @@ impl<'a> YamlTreeParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
+                let _spliter_offset = line.find(": ");
                 self.handle_plain_scalar(
                     desired_indent_count,
                     desired_indent_count,
+                    None,
                 )?;
+                let Some(line) = self.scanner.peek_line() else {
+                    continue;
+                };
+                self.pop_state();
+                self.push_state(YamlState::InBlockMapValue);
                 let trimmed_line = line.trim_end_matches(' ');
                 // TODO: Handle comment after `:`
                 if trimmed_line.ends_with(":") {
@@ -82,11 +204,14 @@ impl<'a> YamlTreeParser<'a> {
                             self.scanner.done_pos,
                             self.scanner.done_pos,
                         ));
+                        break;
                     }
-                } else if trimmed_line.contains(": ") {
+                } else if line.contains(": ") {
                     self.scanner.advance_offset(2);
                     value_first_indent_count = 0;
-                    value_rest_indent_count = desired_indent_count + 2;
+                    value_rest_indent_count = self.scanner.done_pos.column;
+                } else if trimmed_line.is_empty() {
+                    self.scanner.next_line();
                 } else {
                     return Err(YamlError::new(
                         ErrorKind::Bug,
@@ -99,11 +224,10 @@ impl<'a> YamlTreeParser<'a> {
                         self.scanner.done_pos,
                     ));
                 }
-                self.pop_state();
-                self.push_state(YamlState::InBlockMapValue);
                 self.handle_node(
                     value_first_indent_count,
                     value_rest_indent_count,
+                    None,
                 )?;
                 self.pop_state();
             }
@@ -127,7 +251,10 @@ impl<'a> YamlTreeParser<'a> {
 
     /// Consume the scanner till a flow map is finished and insert the parsed
     /// event.
-    pub(crate) fn handle_flow_map(&mut self) -> Result<(), YamlError> {
+    pub(crate) fn handle_flow_map(
+        &mut self,
+        _tag: Option<String>,
+    ) -> Result<(), YamlError> {
         todo!()
     }
 }
@@ -144,11 +271,11 @@ mod test {
         crate::testlib::init_logger();
 
         assert_eq!(
-            YamlTreeParser::parse("a: 1\nb: 2\n").unwrap(),
+            YamlParser::parse_to_events("a: 1\nb: 2\n").unwrap(),
             vec![
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-                YamlEvent::MapStart(YamlPosition::new(1, 1)),
+                YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
                     None,
                     "a".to_string(),
@@ -183,11 +310,11 @@ mod test {
     #[test]
     fn test_map_of_plain_scalar_in_two_lines() {
         assert_eq!(
-            YamlTreeParser::parse("a:\n  b\n").unwrap(),
+            YamlParser::parse_to_events("a:\n  b\n").unwrap(),
             vec![
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-                YamlEvent::MapStart(YamlPosition::new(1, 1)),
+                YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
                 YamlEvent::Scalar(
                     None,
                     "a".to_string(),
