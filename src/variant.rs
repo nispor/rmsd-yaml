@@ -5,10 +5,7 @@ use serde::de::{
     value::StrDeserializer,
 };
 
-use crate::{
-    ErrorKind, YamlDeserializer, YamlError, YamlValue,
-    YamlValueData,
-};
+use crate::{ErrorKind, YamlDeserializer, YamlError, YamlValue, YamlValueData};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct YamlValueEnumAccess {

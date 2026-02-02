@@ -13,7 +13,7 @@ const TEST_EVENT_FILE_NAME: &str = "test.event";
 
 #[test]
 fn yaml_test_suit() {
-    crate::testlib::init_logger();
+    super::testlib::init_logger();
 
     #[rustfmt::skip]
         let supported_tests: &[&str] = &[

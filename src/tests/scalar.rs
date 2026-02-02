@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use pretty_assertions::assert_eq;
+
+use crate::{YamlEvent, YamlParser, YamlPosition};
+
+#[test]
+fn test_block_scalar_literal_block_clip_auto() {
+    super::testlib::init_logger();
+
+    assert_eq!(
+        YamlParser::parse_to_events("--- |\n abc \n def\n").unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                "abc \ndef\n".to_string(),
+                YamlPosition::new(2, 2),
+                YamlPosition::new(3, 5)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(3, 5)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}
+
+#[test]
+fn test_block_scalar_literal_block_clip_fixed_ident() {
+    assert_eq!(
+        YamlParser::parse_to_events("--- |3\n    abc \n    def\n   \n  \n")
+            .unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                " abc \n def\n".to_string(),
+                YamlPosition::new(2, 4),
+                YamlPosition::new(5, 3),
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(5, 3)),
+            YamlEvent::StreamEnd,
+        ]
+    );
+}
+
+#[test]
+fn test_block_scalar_literal_block_strip_fixed_ident() {
+    let expected = vec![
+        YamlEvent::StreamStart,
+        YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+        YamlEvent::Scalar(
+            None,
+            " abc \n def".to_string(),
+            YamlPosition::new(2, 4),
+            YamlPosition::new(3, 8),
+        ),
+        YamlEvent::DocumentEnd(false, YamlPosition::new(3, 8)),
+        YamlEvent::StreamEnd,
+    ];
+    assert_eq!(
+        YamlParser::parse_to_events("--- |3+\n    abc \n    def\n").unwrap(),
+        expected
+    );
+    assert_eq!(
+        YamlParser::parse_to_events("--- |+3\n    abc \n    def\n").unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn test_block_scalar_literal_block_keep_fixed_ident() {
+    let expected = vec![
+        YamlEvent::StreamStart,
+        YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+        YamlEvent::Scalar(
+            None,
+            " abc \n def  \n\n\n".to_string(),
+            YamlPosition::new(2, 4),
+            YamlPosition::new(5, 1),
+        ),
+        YamlEvent::DocumentEnd(false, YamlPosition::new(5, 1)),
+        YamlEvent::StreamEnd,
+    ];
+    assert_eq!(
+        YamlParser::parse_to_events("--- |3-\n    abc \n    def  \n   \n\n")
+            .unwrap(),
+        expected
+    );
+    assert_eq!(
+        YamlParser::parse_to_events("--- |-3\n    abc \n    def  \n   \n\n")
+            .unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn test_block_scalar_literal_all_indented() {
+    assert_eq!(
+        YamlParser::parse_to_events("---\n   |\n   abc\n   def\n\n").unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                "abc\ndef\n".to_string(),
+                YamlPosition::new(3, 4),
+                YamlPosition::new(5, 1)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(5, 1)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}
+
+#[test]
+fn test_plain_scalar_folding() {
+    assert_eq!(
+        YamlParser::parse_to_events(
+            "1st non-empty\n\n 2nd non-empty \n\t3rd non-empty"
+        )
+        .unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                "1st non-empty\n2nd non-empty 3rd non-empty".to_string(),
+                YamlPosition::new(1, 1),
+                YamlPosition::new(4, 14)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(4, 14)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}
+
+#[test]
+fn test_double_quoted_scalar() {
+    assert_eq!(
+        YamlParser::parse_to_events("\"\n  foo \n \n  \tbar\n\n  baz\n \"")
+            .unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                " foo\nbar\nbaz ".to_string(),
+                YamlPosition::new(1, 1),
+                YamlPosition::new(7, 2)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(7, 2)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}
+
+#[test]
+fn test_block_folding_scalar_simple() {
+    assert_eq!(
+        YamlParser::parse_to_events(">\n folded\n text\n\n").unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                "folded text\n".to_string(),
+                YamlPosition::new(2, 1),
+                YamlPosition::new(4, 1)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(4, 1)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}
+
+#[test]
+fn test_block_folding_scalar_more_indented() {
+    assert_eq!(
+        YamlParser::parse_to_events(">\n  foo \n \n  \t bar\n\n  baz\n")
+            .unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                "foo \n\n\t bar\n\nbaz\n".to_string(),
+                YamlPosition::new(2, 1),
+                YamlPosition::new(6, 6)
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(6, 6)),
+            YamlEvent::StreamEnd,
+        ]
+    )
+}

@@ -11,79 +11,11 @@ enum ChompingMethod {
 }
 
 impl<'a> YamlParser<'a> {
-    /// Advance the scanner till scalar ends.
-    pub(crate) fn handle_scalar(
+    fn get_indent_indicator_and_chomping_method(
         &mut self,
-        first_indent_count: usize,
-        rest_indent_count: usize,
-        tag: Option<String>,
-    ) -> Result<(), YamlError> {
-        log::trace!(
-            "handle_scalar {first_indent_count} {rest_indent_count} {:?}",
-            self.scanner.remains()
-        );
-        if let Some(line) = self.scanner.peek_line()
-            && let Some(next_char) = line.trim_start_matches(' ').chars().next()
-        {
-            if line == "..." {
-                return Ok(());
-            }
-            match next_char {
-                '|' => {
-                    self.scanner.advance_till_non_space();
-                    self.scanner.next_char();
-                    self.handle_literal_block_scalar(
-                        first_indent_count,
-                        rest_indent_count,
-                        tag,
-                    )?;
-                }
-                '>' => {
-                    self.scanner.advance_till_non_space();
-                    self.scanner.next_char();
-                    self.handle_folded_block_scalar(tag)?;
-                }
-                '\'' => {
-                    self.scanner.advance_till_non_space();
-                    self.scanner.next_char();
-                    self.handle_single_quoted_flow_scalar(tag)?;
-                }
-                '"' => {
-                    self.scanner.advance_till_non_space();
-                    self.handle_double_quoted_flow_scalar(tag)?;
-                }
-                _ => {
-                    self.handle_plain_scalar(
-                        first_indent_count,
-                        rest_indent_count,
-                        tag,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Consume till literal block scalar ends by:
-    /// 1. End of file
-    /// 2. `...`
-    /// 3. Less indention
-    pub(crate) fn handle_literal_block_scalar(
-        &mut self,
-        first_indent_count: usize,
-        rest_indent_count: usize,
-        tag: Option<String>,
-    ) -> Result<(), YamlError> {
-        log::trace!(
-            "handle_literal_block_scalar {first_indent_count} \
-             {rest_indent_count} {:?}",
-            self.scanner.remains()
-        );
-        let mut ret = String::new();
+    ) -> (Option<usize>, ChompingMethod) {
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
-        let mut start_pos = self.scanner.next_pos;
-
         if let Some(next_char) = self.scanner.peek_char() {
             match next_char {
                 '1'..'9' => {
@@ -128,55 +60,134 @@ impl<'a> YamlParser<'a> {
                 }
                 _ => (),
             }
-            // After `|` and its optional indicators, we should get a line
-            // break or comments or both.
-            self.scanner.expect_comment_or_line_break()?;
+        }
 
-            let leading_space_count = self.scanner.count_block_identation();
-            let desired_indent = if let Some(d) = indentation_indicator {
-                d + rest_indent_count
-            } else {
-                leading_space_count
-            };
-            start_pos = self.scanner.next_pos;
-            start_pos.column += desired_indent;
-            while let Some(line) = self.scanner.peek_line() {
-                let pre_pos = self.scanner.done_pos;
-                let leading_space =
-                    line.chars().take_while(|c| c == &' ').count();
-                if leading_space < desired_indent {
-                    if line.trim_start_matches(' ').is_empty() {
-                        self.scanner.next_line();
-                        ret.push('\n');
-                        continue;
-                    } else {
-                        break;
-                    }
-                } else if self.cur_state().is_block_map_value()
-                    && line.contains(": ")
-                {
-                    break;
-                } else if let Some(line) = self.scanner.next_line() {
-                    // Remove indent then append
-                    ret.push_str(&line[desired_indent..]);
+        (indentation_indicator, chomping_method)
+    }
+
+    /// Advance the scanner till scalar ends.
+    pub(crate) fn handle_scalar(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+        tag: Option<String>,
+    ) -> Result<(), YamlError> {
+        log::trace!(
+            "handle_scalar {first_indent_count} {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
+        if let Some(line) = self.scanner.peek_line()
+            && let Some(next_char) = line.trim_start_matches(' ').chars().next()
+        {
+            if line == "..." {
+                return Ok(());
+            }
+            match next_char {
+                '|' => {
+                    self.scanner.advance_till_non_space();
+                    self.scanner.next_char();
+                    self.handle_literal_block_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                        tag,
+                    )?;
+                }
+                '>' => {
+                    self.scanner.advance_till_non_space();
+                    self.handle_folded_block_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                        tag,
+                    )?;
+                }
+                '\'' => {
+                    self.scanner.advance_till_non_space();
+                    self.scanner.next_char();
+                    self.handle_single_quoted_flow_scalar(tag)?;
+                }
+                '"' => {
+                    self.scanner.advance_till_non_space();
+                    self.handle_double_quoted_flow_scalar(tag)?;
+                }
+                _ => {
+                    self.handle_plain_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                        tag,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Consume till literal block scalar ends by:
+    /// 1. End of file
+    /// 2. `...`
+    /// 3. Less indention
+    pub(crate) fn handle_literal_block_scalar(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+        tag: Option<String>,
+    ) -> Result<(), YamlError> {
+        log::trace!(
+            "handle_literal_block_scalar {first_indent_count} \
+             {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
+        let mut ret = String::new();
+
+        let (indentation_indicator, chomping_method) =
+            self.get_indent_indicator_and_chomping_method();
+
+        // After `|` and its optional indicators, we should get a line
+        // break or comments or both.
+        self.scanner.expect_comment_or_line_break()?;
+
+        let leading_space_count = self.scanner.count_block_identation();
+        let desired_indent = if let Some(d) = indentation_indicator {
+            d + rest_indent_count
+        } else {
+            leading_space_count
+        };
+        let mut start_pos = self.scanner.next_pos;
+        start_pos.column += desired_indent;
+        while let Some(line) = self.scanner.peek_line() {
+            let pre_pos = self.scanner.done_pos;
+            let leading_space = line.chars().take_while(|c| c == &' ').count();
+            if leading_space < desired_indent {
+                if line.trim_start_matches(' ').is_empty() {
+                    self.scanner.next_line();
                     ret.push('\n');
+                    continue;
                 } else {
-                    // No line left
                     break;
                 }
+            } else if self.cur_state().is_block_map_value()
+                && line.contains(": ")
+            {
+                break;
+            } else if let Some(line) = self.scanner.next_line() {
+                // Remove indent then append
+                ret.push_str(&line[desired_indent..]);
+                ret.push('\n');
+            } else {
+                // No line left
+                break;
+            }
 
-                if self.scanner.done_pos == pre_pos {
-                    return Err(YamlError::new(
-                        ErrorKind::Bug,
-                        format!(
-                            "handle_literal_block_scalar(): dead loop, \
-                             remains {:?}",
-                            self.scanner.remains(),
-                        ),
-                        pre_pos,
-                        pre_pos,
-                    ));
-                }
+            if self.scanner.done_pos == pre_pos {
+                return Err(YamlError::new(
+                    ErrorKind::Bug,
+                    format!(
+                        "handle_literal_block_scalar(): dead loop, remains \
+                         {:?}",
+                        self.scanner.remains(),
+                    ),
+                    pre_pos,
+                    pre_pos,
+                ));
             }
         }
 
@@ -207,11 +218,78 @@ impl<'a> YamlParser<'a> {
     /// 1. End of file
     /// 2. `...`
     /// 3. Less indention
+    ///
+    /// YAML 1.2.2: 8.1.3. Folded Style
+    ///    The folded style is denoted by the “>” indicator. It is similar to
+    ///    the literal style; however, folded scalars are subject to line
+    ///    folding.
     pub(crate) fn handle_folded_block_scalar(
         &mut self,
-        _tag: Option<String>,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+        tag: Option<String>,
     ) -> Result<(), YamlError> {
-        todo!()
+        log::trace!(
+            "handle_literal_block_scalar {first_indent_count} \
+             {rest_indent_count} {:?}",
+            self.scanner.remains()
+        );
+        let _ret = String::new();
+        if self.scanner.next_char() != Some('>') {
+            return Err(YamlError::new(
+                ErrorKind::Bug,
+                format!(
+                    "handle_folded_block_scalar() got a scanner not started \
+                     with >: {:?}",
+                    self.scanner.remains()
+                ),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        let (indentation_indicator, chomping_method) =
+            self.get_indent_indicator_and_chomping_method();
+
+        // After `|` and its optional indicators, we should get a line
+        // break or comments or both.
+        self.scanner.expect_comment_or_line_break()?;
+
+        let start_pos = self.scanner.next_pos;
+
+        let leading_space_count = self.scanner.count_block_identation();
+        let desired_indent = if let Some(d) = indentation_indicator {
+            d + rest_indent_count
+        } else {
+            leading_space_count
+        };
+        let mut lines: Vec<&str> = Vec::new();
+        let _indent = self.scanner.done_pos.column;
+        while let Some(line) = self.scanner.peek_line() {
+            let cur_indent = line.chars().take_while(|c| *c == ' ').count();
+            if cur_indent < desired_indent {
+                if is_empty_line(line) {
+                    self.scanner.next_line();
+                    lines.push("");
+                } else {
+                    break;
+                }
+            }
+            self.scanner.advance(desired_indent);
+            if let Some(line) = self.scanner.next_line() {
+                lines.push(line);
+            } else {
+                break;
+            }
+        }
+        let end_pos = self.scanner.done_pos;
+
+        self.push_event(YamlEvent::Scalar(
+            tag,
+            block_scalar_folding(lines, chomping_method),
+            start_pos,
+            end_pos,
+        ));
+        Ok(())
     }
 
     pub(crate) fn handle_single_quoted_flow_scalar(
@@ -510,21 +588,6 @@ fn line_folding(string_to_fold: Vec<&str>) -> String {
     ret
 }
 
-// YAML 1.2.2 SPEC 6.5 Block Folding
-// In the folded block style, the final line break and trailing empty lines are
-// subject to chomping and are never folded. In addition, folding does not
-// apply to line breaks surrounding text lines that contain leading white
-// space. Note that such a more-indented line may consist only of such leading
-// white space.
-// The combined effect of the block line folding rules is that each “paragraph”
-// is interpreted as a line, empty lines are interpreted as a line feed and the
-// formatting of more-indented lines is preserved.
-/*
-fn block_folding(string_to_fold: Vec<&str>) -> String {
-    todo!()
-}
-*/
-
 // YAML 1.2.2: 6.5. Flow Folding
 //      Folding in flow styles provides more relaxed semantics. Flow styles
 //      typically depend on explicit indicators rather than indentation to
@@ -548,6 +611,66 @@ fn flow_folding(mut string_to_fold: String) -> String {
     let ret = line_folding(string_to_fold.split('\n').collect());
     // Remove leading and trialing `"` we manually added.
     ret[1..ret.len() - 1].to_string()
+}
+
+fn block_scalar_folding(
+    lines: Vec<&str>,
+    chomping_method: ChompingMethod,
+) -> String {
+    let mut ret = String::new();
+    let mut iter = lines.into_iter().peekable();
+
+    while let Some(line) = iter.next() {
+        let _trimmed = line.trim_matches(|c| matches!(c, ' ' | '\t'));
+        let next_line_is_empty = if let Some(next_line) = iter.peek() {
+            let trimmed_next_line =
+                next_line.trim_matches(|c| matches!(c, ' ' | '\t'));
+            Some(trimmed_next_line.is_empty())
+        } else {
+            None
+        };
+        // Lines starting with white space characters (more-indented lines) are
+        // not folded.
+        if line.starts_with(" ") || line.starts_with("\t") {
+            ret.push_str(line);
+            ret.push('\n');
+        } else if is_empty_line(line) {
+            ret.push('\n');
+        } else {
+            ret.push_str(line);
+            // * Line breaks and empty lines separating folded and more-indented
+            //   lines are also not folded.
+            match next_line_is_empty {
+                Some(false) => ret.push(' '),
+                Some(true) => ret.push('\n'),
+                _ => (),
+            }
+        }
+    }
+
+    // * The final line break and trailing empty lines if any, are subject to
+    //   chomping and are never folded.
+    match chomping_method {
+        ChompingMethod::Strip => {
+            // the final line break and any trailing empty lines are
+            // excluded from the scalar’s content.
+            ret = ret.trim_end_matches(['\n', '\r']).to_string();
+        }
+        ChompingMethod::Clip => {
+            // the final line break character is preserved in the scalar’s
+            // content. However, any trailing empty lines are excluded from
+            // the scalar’s content.
+            ret = ret.trim_end_matches(['\n', '\r']).to_string();
+            ret.push('\n');
+        }
+        ChompingMethod::Keep => (),
+    }
+
+    ret
+}
+
+fn is_empty_line(line: &str) -> bool {
+    line.chars().all(|c| matches!(c, ' ' | '\t'))
 }
 
 // Escaped ASCII null (x00) character.
@@ -679,172 +802,5 @@ impl<'a> YamlParser<'a> {
                 ));
             }
         })
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-    use crate::YamlPosition;
-
-    #[test]
-    fn test_block_scalar_literal_block_clip_auto() {
-        crate::testlib::init_logger();
-
-        assert_eq!(
-            YamlParser::parse_to_events("--- |\n abc \n def\n").unwrap(),
-            vec![
-                YamlEvent::StreamStart,
-                YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-                YamlEvent::Scalar(
-                    None,
-                    "abc \ndef\n".to_string(),
-                    YamlPosition::new(2, 2),
-                    YamlPosition::new(3, 5)
-                ),
-                YamlEvent::DocumentEnd(false, YamlPosition::new(3, 5)),
-                YamlEvent::StreamEnd,
-            ]
-        )
-    }
-
-    #[test]
-    fn test_block_scalar_literal_block_clip_fixed_ident() {
-        assert_eq!(
-            YamlParser::parse_to_events("--- |3\n    abc \n    def\n   \n  \n")
-                .unwrap(),
-            vec![
-                YamlEvent::StreamStart,
-                YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-                YamlEvent::Scalar(
-                    None,
-                    " abc \n def\n".to_string(),
-                    YamlPosition::new(2, 4),
-                    YamlPosition::new(5, 3),
-                ),
-                YamlEvent::DocumentEnd(false, YamlPosition::new(5, 3)),
-                YamlEvent::StreamEnd,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_block_scalar_literal_block_strip_fixed_ident() {
-        let expected = vec![
-            YamlEvent::StreamStart,
-            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-            YamlEvent::Scalar(
-                None,
-                " abc \n def".to_string(),
-                YamlPosition::new(2, 4),
-                YamlPosition::new(3, 8),
-            ),
-            YamlEvent::DocumentEnd(false, YamlPosition::new(3, 8)),
-            YamlEvent::StreamEnd,
-        ];
-        assert_eq!(
-            YamlParser::parse_to_events("--- |3+\n    abc \n    def\n")
-                .unwrap(),
-            expected
-        );
-        assert_eq!(
-            YamlParser::parse_to_events("--- |+3\n    abc \n    def\n")
-                .unwrap(),
-            expected
-        );
-    }
-
-    #[test]
-    fn test_block_scalar_literal_block_keep_fixed_ident() {
-        let expected = vec![
-            YamlEvent::StreamStart,
-            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-            YamlEvent::Scalar(
-                None,
-                " abc \n def  \n\n\n".to_string(),
-                YamlPosition::new(2, 4),
-                YamlPosition::new(5, 1),
-            ),
-            YamlEvent::DocumentEnd(false, YamlPosition::new(5, 1)),
-            YamlEvent::StreamEnd,
-        ];
-        assert_eq!(
-            YamlParser::parse_to_events(
-                "--- |3-\n    abc \n    def  \n   \n\n"
-            )
-            .unwrap(),
-            expected
-        );
-        assert_eq!(
-            YamlParser::parse_to_events(
-                "--- |-3\n    abc \n    def  \n   \n\n"
-            )
-            .unwrap(),
-            expected
-        );
-    }
-
-    #[test]
-    fn test_block_scalar_literal_all_indented() {
-        assert_eq!(
-            YamlParser::parse_to_events("---\n   |\n   abc\n   def\n\n")
-                .unwrap(),
-            vec![
-                YamlEvent::StreamStart,
-                YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
-                YamlEvent::Scalar(
-                    None,
-                    "abc\ndef\n".to_string(),
-                    YamlPosition::new(3, 4),
-                    YamlPosition::new(5, 1)
-                ),
-                YamlEvent::DocumentEnd(false, YamlPosition::new(5, 1)),
-                YamlEvent::StreamEnd,
-            ]
-        )
-    }
-
-    #[test]
-    fn test_plain_scalar_folding() {
-        assert_eq!(
-            YamlParser::parse_to_events(
-                "1st non-empty\n\n 2nd non-empty \n\t3rd non-empty"
-            )
-            .unwrap(),
-            vec![
-                YamlEvent::StreamStart,
-                YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-                YamlEvent::Scalar(
-                    None,
-                    "1st non-empty\n2nd non-empty 3rd non-empty".to_string(),
-                    YamlPosition::new(1, 1),
-                    YamlPosition::new(4, 14)
-                ),
-                YamlEvent::DocumentEnd(false, YamlPosition::new(4, 14)),
-                YamlEvent::StreamEnd,
-            ]
-        )
-    }
-
-    #[test]
-    fn test_double_quoted_scalar() {
-        assert_eq!(
-            YamlParser::parse_to_events("\"\n  foo \n \n  \tbar\n\n  baz\n \"")
-                .unwrap(),
-            vec![
-                YamlEvent::StreamStart,
-                YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-                YamlEvent::Scalar(
-                    None,
-                    " foo\nbar\nbaz ".to_string(),
-                    YamlPosition::new(1, 1),
-                    YamlPosition::new(7, 2)
-                ),
-                YamlEvent::DocumentEnd(false, YamlPosition::new(7, 2)),
-                YamlEvent::StreamEnd,
-            ]
-        )
     }
 }

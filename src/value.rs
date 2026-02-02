@@ -3,8 +3,7 @@
 use std::str::FromStr;
 
 use crate::{
-    ErrorKind, YamlError, YamlParser, YamlPosition, YamlTag,
-    YamlValueMap,
+    ErrorKind, YamlError, YamlParser, YamlPosition, YamlTag, YamlValueMap,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]

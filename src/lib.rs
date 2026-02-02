@@ -18,10 +18,7 @@ mod value;
 mod variant;
 
 #[cfg(test)]
-pub(crate) mod testlib;
-#[cfg(test)]
-mod yaml_test_suite;
-
+mod tests;
 
 pub use self::{
     deserializer::{YamlDeserializer, from_str, to_value},
