@@ -31,7 +31,8 @@ impl<'a> YamlParser<'a> {
     }
 
     pub(crate) fn pop_state(&mut self) {
-        log::trace!("Pop state: {:?}", self.states.pop());
+        let state = self.states.pop();
+        log::trace!("Pop state: {:?}", state);
     }
 
     pub(crate) fn parse_to_events(
@@ -191,6 +192,10 @@ impl<'a> YamlParser<'a> {
             } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
                 // Flow style does not care indentation
                 self.handle_scalar(0, 0, anchor, tag)?;
+            } else if trimmed.starts_with('*') {
+                self.scanner.advance(indent_count);
+                let name = self.handle_alias()?;
+                self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
             } else if trimmed.contains(": ") {
                 // Guess out the indent
 
@@ -222,16 +227,65 @@ impl<'a> YamlParser<'a> {
                         property_line.trim_start_matches(' ');
                     let property_indent =
                         property_line.chars().take_while(|c| *c == ' ').count();
-                    if property_trimmed.starts_with('&') && anchor.is_none() {
-                        self.scanner.advance(property_indent);
-                        anchor = Some(self.handle_anchor()?);
-                        property_found = true;
-                    } else if property_trimmed.starts_with('!') && tag.is_none()
-                    {
-                        self.scanner.advance(property_indent);
-                        // Tag decorating its container
-                        tag = self.handle_tag();
-                        property_found = true;
+                    if property_trimmed.starts_with('&') {
+                        if anchor.is_none() {
+                            self.scanner.advance(property_indent);
+                            anchor = Some(self.handle_anchor()?);
+                            property_found = true;
+                        } else if let Some(after_anchor) =
+                            property_trimmed.split_once([' ', '\t'])
+                        {
+                            // A second anchor is allowed when it belongs
+                            // to an implicit mapping key of the anchored
+                            // node, e.g.
+                            //      &node
+                            //      &key key: value
+                            let after_anchor =
+                                after_anchor.1.trim_start_matches(' ');
+                            if after_anchor.contains(": ")
+                                || after_anchor.ends_with(':')
+                            {
+                                property_found = true;
+                                break;
+                            } else {
+                                return Err(YamlError::new(
+                                    ErrorKind::InvalidAnchor,
+                                    format!(
+                                        "Node can have at most one anchor, \
+                                         but got: {property_line}"
+                                    ),
+                                    self.scanner.next_pos,
+                                    self.scanner.next_pos,
+                                ));
+                            }
+                        } else {
+                            return Err(YamlError::new(
+                                ErrorKind::InvalidAnchor,
+                                format!(
+                                    "Node can have at most one anchor, but \
+                                     got: {property_line}"
+                                ),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
+                    } else if property_trimmed.starts_with('!') {
+                        if tag.is_none() {
+                            self.scanner.advance(property_indent);
+                            // Tag decorating its container
+                            tag = self.handle_tag();
+                            property_found = true;
+                        } else {
+                            return Err(YamlError::new(
+                                ErrorKind::InvalidAnchor,
+                                format!(
+                                    "Node can have at most one tag, but got: \
+                                     {property_line}"
+                                ),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
                     } else {
                         break;
                     }
@@ -246,6 +300,25 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                         self.scanner.next_pos,
                     ));
+                }
+                if self.scanner.done_pos.line == self.scanner.next_pos.line
+                    && let Some(content_line) = self.scanner.peek_line()
+                {
+                    let content_trimmed = content_line.trim_start_matches(' ');
+                    if content_trimmed.starts_with("- ")
+                        || content_trimmed == "-"
+                    {
+                        return Err(YamlError::new(
+                            ErrorKind::InvalidAnchor,
+                            format!(
+                                "Node property cannot be placed before a \
+                                 block sequence entry on the same line: \
+                                 {content_line}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
                 }
                 self.handle_node(
                     first_indent_count,

@@ -70,6 +70,8 @@ pub(crate) enum YamlEvent {
         YamlPosition,
         YamlPosition,
     ),
+    /// Alias name and position
+    Alias(String, YamlPosition),
 }
 
 impl std::fmt::Display for YamlEvent {
@@ -114,6 +116,7 @@ impl std::fmt::Display for YamlEvent {
                 s.push_str(&format!(" {}", show_scalar_str(v, style)));
                 write!(f, "{s}")
             }
+            Self::Alias(name, _) => write!(f, "=ALI *{name}"),
         }
     }
 }

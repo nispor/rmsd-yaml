@@ -94,8 +94,9 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
         V: DeserializeSeed<'de>,
     {
         if let YamlValueData::Tag(tag) = self.value.data {
-            let tag_name =
-                StrDeserializer::<Self::Error>::new(tag.name.as_str());
+            let tag_name = StrDeserializer::<Self::Error>::new(
+                variant_name_from_tag(tag.name.as_str()),
+            );
             Ok((
                 seed.deserialize(tag_name)?,
                 Self {
@@ -115,4 +116,20 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
             ))
         }
     }
+}
+
+/// Extract the enum variant name from a tag string. The serializer
+/// renders enum variants as local tags (e.g. `!Variant`), which the
+/// parser stores as `<!Variant>` or `<tag:yaml.org,2002:Variant>`.
+fn variant_name_from_tag(tag_name: &str) -> &str {
+    let mut ret = tag_name;
+    if let Some(stripped) = ret.strip_prefix('<')
+        && let Some(stripped) = stripped.strip_suffix('>')
+    {
+        ret = stripped;
+    }
+    if let Some(stripped) = ret.strip_prefix('!') {
+        ret = stripped;
+    }
+    ret.rsplit_once(':').map(|(_, name)| name).unwrap_or(ret)
 }

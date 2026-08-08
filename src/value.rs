@@ -117,6 +117,41 @@ impl YamlValue {
         }
     }
 
+    pub fn is_float(&self) -> bool {
+        if let YamlValueData::String(s) = &self.data {
+            str_is_float(s)
+        } else {
+            false
+        }
+    }
+
+    pub fn as_f64(&self) -> Result<f64, YamlError> {
+        if let YamlValueData::String(s) = &self.data {
+            match s.as_str() {
+                ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => {
+                    Ok(f64::INFINITY)
+                }
+                "-.inf" | "-.Inf" | "-.INF" => Ok(f64::NEG_INFINITY),
+                ".nan" | ".NaN" | ".NAN" => Ok(f64::NAN),
+                _ => s.parse::<f64>().map_err(|_| {
+                    YamlError::new(
+                        ErrorKind::InvalidNumber,
+                        format!("Expecting a float, but got {s}"),
+                        self.start,
+                        self.end,
+                    )
+                }),
+            }
+        } else {
+            Err(YamlError::new(
+                ErrorKind::UnexpectedYamlNodeType,
+                format!("Expecting a number, but got {}", self.data),
+                self.start,
+                self.end,
+            ))
+        }
+    }
+
     pub fn as_u64(&self) -> Result<u64, YamlError> {
         if let YamlValueData::String(s) = &self.data {
             if s.starts_with("0x") | s.starts_with("0X") {
@@ -385,4 +420,22 @@ fn str_is_integer(s: &str) -> bool {
     } else {
         s.chars().all(|c| c.is_ascii_digit())
     }
+}
+
+fn str_is_float(s: &str) -> bool {
+    matches!(
+        s,
+        ".inf"
+            | ".Inf"
+            | ".INF"
+            | "+.inf"
+            | "+.Inf"
+            | "+.INF"
+            | "-.inf"
+            | "-.Inf"
+            | "-.INF"
+            | ".nan"
+            | ".NaN"
+            | ".NAN"
+    ) || s.parse::<f64>().is_ok()
 }

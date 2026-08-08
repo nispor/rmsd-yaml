@@ -56,4 +56,50 @@ impl<'a> YamlParser<'a> {
         }
         Ok(name)
     }
+
+    /// Parse a YAML alias (the name after `*`). The scanner must stay at
+    /// the `*` character.
+    ///
+    /// YAML 1.2.2 SPEC, 6.9.2. Node Anchors:
+    ///     An alias node is denoted by an `*` indicator followed by the
+    ///     anchor name.
+    pub(crate) fn handle_alias(&mut self) -> Result<String, YamlError> {
+        if self.scanner.next_char() != Some('*') {
+            return Err(YamlError::new(
+                ErrorKind::Bug,
+                format!(
+                    "handle_alias() got a scanner not started with *: {:?}",
+                    self.scanner.remains()
+                ),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        let start_pos = self.scanner.done_pos;
+        let name = self.scanner.peek_till_linebreak_or_space();
+        if name.is_empty() {
+            return Err(YamlError::new(
+                ErrorKind::InvalidAlias,
+                "Empty alias name".to_string(),
+                start_pos,
+                self.scanner.next_pos,
+            ));
+        }
+        // YAML 1.2.2 SPEC, 6.9.2. Node Anchors:
+        //      ns-anchor-char ::= ns-char - c-flow-indicator
+        if let Some(c) = name
+            .chars()
+            .find(|c| matches!(c, ',' | '[' | ']' | '{' | '}'))
+        {
+            return Err(YamlError::new(
+                ErrorKind::InvalidAlias,
+                format!("Invalid character '{c}' in alias name"),
+                start_pos,
+                self.scanner.next_pos,
+            ));
+        }
+        let name = name.to_string();
+        self.scanner.advance_till_linebreak_or_space();
+        Ok(name)
+    }
 }

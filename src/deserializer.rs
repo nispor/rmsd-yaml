@@ -51,6 +51,8 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
                     self.deserialize_u64(visitor)
                 } else if self.parsed.is_signed_integer() {
                     self.deserialize_i64(visitor)
+                } else if self.parsed.is_float() {
+                    self.deserialize_f64(visitor)
                 } else {
                     self.deserialize_str(visitor)
                 }
@@ -133,18 +135,18 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
         visitor.visit_u64(self.parsed.as_u64()?)
     }
 
-    fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_f64(visitor)
     }
 
-    fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_f64(self.parsed.as_f64()?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -172,7 +174,13 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        todo!()
+        // Keep the same behavior as serde_yaml.
+        Err(YamlError::new(
+            ErrorKind::BytesUnsupported,
+            "Deserializing bytes is not supported".to_string(),
+            self.parsed.start,
+            self.parsed.end,
+        ))
     }
 
     fn deserialize_byte_buf<V>(
@@ -182,7 +190,13 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        todo!()
+        // Keep the same behavior as serde_yaml.
+        Err(YamlError::new(
+            ErrorKind::BytesUnsupported,
+            "Deserializing byte_buf is not supported".to_string(),
+            self.parsed.start,
+            self.parsed.end,
+        ))
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -195,22 +209,31 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
         }
     }
 
-    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        if self.parsed.data == YamlValueData::Null {
+            visitor.visit_unit()
+        } else {
+            Err(YamlError::new(
+                ErrorKind::UnexpectedYamlNodeType,
+                format!("Expecting null, but got {}", self.parsed.data),
+                self.parsed.start,
+                self.parsed.end,
+            ))
+        }
     }
 
     fn deserialize_unit_struct<V>(
         self,
         _name: &'static str,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        self.deserialize_unit(visitor)
     }
 
     fn deserialize_newtype_struct<V>(

@@ -170,25 +170,48 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                let mut key_anchor = None;
-                let (key_first_indent, key_rest_indent) =
-                    if line.trim_start_matches(' ').starts_with('&') {
-                        // e.g. `&a a: b`: the anchor belongs to the key
-                        // scalar, not the map. After stripping the anchor,
-                        // the remains act as a line starting at the scanner
-                        // position.
-                        self.scanner.advance(cur_indent);
-                        key_anchor = Some(self.handle_anchor()?);
-                        (0, 0)
-                    } else {
-                        (desired_indent_count, desired_indent_count)
-                    };
-                self.handle_plain_scalar(
-                    key_first_indent,
-                    key_rest_indent,
-                    key_anchor,
-                    None,
-                )?;
+                let trimmed_key = line.trim_start_matches(' ');
+                let mut value_anchor = None;
+                let mut value_tag = None;
+                if trimmed_key.starts_with('&') {
+                    // e.g. `&a a: b`: the anchor belongs to the key scalar,
+                    // not the map. After stripping the anchor, the remains
+                    // act as a line starting at the scanner position.
+                    self.scanner.advance(cur_indent);
+                    let key_anchor = Some(self.handle_anchor()?);
+                    self.handle_plain_scalar(0, 0, key_anchor, None)?;
+                } else if trimmed_key.starts_with('*') {
+                    // e.g. `*b : *a`: an alias as key
+                    self.scanner.advance(cur_indent);
+                    let name = self.handle_alias()?;
+                    self.push_event(YamlEvent::Alias(
+                        name,
+                        self.scanner.next_pos,
+                    ));
+                    // Place the scanner at the `:` after the alias key so
+                    // that the common post-key handling applies.
+                    while self.scanner.peek_char() == Some(' ') {
+                        self.scanner.next_char();
+                    }
+                    if self.scanner.peek_char() != Some(':') {
+                        return Err(YamlError::new(
+                            ErrorKind::InvalidImplicitKey,
+                            format!(
+                                "Expecting ':' after alias key, but got {:?}",
+                                self.scanner.remains()
+                            ),
+                            self.scanner.done_pos,
+                            self.scanner.done_pos,
+                        ));
+                    }
+                } else {
+                    self.handle_plain_scalar(
+                        desired_indent_count,
+                        desired_indent_count,
+                        None,
+                        None,
+                    )?;
+                }
                 let Some(line) = self.scanner.peek_line() else {
                     continue;
                 };
@@ -196,7 +219,7 @@ impl<'a> YamlParser<'a> {
                 self.push_state(YamlState::InBlockMapValue);
                 let trimmed_line = line.trim_end_matches(' ');
                 // TODO: Handle comment after `:`
-                if trimmed_line.ends_with(":") {
+                if trimmed_line.ends_with(":") && !line.contains(": ") {
                     self.scanner.next_line();
                     if let Some(next_line) = self.scanner.peek_line() {
                         let next_line_indent_count =
@@ -229,6 +252,45 @@ impl<'a> YamlParser<'a> {
                     }
                 } else if line.contains(": ") {
                     self.scanner.advance_offset(2);
+                    // Node properties of a same-line value, e.g.
+                    // `a: &anchor`
+                    while let Some(property_line) = self.scanner.peek_line() {
+                        let property_trimmed =
+                            property_line.trim_start_matches(' ');
+                        let property_indent = property_line
+                            .chars()
+                            .take_while(|c| *c == ' ')
+                            .count();
+                        if property_trimmed.starts_with('&')
+                            && value_anchor.is_none()
+                        {
+                            self.scanner.advance(property_indent);
+                            value_anchor = Some(self.handle_anchor()?);
+                        } else if property_trimmed.starts_with('!')
+                            && value_tag.is_none()
+                        {
+                            self.scanner.advance(property_indent);
+                            value_tag = self.handle_tag();
+                        } else {
+                            break;
+                        }
+                    }
+                    if (value_anchor.is_some() || value_tag.is_some())
+                        && self.value_has_no_content(desired_indent_count)
+                    {
+                        // e.g. `a: &anchor\nb: *anchor`: the node
+                        // properties decorate an empty value node.
+                        self.push_event(YamlEvent::Scalar(
+                            value_anchor,
+                            value_tag,
+                            String::new(),
+                            YamlScalarStyle::Plain,
+                            self.scanner.done_pos,
+                            self.scanner.done_pos,
+                        ));
+                        self.pop_state();
+                        continue;
+                    }
                     value_first_indent_count = 0;
                     value_rest_indent_count = self.scanner.done_pos.column;
                 } else if trimmed_line.is_empty() {
@@ -248,8 +310,8 @@ impl<'a> YamlParser<'a> {
                 self.handle_node(
                     value_first_indent_count,
                     value_rest_indent_count,
-                    None,
-                    None,
+                    value_anchor,
+                    value_tag,
                 )?;
                 self.pop_state();
             }
@@ -269,6 +331,40 @@ impl<'a> YamlParser<'a> {
         self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
         self.pop_state();
         Ok(())
+    }
+
+    /// Check whether the value node carrying node properties (anchor or
+    /// tag) is empty, e.g.
+    ///     a: &anchor
+    ///     b: *anchor
+    /// The value is empty when nothing follows the node properties on the
+    /// same line and the next content line is not indented deeper than
+    /// the key.
+    fn value_has_no_content(&self, key_indent_count: usize) -> bool {
+        let mut remains = self.scanner.remains();
+        if self.scanner.done_pos.line == self.scanner.next_pos.line {
+            // Node properties ended mid-line: check the remains of this
+            // line first.
+            let rest_of_line =
+                remains.split(['\n', '\r']).next().unwrap_or_default();
+            let trimmed = rest_of_line.trim_start_matches(' ');
+            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                return false;
+            }
+            let Some(offset) = remains.find(['\n', '\r']) else {
+                return true;
+            };
+            remains = &remains[offset + 1..];
+        }
+        for line in remains.split(['\n', '\r']) {
+            let trimmed = line.trim_start_matches(' ');
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            return line.chars().take_while(|c| *c == ' ').count()
+                <= key_indent_count;
+        }
+        true
     }
 
     /// Consume the scanner till a flow map is finished and insert the parsed

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
 use crate::{
     ErrorKind, YamlError, YamlEvent, YamlEventIter, YamlPosition, YamlTag,
     YamlValue, YamlValueData, YamlValueMap,
@@ -8,12 +10,14 @@ use crate::{
 impl YamlValue {
     pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, YamlError> {
         let mut events_iter = YamlEventIter::new(events);
-        compose_value(&mut events_iter)
+        let mut anchors: HashMap<String, YamlValue> = HashMap::new();
+        compose_value(&mut events_iter, &mut anchors)
     }
 }
 
 fn compose_value(
     events_iter: &mut YamlEventIter,
+    anchors: &mut HashMap<String, YamlValue>,
 ) -> Result<YamlValue, YamlError> {
     let mut doc_started_pos: Option<YamlPosition> = None;
     while let Some(event) = events_iter.next() {
@@ -34,20 +38,24 @@ fn compose_value(
             YamlEvent::DocumentEnd(_, _) | YamlEvent::StreamEnd => {
                 break;
             }
-            YamlEvent::SequenceStart(_anchor, tag, pos) => {
-                let array = compose_sequence(events_iter, pos)?;
-                if let Some(tag) = tag {
-                    return Ok(YamlValue {
+            YamlEvent::SequenceStart(anchor, tag, pos) => {
+                let array = compose_sequence(events_iter, anchors, pos)?;
+                let ret = if let Some(tag) = tag {
+                    YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
                             data: array.data,
                         })),
                         start: array.start,
                         end: array.end,
-                    });
+                    }
                 } else {
-                    return Ok(array);
+                    array
+                };
+                if let Some(anchor) = anchor {
+                    anchors.insert(anchor, ret.clone());
                 }
+                return Ok(ret);
             }
             YamlEvent::SequenceEnd(pos) => {
                 return Err(YamlError::new(
@@ -62,20 +70,24 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::MapStart(_anchor, tag, pos) => {
-                let map = compose_map(events_iter, pos)?;
-                if let Some(tag) = tag {
-                    return Ok(YamlValue {
+            YamlEvent::MapStart(anchor, tag, pos) => {
+                let map = compose_map(events_iter, anchors, pos)?;
+                let ret = if let Some(tag) = tag {
+                    YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
                             data: map.data,
                         })),
                         start: map.start,
                         end: map.end,
-                    });
+                    }
                 } else {
-                    return Ok(map);
+                    map
+                };
+                if let Some(anchor) = anchor {
+                    anchors.insert(anchor, ret.clone());
                 }
+                return Ok(ret);
             }
             YamlEvent::MapEnd(pos) => {
                 return Err(YamlError::new(
@@ -90,22 +102,41 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::Scalar(_anchor, tag, val, _style, start, end) => {
-                if let Some(tag) = tag {
-                    return Ok(YamlValue {
+            YamlEvent::Scalar(anchor, tag, val, _style, start, end) => {
+                let ret = if let Some(tag) = tag {
+                    YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
                             data: YamlValueData::String(val),
                         })),
                         start,
                         end,
-                    });
+                    }
                 } else {
-                    return Ok(YamlValue {
+                    YamlValue {
                         data: YamlValueData::String(val),
                         start,
                         end,
-                    });
+                    }
+                };
+                if let Some(anchor) = anchor {
+                    anchors.insert(anchor, ret.clone());
+                }
+                return Ok(ret);
+            }
+            YamlEvent::Alias(name, pos) => {
+                if let Some(value) = anchors.get(&name) {
+                    return Ok(value.clone());
+                } else {
+                    return Err(YamlError::new(
+                        ErrorKind::UnknownAlias,
+                        format!(
+                            "Alias *{name} does not reference any anchored \
+                             node"
+                        ),
+                        pos,
+                        pos,
+                    ));
                 }
             }
         }
@@ -116,6 +147,7 @@ fn compose_value(
 
 fn compose_sequence(
     events_iter: &mut YamlEventIter,
+    anchors: &mut HashMap<String, YamlValue>,
     start_pos: YamlPosition,
 ) -> Result<YamlValue, YamlError> {
     let mut ret: Vec<YamlValue> = Vec::new();
@@ -128,7 +160,7 @@ fn compose_sequence(
                 break;
             }
             _ => {
-                ret.push(compose_value(events_iter)?);
+                ret.push(compose_value(events_iter, anchors)?);
             }
         }
     }
@@ -142,6 +174,7 @@ fn compose_sequence(
 
 fn compose_map(
     events_iter: &mut YamlEventIter,
+    anchors: &mut HashMap<String, YamlValue>,
     start_pos: YamlPosition,
 ) -> Result<YamlValue, YamlError> {
     let mut ret: YamlValueMap = YamlValueMap::new();
@@ -156,10 +189,10 @@ fn compose_map(
             }
             _ => {
                 if let Some(key) = key.take() {
-                    let value = compose_value(events_iter)?;
+                    let value = compose_value(events_iter, anchors)?;
                     ret.insert(key, value);
                 } else {
-                    key = Some(compose_value(events_iter)?);
+                    key = Some(compose_value(events_iter, anchors)?);
                 }
             }
         }

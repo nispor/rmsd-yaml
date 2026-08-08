@@ -57,6 +57,13 @@ pub enum ErrorKind {
     /// Invalid anchor: empty anchor name, flow indicator character in
     /// anchor name, or anchor attached to an alias.
     InvalidAnchor,
+    /// Invalid alias: empty alias name or flow indicator character in
+    /// alias name.
+    InvalidAlias,
+    /// Alias does not reference any anchored node.
+    UnknownAlias,
+    /// Deserializing bytes is not supported.
+    BytesUnsupported,
     /// Directive is only allowed before document start marker `---` or
     /// after document end marker `...`.
     MissingDocumentEndMarkerBeforeDirective,
@@ -96,6 +103,9 @@ impl std::fmt::Display for ErrorKind {
                 Self::NoSupportMultipleDocuments =>
                     "no_support_mulitple_documents",
                 Self::InvalidAnchor => "invalid_anchor",
+                Self::InvalidAlias => "invalid_alias",
+                Self::UnknownAlias => "unknown_alias",
+                Self::BytesUnsupported => "bytes_unsupported",
                 Self::MissingDocumentEndMarkerBeforeDirective =>
                     "missing_document_end_marker_before_directive",
             }
