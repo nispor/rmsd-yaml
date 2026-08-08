@@ -38,7 +38,7 @@ fn compose_value(
             YamlEvent::DocumentEnd(_, _) | YamlEvent::StreamEnd => {
                 break;
             }
-            YamlEvent::SequenceStart(anchor, tag, pos) => {
+            YamlEvent::SequenceStart(anchor, tag, _style, pos) => {
                 let array = compose_sequence(events_iter, anchors, pos)?;
                 let ret = if let Some(tag) = tag {
                     YamlValue {
@@ -70,7 +70,7 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::MapStart(anchor, tag, pos) => {
+            YamlEvent::MapStart(anchor, tag, _style, pos) => {
                 let map = compose_map(events_iter, anchors, pos)?;
                 let ret = if let Some(tag) = tag {
                     YamlValue {
@@ -210,7 +210,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::YamlScalarStyle;
+    use crate::{YamlCollectionStyle, YamlScalarStyle};
 
     #[test]
     fn test_compose_single_scalar() {
@@ -244,7 +244,12 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::SequenceStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::SequenceStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -292,7 +297,12 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -343,8 +353,18 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::SequenceStart(None, None, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::SequenceStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1),
+            ),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -362,7 +382,12 @@ mod test {
                 YamlPosition::new(1, 10),
             ),
             YamlEvent::MapEnd(YamlPosition::new(1, 10)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(2, 1)),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(2, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -438,7 +463,12 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -447,7 +477,12 @@ mod test {
                 YamlPosition::new(1, 1),
                 YamlPosition::new(1, 3),
             ),
-            YamlEvent::SequenceStart(None, None, YamlPosition::new(2, 1)),
+            YamlEvent::SequenceStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(2, 1),
+            ),
             YamlEvent::Scalar(
                 None,
                 None,

@@ -39,12 +39,17 @@ impl YamlEventIter {
 pub(crate) enum YamlScalarStyle {
     #[default]
     Plain,
-    // Constructed once single-quoted scalar parsing is implemented.
-    #[allow(dead_code)]
     SingleQuoted,
     DoubleQuoted,
     Literal,
     Folded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum YamlCollectionStyle {
+    #[default]
+    Block,
+    Flow,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,11 +60,21 @@ pub(crate) enum YamlEvent {
     DocumentStart(bool, YamlPosition),
     /// Whether document start with `...`
     DocumentEnd(bool, YamlPosition),
-    /// Anchor, Tag and position
-    SequenceStart(Option<String>, Option<String>, YamlPosition),
+    /// Anchor, Tag, style and position
+    SequenceStart(
+        Option<String>,
+        Option<String>,
+        YamlCollectionStyle,
+        YamlPosition,
+    ),
     SequenceEnd(YamlPosition),
-    /// Anchor, Tag and position
-    MapStart(Option<String>, Option<String>, YamlPosition),
+    /// Anchor, Tag, style and position
+    MapStart(
+        Option<String>,
+        Option<String>,
+        YamlCollectionStyle,
+        YamlPosition,
+    ),
     MapEnd(YamlPosition),
     /// Anchor, Tag, value, style, start and end
     Scalar(
@@ -83,8 +98,11 @@ impl std::fmt::Display for YamlEvent {
             Self::DocumentStart(false, _) => write!(f, "+DOC"),
             Self::DocumentEnd(true, _) => write!(f, "-DOC ..."),
             Self::DocumentEnd(false, _) => write!(f, "-DOC"),
-            Self::SequenceStart(anchor, tag, _) => {
+            Self::SequenceStart(anchor, tag, style, _) => {
                 let mut s = String::from("+SEQ");
+                if style == &YamlCollectionStyle::Flow {
+                    s.push_str(" []");
+                }
                 if let Some(a) = anchor {
                     s.push_str(&format!(" &{a}"));
                 }
@@ -94,8 +112,11 @@ impl std::fmt::Display for YamlEvent {
                 write!(f, "{s}")
             }
             Self::SequenceEnd(_) => write!(f, "-SEQ"),
-            Self::MapStart(anchor, tag, _) => {
+            Self::MapStart(anchor, tag, style, _) => {
                 let mut s = String::from("+MAP");
+                if style == &YamlCollectionStyle::Flow {
+                    s.push_str(" {}");
+                }
                 if let Some(a) = anchor {
                     s.push_str(&format!(" &{a}"));
                 }

@@ -25,6 +25,17 @@ impl<'a> YamlParser<'a> {
         self.events.push(event);
     }
 
+    /// Current count of the pushed events.
+    pub(crate) fn events_len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Take the events pushed since `start` out. Used to wrap an
+    /// already-emitted flow node into a single-pair flow mapping.
+    pub(crate) fn take_events_since(&mut self, start: usize) -> Vec<YamlEvent> {
+        self.events.drain(start..).collect()
+    }
+
     pub(crate) fn push_state(&mut self, state: YamlState) {
         log::trace!("Push state {:?}", state);
         self.states.push(state);
@@ -70,6 +81,9 @@ impl<'a> YamlParser<'a> {
     fn handle_stream(&mut self) -> Result<(), YamlError> {
         self.push_event(YamlEvent::StreamStart);
         log::trace!("handle_stream {:?}", self.scanner.remains());
+        // Whether the previous document was terminated by `...` (or no
+        // document has been parsed yet).
+        let mut doc_terminated = true;
         while let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
             if trimmed.is_empty() {
@@ -83,6 +97,7 @@ impl<'a> YamlParser<'a> {
                 ));
                 self.scanner.advance_till_linebreak();
                 self.handle_node(indent_count, indent_count, None, None)?;
+                doc_terminated = false;
             } else if let Some(offset) = line.find("--- ") {
                 self.push_event(YamlEvent::DocumentStart(
                     true,
@@ -90,6 +105,7 @@ impl<'a> YamlParser<'a> {
                 ));
                 self.scanner.advance_offset(offset + 4);
                 self.handle_node(0, 0, None, None)?;
+                doc_terminated = false;
             } else if trimmed == "..." {
                 if self
                     .events
@@ -102,12 +118,25 @@ impl<'a> YamlParser<'a> {
                     ));
                 }
                 self.scanner.advance_till_linebreak_or_space();
+                doc_terminated = true;
             } else {
+                if !doc_terminated {
+                    return Err(YamlError::new(
+                        ErrorKind::MissingDocumentEndMarkerBeforeDirective,
+                        format!(
+                            "Expecting document end marker `...` before new \
+                             document content: {line}"
+                        ),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 self.push_event(YamlEvent::DocumentStart(
                     false,
                     self.scanner.next_pos,
                 ));
                 self.handle_node(0, 0, None, None)?;
+                doc_terminated = false;
             }
         }
 
@@ -186,6 +215,25 @@ impl<'a> YamlParser<'a> {
             let trimmed = line.trim_start_matches(' ');
 
             if trimmed.starts_with("- ") || trimmed == "-" {
+                if self.cur_state().is_block_map_value()
+                    && self.scanner.done_pos.line == self.scanner.next_pos.line
+                {
+                    // YAML 1.2.2 SPEC, 8.2.1. Block Sequences:
+                    //     A block sequence entry is not allowed on the
+                    //     same line as a mapping key.
+                    return Err(
+                        YamlError::new(
+                            ErrorKind::InvalidSequnceStartIndicator,
+                            format!(
+                                "Block sequence entry is not allowed on the \
+                                 same                              line as a \
+                                 mapping key: {line}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ),
+                    );
+                }
                 let expected_indent_count =
                     rest_indent_count + indent_count - first_indent_count;
                 self.handle_block_seq(expected_indent_count, anchor, tag)?;
@@ -196,6 +244,12 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance(indent_count);
                 let name = self.handle_alias()?;
                 self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
+            } else if trimmed.starts_with("[") {
+                self.handle_flow_seq(anchor, tag)?;
+                self.expect_flow_end_separation()?;
+            } else if trimmed.starts_with("{") {
+                self.handle_flow_map(anchor, tag)?;
+                self.expect_flow_end_separation()?;
             } else if trimmed.contains(": ") {
                 // Guess out the indent
 
@@ -212,10 +266,6 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed.starts_with("[") {
-                self.handle_flow_seq(anchor, tag)?;
-            } else if trimmed.starts_with("{") {
-                self.handle_flow_map(anchor, tag)?;
             } else if trimmed.starts_with('!') || trimmed.starts_with('&') {
                 self.scanner.advance(indent_count);
                 // YAML 1.2.2 SPEC, 6.9. Node Properties:
@@ -368,6 +418,82 @@ impl<'a> YamlParser<'a> {
                 self.scanner.done_pos,
                 self.scanner.done_pos,
             ));
+        }
+        Ok(())
+    }
+
+    /// After a flow collection in block context, only spaces, a line
+    /// break, a comment or EOF may follow.
+    fn expect_flow_end_separation(&mut self) -> Result<(), YamlError> {
+        while self.scanner.peek_char() == Some(' ') {
+            self.scanner.next_char();
+        }
+        match self.scanner.peek_char() {
+            None | Some('\n') | Some('\r') | Some('#') => Ok(()),
+            Some(c) => Err(YamlError::new(
+                ErrorKind::UnexpectedYamlNodeType,
+                format!(
+                    "Expecting a line break or comment after a flow \
+                     collection, but got '{c}'"
+                ),
+                self.scanner.next_pos,
+                self.scanner.next_pos,
+            )),
+        }
+    }
+
+    /// Handle a node inside a flow collection. The entry terminators
+    /// (`,` plus `]` or `}`) are handled by the caller.
+    pub(crate) fn handle_flow_node(&mut self) -> Result<(), YamlError> {
+        self.scanner.skip_flow_separation();
+        // YAML 1.2.2 SPEC, 6.9. Node Properties:
+        //      Node properties may appear in any order, but each at
+        //      most once.
+        let mut anchor = None;
+        let mut tag = None;
+        loop {
+            match self.scanner.peek_char() {
+                Some('&') if anchor.is_none() => {
+                    anchor = Some(self.handle_anchor()?);
+                    self.scanner.skip_flow_separation();
+                }
+                Some('!') if tag.is_none() => {
+                    tag = self.handle_tag();
+                    self.scanner.skip_flow_separation();
+                }
+                _ => break,
+            }
+        }
+        match self.scanner.peek_char() {
+            Some('[') => self.handle_flow_seq(anchor, tag)?,
+            Some('{') => self.handle_flow_map(anchor, tag)?,
+            Some('*') => {
+                if anchor.is_some() || tag.is_some() {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidAnchor,
+                        "Alias cannot carry node properties".to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
+                let name = self.handle_alias()?;
+                self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
+            }
+            Some('"') => self.handle_double_quoted_flow_scalar(anchor, tag)?,
+            Some('\'') => self.handle_single_quoted_flow_scalar(anchor, tag)?,
+            Some(',') | Some(']') | Some('}') | None => {
+                // Empty node, e.g. an omitted value in a flow mapping.
+                let pos = self.scanner.next_pos;
+                self.push_event(YamlEvent::Scalar(
+                    anchor,
+                    tag,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    pos,
+                    pos,
+                ));
+            }
+            Some(_) => self.handle_flow_plain_scalar(anchor, tag)?,
         }
         Ok(())
     }

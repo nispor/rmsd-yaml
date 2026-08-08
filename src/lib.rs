@@ -32,7 +32,7 @@ pub use self::{
     value::{YamlValue, YamlValueData},
 };
 pub(crate) use self::{
-    event::{YamlEvent, YamlEventIter, YamlScalarStyle},
+    event::{YamlCollectionStyle, YamlEvent, YamlEventIter, YamlScalarStyle},
     map::YamlValueMapAccess,
     parser::YamlParser,
     scalar_ser::to_scalar_string,

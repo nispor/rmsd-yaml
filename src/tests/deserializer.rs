@@ -4,8 +4,8 @@ use pretty_assertions::assert_eq;
 use serde::Deserialize;
 
 use crate::{
-    ErrorKind, YamlEvent, YamlParser, YamlPosition, YamlScalarStyle, from_str,
-    to_value,
+    ErrorKind, YamlCollectionStyle, YamlEvent, YamlParser, YamlPosition,
+    YamlScalarStyle, from_str, to_value,
 };
 
 #[test]
@@ -17,7 +17,12 @@ fn test_map_of_plain_scalar() {
         vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1)
+            ),
             YamlEvent::Scalar(
                 None,
                 None,
@@ -64,7 +69,12 @@ fn test_map_of_plain_scalar_in_two_lines() {
         vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1)
+            ),
             YamlEvent::Scalar(
                 None,
                 None,

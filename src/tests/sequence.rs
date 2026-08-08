@@ -2,7 +2,9 @@
 
 use pretty_assertions::assert_eq;
 
-use crate::{YamlEvent, YamlParser, YamlPosition, YamlScalarStyle};
+use crate::{
+    YamlCollectionStyle, YamlEvent, YamlParser, YamlPosition, YamlScalarStyle,
+};
 
 #[test]
 fn test_sequence_of_plain_scalar() {
@@ -11,7 +13,12 @@ fn test_sequence_of_plain_scalar() {
         vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::SequenceStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::SequenceStart(
+                None,
+                None,
+                YamlCollectionStyle::Block,
+                YamlPosition::new(1, 1)
+            ),
             YamlEvent::Scalar(
                 None,
                 None,

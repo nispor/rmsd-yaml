@@ -6,8 +6,8 @@ use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::{
-    ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser,
-    YamlPosition, YamlScalarStyle, YamlState, YamlValue,
+    ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
+    YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -131,6 +131,7 @@ impl<'a> YamlParser<'a> {
         self.push_event(YamlEvent::MapStart(
             anchor,
             tag,
+            YamlCollectionStyle::Block,
             self.scanner.next_pos,
         ));
         self.push_state(YamlState::InBlockMapKey);
@@ -174,12 +175,28 @@ impl<'a> YamlParser<'a> {
                 let mut value_anchor = None;
                 let mut value_tag = None;
                 if trimmed_key.starts_with('&') {
-                    // e.g. `&a a: b`: the anchor belongs to the key scalar,
-                    // not the map. After stripping the anchor, the remains
-                    // act as a line starting at the scanner position.
+                    // e.g. `&a a: b` or `&key [a]: v`: the anchor belongs
+                    // to the key node, not the map. After stripping the
+                    // anchor, the remains act as a line starting at the
+                    // scanner position.
                     self.scanner.advance(cur_indent);
                     let key_anchor = Some(self.handle_anchor()?);
-                    self.handle_plain_scalar(0, 0, key_anchor, None)?;
+                    while self.scanner.peek_char() == Some(' ') {
+                        self.scanner.next_char();
+                    }
+                    match self.scanner.peek_char() {
+                        Some('[') => {
+                            self.handle_flow_seq(key_anchor, None)?;
+                            self.expect_colon_after_key()?;
+                        }
+                        Some('{') => {
+                            self.handle_flow_map(key_anchor, None)?;
+                            self.expect_colon_after_key()?;
+                        }
+                        _ => {
+                            self.handle_plain_scalar(0, 0, key_anchor, None)?;
+                        }
+                    }
                 } else if trimmed_key.starts_with('*') {
                     // e.g. `*b : *a`: an alias as key
                     self.scanner.advance(cur_indent);
@@ -190,20 +207,18 @@ impl<'a> YamlParser<'a> {
                     ));
                     // Place the scanner at the `:` after the alias key so
                     // that the common post-key handling applies.
-                    while self.scanner.peek_char() == Some(' ') {
-                        self.scanner.next_char();
+                    self.expect_colon_after_key()?;
+                } else if trimmed_key.starts_with('[')
+                    || trimmed_key.starts_with('{')
+                {
+                    // A flow collection as key, e.g. `[a, b]: value`
+                    self.scanner.advance(cur_indent);
+                    if trimmed_key.starts_with('[') {
+                        self.handle_flow_seq(None, None)?;
+                    } else {
+                        self.handle_flow_map(None, None)?;
                     }
-                    if self.scanner.peek_char() != Some(':') {
-                        return Err(YamlError::new(
-                            ErrorKind::InvalidImplicitKey,
-                            format!(
-                                "Expecting ':' after alias key, but got {:?}",
-                                self.scanner.remains()
-                            ),
-                            self.scanner.done_pos,
-                            self.scanner.done_pos,
-                        ));
-                    }
+                    self.expect_colon_after_key()?;
                 } else {
                     self.handle_plain_scalar(
                         desired_indent_count,
@@ -367,13 +382,154 @@ impl<'a> YamlParser<'a> {
         true
     }
 
-    /// Consume the scanner till a flow map is finished and insert the parsed
-    /// event.
+    /// Place the scanner at the `:` following a non-scalar mapping key
+    /// (alias or flow collection).
+    fn expect_colon_after_key(&mut self) -> Result<(), YamlError> {
+        while self.scanner.peek_char() == Some(' ') {
+            self.scanner.next_char();
+        }
+        if self.scanner.peek_char() != Some(':') {
+            return Err(YamlError::new(
+                ErrorKind::InvalidImplicitKey,
+                format!(
+                    "Expecting ':' after the mapping key, but got {:?}",
+                    self.scanner.remains()
+                ),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Consume the scanner till a flow map is finished and insert the
+    /// parsed events. The scanner must stay at `{`.
+    ///
+    /// YAML 1.2.2 SPEC, 7.4.2. Flow Mappings.
     pub(crate) fn handle_flow_map(
         &mut self,
-        _anchor: Option<String>,
-        _tag: Option<String>,
+        anchor: Option<String>,
+        tag: Option<String>,
     ) -> Result<(), YamlError> {
-        todo!()
+        let start_pos = self.scanner.next_pos;
+        self.scanner.next_char();
+        self.push_event(YamlEvent::MapStart(
+            anchor,
+            tag,
+            YamlCollectionStyle::Flow,
+            start_pos,
+        ));
+        self.push_state(YamlState::InFlowMapKey);
+        self.scanner.skip_flow_separation();
+        if self.scanner.peek_char() == Some('}') {
+            self.scanner.next_char();
+        } else {
+            loop {
+                // Key
+                match self.scanner.peek_char() {
+                    Some(':') => {
+                        // Empty key, e.g. `{: value}`
+                        let pos = self.scanner.next_pos;
+                        self.push_event(YamlEvent::Scalar(
+                            None,
+                            None,
+                            String::new(),
+                            YamlScalarStyle::Plain,
+                            pos,
+                            pos,
+                        ));
+                    }
+                    Some('?') => {
+                        // Explicit key, e.g. `{? key : value}`
+                        self.scanner.next_char();
+                        self.scanner.skip_flow_separation();
+                        if self.scanner.peek_char() == Some(':') {
+                            let pos = self.scanner.next_pos;
+                            self.push_event(YamlEvent::Scalar(
+                                None,
+                                None,
+                                String::new(),
+                                YamlScalarStyle::Plain,
+                                pos,
+                                pos,
+                            ));
+                        } else {
+                            self.handle_flow_node()?;
+                        }
+                    }
+                    _ => {
+                        self.handle_flow_node()?;
+                    }
+                }
+                self.scanner.skip_flow_separation();
+                // Value
+                if self.scanner.peek_char() == Some(':') {
+                    self.scanner.next_char();
+                    self.scanner.skip_flow_separation();
+                    self.handle_flow_node()?;
+                } else {
+                    // Omitted value, e.g. `{a}` or `{http://foo.com}`
+                    let pos = self.scanner.next_pos;
+                    self.push_event(YamlEvent::Scalar(
+                        None,
+                        None,
+                        String::new(),
+                        YamlScalarStyle::Plain,
+                        pos,
+                        pos,
+                    ));
+                }
+                self.scanner.skip_flow_separation();
+                match self.scanner.peek_char() {
+                    Some(',') => {
+                        self.scanner.next_char();
+                        self.scanner.skip_flow_separation();
+                        // A trailing comma before '}' is tolerated in
+                        // flow mappings.
+                        if self.scanner.peek_char() == Some('}') {
+                            break;
+                        }
+                        if self.scanner.peek_char() == Some(',') {
+                            return Err(YamlError::new(
+                                ErrorKind::UnfinishedMapIndicator,
+                                format!(
+                                    "Expecting a key after ',' in flow \
+                                     mapping, but got: {:?}",
+                                    self.scanner.remains()
+                                ),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
+                    }
+                    Some('}') => {
+                        self.scanner.next_char();
+                        break;
+                    }
+                    Some(c) => {
+                        return Err(YamlError::new(
+                            ErrorKind::UnfinishedMapIndicator,
+                            format!(
+                                "Expecting ',' or '}}' in flow mapping, but \
+                                 got '{c}'"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                    None => {
+                        return Err(YamlError::new(
+                            ErrorKind::UnfinishedMapIndicator,
+                            "Unfinished flow mapping".to_string(),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                }
+            }
+        }
+        self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
+        self.pop_state();
+        Ok(())
     }
 }

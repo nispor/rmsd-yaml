@@ -163,6 +163,27 @@ impl<'a> YamlScanner<'a> {
         Some(c)
     }
 
+    /// Skip spaces, line breaks and comments. Used within flow
+    /// collections where indentation is not significant.
+    ///
+    /// YAML 1.2.2 SPEC, 7.4. Flow Collection Styles:
+    ///     Flow collection styles allow flow scalar content to span
+    ///     multiple lines, with line breaks folded and comments
+    ///     ignored.
+    pub(crate) fn skip_flow_separation(&mut self) {
+        while let Some(c) = self.peek_char() {
+            match c {
+                ' ' | '\t' | '\n' | '\r' => {
+                    self.next_char();
+                }
+                '#' => {
+                    self.advance_till_linebreak();
+                }
+                _ => break,
+            }
+        }
+    }
+
     /// Consume comment or line break or both.
     /// Raise Error if not followed by comment or line break.
     pub(crate) fn expect_comment_or_line_break(

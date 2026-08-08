@@ -3,8 +3,8 @@
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser,
-    YamlScalarStyle, YamlState, YamlValue,
+    ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
+    YamlParser, YamlScalarStyle, YamlState, YamlValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +62,7 @@ impl<'a> YamlParser<'a> {
         self.push_event(YamlEvent::SequenceStart(
             anchor,
             tag,
+            YamlCollectionStyle::Block,
             self.scanner.next_pos,
         ));
         self.push_state(YamlState::InBlockSequnce);
@@ -71,7 +72,12 @@ impl<'a> YamlParser<'a> {
                 continue;
             }
             let cur_indent = line.chars().take_while(|c| *c == ' ').count();
-            if cur_indent < indent_count {
+            // A same-line entry (e.g. the inner dash of `- - a`) starts
+            // at the scanner position, so the indent check only applies
+            // from the next line on.
+            let mid_line =
+                self.scanner.done_pos.line == self.scanner.next_pos.line;
+            if !mid_line && cur_indent < indent_count {
                 break;
             }
             let trimmed = line.trim_start_matches(' ');
@@ -119,11 +125,128 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
+    /// Consume the scanner till a flow sequence is finished and insert
+    /// the parsed events. The scanner must stay at `[`.
+    ///
+    /// YAML 1.2.2 SPEC, 7.4.1. Flow Sequences.
     pub(crate) fn handle_flow_seq(
         &mut self,
-        _anchor: Option<String>,
-        _tag: Option<String>,
+        anchor: Option<String>,
+        tag: Option<String>,
     ) -> Result<(), YamlError> {
-        todo!()
+        let start_pos = self.scanner.next_pos;
+        self.scanner.next_char();
+        self.push_event(YamlEvent::SequenceStart(
+            anchor,
+            tag,
+            YamlCollectionStyle::Flow,
+            start_pos,
+        ));
+        self.push_state(YamlState::InFlowSequnce);
+        self.scanner.skip_flow_separation();
+        if self.scanner.peek_char() == Some(']') {
+            self.scanner.next_char();
+        } else {
+            loop {
+                self.handle_flow_seq_entry()?;
+                self.scanner.skip_flow_separation();
+                match self.scanner.peek_char() {
+                    Some(',') => {
+                        self.scanner.next_char();
+                        self.scanner.skip_flow_separation();
+                        if matches!(
+                            self.scanner.peek_char(),
+                            Some(',') | Some(']')
+                        ) {
+                            return Err(YamlError::new(
+                                ErrorKind::UnfinishedSequenceIndicator,
+                                format!(
+                                    "Expecting an entry after ',' in flow \
+                                     sequence, but got: {:?}",
+                                    self.scanner.remains()
+                                ),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
+                    }
+                    Some(']') => {
+                        self.scanner.next_char();
+                        break;
+                    }
+                    Some(c) => {
+                        return Err(YamlError::new(
+                            ErrorKind::UnfinishedSequenceIndicator,
+                            format!(
+                                "Expecting ',' or ']' in flow sequence, but \
+                                 got '{c}'"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                    None => {
+                        return Err(YamlError::new(
+                            ErrorKind::UnfinishedSequenceIndicator,
+                            "Unfinished flow sequence".to_string(),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                }
+            }
+        }
+        self.push_event(YamlEvent::SequenceEnd(self.scanner.done_pos));
+        self.pop_state();
+        Ok(())
+    }
+
+    /// Parse a flow sequence entry. An entry containing `key: value` is
+    /// a single-pair flow mapping.
+    fn handle_flow_seq_entry(&mut self) -> Result<(), YamlError> {
+        self.scanner.skip_flow_separation();
+        if self.scanner.peek_char() == Some(':') {
+            // Single-pair entry with an empty key, e.g. `[ : value ]`
+            let start_pos = self.scanner.next_pos;
+            self.push_event(YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Flow,
+                start_pos,
+            ));
+            self.push_event(YamlEvent::Scalar(
+                None,
+                None,
+                String::new(),
+                YamlScalarStyle::Plain,
+                start_pos,
+                start_pos,
+            ));
+            self.scanner.next_char();
+            self.handle_flow_node()?;
+            self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
+            return Ok(());
+        }
+        let events_start = self.events_len();
+        self.handle_flow_node()?;
+        self.scanner.skip_flow_separation();
+        if self.scanner.peek_char() == Some(':') {
+            // Single-pair entry, e.g. `[ key: value ]`. Wrap the
+            // already-emitted key node events into a flow mapping.
+            let key_events = self.take_events_since(events_start);
+            self.push_event(YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Flow,
+                self.scanner.next_pos,
+            ));
+            for event in key_events {
+                self.push_event(event);
+            }
+            self.scanner.next_char();
+            self.handle_flow_node()?;
+            self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
+        }
+        Ok(())
     }
 }

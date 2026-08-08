@@ -121,7 +121,6 @@ impl<'a> YamlParser<'a> {
                 }
                 '\'' => {
                     self.scanner.advance_till_non_space();
-                    self.scanner.next_char();
                     self.handle_single_quoted_flow_scalar(anchor, tag)?;
                 }
                 '"' => {
@@ -324,12 +323,178 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
+    /// Parse a single-quoted flow scalar. The scanner must stay at the
+    /// opening `'`.
+    ///
+    /// YAML 1.2.2 SPEC, 7.4.2. Single-Quoted Styles:
+    ///     A single-quoted scalar may not contain a single quote unless
+    ///     it is escaped by two adjacent single quotes (`''`).
     pub(crate) fn handle_single_quoted_flow_scalar(
         &mut self,
-        _anchor: Option<String>,
-        _tag: Option<String>,
+        anchor: Option<String>,
+        tag: Option<String>,
     ) -> Result<(), YamlError> {
-        todo!()
+        if self.scanner.next_char() != Some('\'') {
+            return Err(YamlError::new(
+                ErrorKind::Bug,
+                format!(
+                    "handle_single_quoted_flow_scalar() got a scanner not \
+                     started with ': {:?}",
+                    self.scanner.remains()
+                ),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        let start_pos = self.scanner.next_pos;
+        let mut ret = String::new();
+        let mut closed = false;
+        while let Some(c) = self.scanner.next_char() {
+            if c == '\'' {
+                if self.scanner.peek_char() == Some('\'') {
+                    self.scanner.next_char();
+                    ret.push('\'');
+                } else {
+                    closed = true;
+                    break;
+                }
+            } else {
+                ret.push(c);
+            }
+        }
+        if !closed {
+            return Err(YamlError::new(
+                ErrorKind::UnfinishedQuote,
+                format!(
+                    "Expecting closing single quote, but got: {:?}",
+                    self.scanner.remains()
+                ),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        self.push_event(YamlEvent::Scalar(
+            anchor,
+            tag,
+            flow_folding(ret),
+            YamlScalarStyle::SingleQuoted,
+            start_pos,
+            self.scanner.done_pos,
+        ));
+        Ok(())
+    }
+
+    /// Parse a plain scalar within a flow collection. The scalar ends at
+    /// `,`, `]`, `}`, or `:` followed by a separation character.
+    ///
+    /// YAML 1.2.2 SPEC, 7.3.3. Plain Style:
+    ///     In flow collections, plain scalars must not contain the `,`,
+    ///     `[`, `]`, `{` and `}` characters, and `:` is restricted.
+    pub(crate) fn handle_flow_plain_scalar(
+        &mut self,
+        anchor: Option<String>,
+        tag: Option<String>,
+    ) -> Result<(), YamlError> {
+        let start_pos = self.scanner.next_pos;
+        let mut ret = String::new();
+        while let Some(c) = self.scanner.peek_char() {
+            match c {
+                ',' | ']' | '}' => break,
+                ':' => {
+                    // Inside flow context, `:` only acts as a mapping
+                    // indicator when followed by a separation character.
+                    let next = self.scanner.remains().chars().nth(1);
+                    if matches!(
+                        next,
+                        None | Some(' ')
+                            | Some('\t')
+                            | Some('\n')
+                            | Some('\r')
+                            | Some(',')
+                            | Some(']')
+                            | Some('}')
+                    ) {
+                        break;
+                    }
+                    self.scanner.next_char();
+                    ret.push(c);
+                }
+                '#' if ret.ends_with(' ') || ret.is_empty() => {
+                    // A comment starts after white space.
+                    break;
+                }
+                '\n' | '\r' => {
+                    // YAML 1.2.2 SPEC, 6.8. Flow Folding: line breaks
+                    // inside flow scalars are folded.
+                    ret = ret.trim_end_matches(' ').to_string();
+                    let mut line_breaks = 0usize;
+                    while let Some(w) = self.scanner.peek_char() {
+                        match w {
+                            '\n' | '\r' => {
+                                line_breaks += 1;
+                                self.scanner.next_char();
+                            }
+                            ' ' | '\t' => {
+                                self.scanner.next_char();
+                            }
+                            '#' => {
+                                self.scanner.advance_till_linebreak();
+                            }
+                            _ => break,
+                        }
+                    }
+                    match self.scanner.peek_char() {
+                        None | Some(',') | Some(']') | Some('}') => break,
+                        Some(':') => {
+                            let next = self.scanner.remains().chars().nth(1);
+                            if matches!(
+                                next,
+                                None | Some(' ')
+                                    | Some('\t')
+                                    | Some('\n')
+                                    | Some('\r')
+                                    | Some(',')
+                                    | Some(']')
+                                    | Some('}')
+                            ) {
+                                break;
+                            }
+                        }
+                        Some(_) => (),
+                    }
+                    if line_breaks <= 1 {
+                        ret.push(' ');
+                    } else {
+                        ret.push('\n');
+                    }
+                }
+                _ => {
+                    self.scanner.next_char();
+                    ret.push(c);
+                }
+            }
+        }
+        let value = ret.trim_end_matches(' ').to_string();
+        if value == "-" || value.starts_with("- ") {
+            return Err(YamlError::new(
+                ErrorKind::InvalidPlainScalarStart,
+                format!(
+                    "Plain scalar in flow context should not be '-', but got: \
+                     {value}"
+                ),
+                start_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        self.push_event(YamlEvent::Scalar(
+            anchor,
+            tag,
+            value,
+            YamlScalarStyle::Plain,
+            start_pos,
+            self.scanner.done_pos,
+        ));
+        Ok(())
     }
 
     /// Should start with `"` and end with `"`
