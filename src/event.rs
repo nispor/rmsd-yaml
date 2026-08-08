@@ -35,6 +35,18 @@ impl YamlEventIter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum YamlScalarStyle {
+    #[default]
+    Plain,
+    // Constructed once single-quoted scalar parsing is implemented.
+    #[allow(dead_code)]
+    SingleQuoted,
+    DoubleQuoted,
+    Literal,
+    Folded,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum YamlEvent {
     StreamStart,
@@ -43,13 +55,21 @@ pub(crate) enum YamlEvent {
     DocumentStart(bool, YamlPosition),
     /// Whether document start with `...`
     DocumentEnd(bool, YamlPosition),
-    /// Tag and position
-    SequenceStart(Option<String>, YamlPosition),
+    /// Anchor, Tag and position
+    SequenceStart(Option<String>, Option<String>, YamlPosition),
     SequenceEnd(YamlPosition),
-    /// Tag and position
-    MapStart(Option<String>, YamlPosition),
+    /// Anchor, Tag and position
+    MapStart(Option<String>, Option<String>, YamlPosition),
     MapEnd(YamlPosition),
-    Scalar(Option<String>, String, YamlPosition, YamlPosition),
+    /// Anchor, Tag, value, style, start and end
+    Scalar(
+        Option<String>,
+        Option<String>,
+        String,
+        YamlScalarStyle,
+        YamlPosition,
+        YamlPosition,
+    ),
 }
 
 impl std::fmt::Display for YamlEvent {
@@ -61,37 +81,51 @@ impl std::fmt::Display for YamlEvent {
             Self::DocumentStart(false, _) => write!(f, "+DOC"),
             Self::DocumentEnd(true, _) => write!(f, "-DOC ..."),
             Self::DocumentEnd(false, _) => write!(f, "-DOC"),
-            Self::SequenceStart(tag, _) => {
-                if let Some(tag) = tag {
-                    write!(f, "+SEQ {tag}")
-                } else {
-                    write!(f, "+SEQ")
+            Self::SequenceStart(anchor, tag, _) => {
+                let mut s = String::from("+SEQ");
+                if let Some(a) = anchor {
+                    s.push_str(&format!(" &{a}"));
                 }
+                if let Some(t) = tag {
+                    s.push_str(&format!(" {t}"));
+                }
+                write!(f, "{s}")
             }
             Self::SequenceEnd(_) => write!(f, "-SEQ"),
-            Self::MapStart(tag, _) => {
-                if let Some(tag) = tag {
-                    write!(f, "+MAP {tag}")
-                } else {
-                    write!(f, "+MAP")
+            Self::MapStart(anchor, tag, _) => {
+                let mut s = String::from("+MAP");
+                if let Some(a) = anchor {
+                    s.push_str(&format!(" &{a}"));
                 }
+                if let Some(t) = tag {
+                    s.push_str(&format!(" {t}"));
+                }
+                write!(f, "{s}")
             }
             Self::MapEnd(_) => write!(f, "-MAP"),
-            Self::Scalar(tag, v, _, _) => {
-                if let Some(tag) = tag {
-                    write!(f, "=VAL {tag} {}", show_scalar_str(v))
-                } else {
-                    write!(f, "=VAL {}", show_scalar_str(v))
+            Self::Scalar(anchor, tag, v, style, _, _) => {
+                let mut s = String::from("=VAL");
+                if let Some(a) = anchor {
+                    s.push_str(&format!(" &{a}"));
                 }
+                if let Some(t) = tag {
+                    s.push_str(&format!(" {t}"));
+                }
+                s.push_str(&format!(" {}", show_scalar_str(v, style)));
+                write!(f, "{s}")
             }
         }
     }
 }
 
-fn show_scalar_str(v: &str) -> String {
-    if v.contains("\n") {
-        format!("|{}", v.replace("\n", "\\n"))
-    } else {
-        format!(":{}", v)
-    }
+fn show_scalar_str(v: &str, style: &YamlScalarStyle) -> String {
+    let mut ret = match style {
+        YamlScalarStyle::Plain => String::from(":"),
+        YamlScalarStyle::SingleQuoted => String::from("'"),
+        YamlScalarStyle::DoubleQuoted => String::from("\""),
+        YamlScalarStyle::Literal => String::from("|"),
+        YamlScalarStyle::Folded => String::from(">"),
+    };
+    ret.push_str(&v.replace("\n", "\\n"));
+    ret
 }

@@ -7,7 +7,7 @@ use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::{
     ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser,
-    YamlPosition, YamlState, YamlValue,
+    YamlPosition, YamlScalarStyle, YamlState, YamlValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -121,13 +121,18 @@ impl<'a> YamlParser<'a> {
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
             "handle_block_map {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
-        self.push_event(YamlEvent::MapStart(tag, self.scanner.next_pos));
+        self.push_event(YamlEvent::MapStart(
+            anchor,
+            tag,
+            self.scanner.next_pos,
+        ));
         self.push_state(YamlState::InBlockMapKey);
         let mut value_first_indent_count = first_indent_count;
         let mut value_rest_indent_count = first_indent_count;
@@ -155,6 +160,7 @@ impl<'a> YamlParser<'a> {
                     value_first_indent_count,
                     value_rest_indent_count,
                     None,
+                    None,
                 )?;
                 self.pop_state();
             } else {
@@ -164,10 +170,23 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                let _spliter_offset = line.find(": ");
+                let mut key_anchor = None;
+                let (key_first_indent, key_rest_indent) =
+                    if line.trim_start_matches(' ').starts_with('&') {
+                        // e.g. `&a a: b`: the anchor belongs to the key
+                        // scalar, not the map. After stripping the anchor,
+                        // the remains act as a line starting at the scanner
+                        // position.
+                        self.scanner.advance(cur_indent);
+                        key_anchor = Some(self.handle_anchor()?);
+                        (0, 0)
+                    } else {
+                        (desired_indent_count, desired_indent_count)
+                    };
                 self.handle_plain_scalar(
-                    desired_indent_count,
-                    desired_indent_count,
+                    key_first_indent,
+                    key_rest_indent,
+                    key_anchor,
                     None,
                 )?;
                 let Some(line) = self.scanner.peek_line() else {
@@ -200,7 +219,9 @@ impl<'a> YamlParser<'a> {
                         // No next line after ':\n', so empty value
                         self.push_event(YamlEvent::Scalar(
                             None,
+                            None,
                             String::new(),
+                            YamlScalarStyle::Plain,
                             self.scanner.done_pos,
                             self.scanner.done_pos,
                         ));
@@ -228,6 +249,7 @@ impl<'a> YamlParser<'a> {
                     value_first_indent_count,
                     value_rest_indent_count,
                     None,
+                    None,
                 )?;
                 self.pop_state();
             }
@@ -253,6 +275,7 @@ impl<'a> YamlParser<'a> {
     /// event.
     pub(crate) fn handle_flow_map(
         &mut self,
+        _anchor: Option<String>,
         _tag: Option<String>,
     ) -> Result<(), YamlError> {
         todo!()

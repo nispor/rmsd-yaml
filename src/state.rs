@@ -5,8 +5,13 @@ pub(crate) enum YamlState {
     InBlockMapKey,
     InBlockMapValue,
     InBlockSequnce,
+    // The flow states are constructed once flow collection parsing is
+    // implemented.
+    #[allow(dead_code)]
     InFlowMapKey,
+    #[allow(dead_code)]
     InFlowMapValue,
+    #[allow(dead_code)]
     InFlowSequnce,
     #[default]
     EndOfFile,

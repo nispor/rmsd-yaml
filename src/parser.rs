@@ -3,7 +3,8 @@
 use std::cmp::max;
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlPosition, YamlScanner, YamlState,
+    ErrorKind, YamlError, YamlEvent, YamlPosition, YamlScalarStyle,
+    YamlScanner, YamlState,
 };
 
 #[derive(Debug)]
@@ -80,43 +81,49 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_pos,
                 ));
                 self.scanner.advance_till_linebreak();
-                self.handle_node(indent_count, indent_count, None)?;
+                self.handle_node(indent_count, indent_count, None, None)?;
             } else if let Some(offset) = line.find("--- ") {
                 self.push_event(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
                 ));
                 self.scanner.advance_offset(offset + 4);
-                self.handle_node(0, 0, None)?;
+                self.handle_node(0, 0, None, None)?;
             } else if trimmed == "..." {
-                self.push_event(YamlEvent::DocumentEnd(
-                    true,
-                    self.scanner.next_pos,
-                ));
+                if self
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)))
+                {
+                    self.push_event(YamlEvent::DocumentEnd(
+                        true,
+                        self.scanner.next_pos,
+                    ));
+                }
                 self.scanner.advance_till_linebreak_or_space();
             } else {
                 self.push_event(YamlEvent::DocumentStart(
                     false,
                     self.scanner.next_pos,
                 ));
-                self.handle_node(0, 0, None)?;
+                self.handle_node(0, 0, None, None)?;
             }
         }
 
-        if !self
+        let has_doc_start = self
             .events
             .iter()
-            .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)))
-        {
+            .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)));
+        let has_doc_end = self
+            .events
+            .iter()
+            .any(|e| matches!(e, YamlEvent::DocumentEnd(_, _)));
+        if !has_doc_start && !has_doc_end {
             // Empty content
             self.push_event(YamlEvent::DocumentStart(false, YamlPosition::EOF));
         }
         // No explicit document end `...`
-        if !self
-            .events
-            .iter()
-            .any(|e| matches!(e, YamlEvent::DocumentEnd(_, _)))
-        {
+        if !has_doc_end {
             self.push_event(YamlEvent::DocumentEnd(
                 false,
                 self.scanner.done_pos,
@@ -131,12 +138,14 @@ impl<'a> YamlParser<'a> {
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
-        tag: Option<String>,
+        mut anchor: Option<String>,
+        mut tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
-            "handle_node {} {} {:?}, {:?}",
+            "handle_node {} {} {:?} {:?}, {:?}",
             first_indent_count,
             rest_indent_count,
+            anchor,
             tag,
             self.scanner.remains()
         );
@@ -178,33 +187,87 @@ impl<'a> YamlParser<'a> {
             if trimmed.starts_with("- ") || trimmed == "-" {
                 let expected_indent_count =
                     rest_indent_count + indent_count - first_indent_count;
-                self.handle_block_seq(expected_indent_count, tag)?;
+                self.handle_block_seq(expected_indent_count, anchor, tag)?;
             } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
                 // Flow style does not care indentation
-                self.handle_scalar(0, 0, tag)?;
+                self.handle_scalar(0, 0, anchor, tag)?;
             } else if trimmed.contains(": ") {
                 // Guess out the indent
 
                 self.handle_block_map(
                     max(first_indent_count, indent_count),
                     max(rest_indent_count, indent_count),
+                    anchor,
                     tag,
                 )?;
             } else if trimmed.ends_with(":") {
                 self.handle_block_map(
                     first_indent_count,
                     rest_indent_count,
+                    anchor,
                     tag,
                 )?;
             } else if trimmed.starts_with("[") {
-                self.handle_flow_seq(tag)?;
+                self.handle_flow_seq(anchor, tag)?;
             } else if trimmed.starts_with("{") {
-                self.handle_flow_map(tag)?;
-            } else if trimmed.starts_with("!") {
+                self.handle_flow_map(anchor, tag)?;
+            } else if trimmed.starts_with('!') || trimmed.starts_with('&') {
                 self.scanner.advance(indent_count);
-                // Tag decorating its container
-                let tag = self.handle_tag();
-                self.handle_node(first_indent_count, rest_indent_count, tag)?;
+                // YAML 1.2.2 SPEC, 6.9. Node Properties:
+                //      Node properties may appear in any order, but each
+                //      at most once.
+                let mut property_found = false;
+                while let Some(property_line) = self.scanner.peek_line() {
+                    let property_trimmed =
+                        property_line.trim_start_matches(' ');
+                    let property_indent =
+                        property_line.chars().take_while(|c| *c == ' ').count();
+                    if property_trimmed.starts_with('&') && anchor.is_none() {
+                        self.scanner.advance(property_indent);
+                        anchor = Some(self.handle_anchor()?);
+                        property_found = true;
+                    } else if property_trimmed.starts_with('!') && tag.is_none()
+                    {
+                        self.scanner.advance(property_indent);
+                        // Tag decorating its container
+                        tag = self.handle_tag();
+                        property_found = true;
+                    } else {
+                        break;
+                    }
+                }
+                if !property_found {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidAnchor,
+                        format!(
+                            "Node can have at most one anchor and one tag, \
+                             but got: {line}"
+                        ),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
+                self.handle_node(
+                    first_indent_count,
+                    rest_indent_count,
+                    anchor,
+                    tag,
+                )?;
+            } else if trimmed == "..." {
+                // Document end marker: this node ends here, and the
+                // stream handler will emit `DocumentEnd`.
+                return Ok(());
+            } else if trimmed.starts_with('%') {
+                return Err(YamlError::new(
+                    ErrorKind::MissingDocumentEndMarkerBeforeDirective,
+                    format!(
+                        "Directive is only allowed before document start \
+                         marker `---` or after document end marker `...`, but \
+                         got: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             } else if line.trim_start_matches(' ').starts_with('\t') {
                 return Err(YamlError::new(
                     ErrorKind::InvalidStartOfToken,
@@ -214,8 +277,24 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_pos,
                 ));
             } else {
-                self.handle_scalar(first_indent_count, rest_indent_count, tag)?;
+                self.handle_scalar(
+                    first_indent_count,
+                    rest_indent_count,
+                    anchor,
+                    tag,
+                )?;
             }
+        } else if anchor.is_some() || tag.is_some() {
+            // Node properties without content: empty scalar node
+            // (e.g. standalone `!` or `&anchor` at EOF).
+            self.push_event(YamlEvent::Scalar(
+                anchor,
+                tag,
+                String::new(),
+                YamlScalarStyle::Plain,
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
         }
         Ok(())
     }
@@ -249,7 +328,9 @@ mod test {
                 YamlEvent::DocumentStart(true, YamlPosition::new(3, 1)),
                 YamlEvent::Scalar(
                     None,
+                    None,
                     "a".to_string(),
+                    YamlScalarStyle::Plain,
                     YamlPosition::new(4, 1),
                     YamlPosition::new(4, 1)
                 ),

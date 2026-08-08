@@ -3,8 +3,8 @@
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser, YamlState,
-    YamlValue,
+    ErrorKind, YamlDeserializer, YamlError, YamlEvent, YamlParser,
+    YamlScalarStyle, YamlState, YamlValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,7 @@ impl<'a> YamlParser<'a> {
     pub(crate) fn handle_block_seq(
         &mut self,
         indent_count: usize,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
@@ -58,10 +59,15 @@ impl<'a> YamlParser<'a> {
             indent_count,
             self.scanner.remains()
         );
-        self.push_event(YamlEvent::SequenceStart(tag, self.scanner.next_pos));
+        self.push_event(YamlEvent::SequenceStart(
+            anchor,
+            tag,
+            self.scanner.next_pos,
+        ));
         self.push_state(YamlState::InBlockSequnce);
         while let Some(line) = self.scanner.peek_line() {
             if line.is_empty() {
+                self.scanner.next_line();
                 continue;
             }
             let cur_indent = line.chars().take_while(|c| *c == ' ').count();
@@ -75,13 +81,15 @@ impl<'a> YamlParser<'a> {
                 if let Some(next_line) = self.scanner.peek_line() {
                     let next_indent =
                         next_line.chars().take_while(|c| *c == ' ').count();
-                    self.handle_node(next_indent, next_indent, None)?;
+                    self.handle_node(next_indent, next_indent, None, None)?;
                 } else {
                     if self.scanner.remains().is_empty() {
                         // Empty array
                         self.push_event(YamlEvent::Scalar(
                             None,
+                            None,
                             String::new(),
+                            YamlScalarStyle::Plain,
                             self.scanner.done_pos,
                             self.scanner.done_pos,
                         ));
@@ -89,7 +97,7 @@ impl<'a> YamlParser<'a> {
                 }
             } else if trimmed.starts_with("- ") {
                 self.scanner.advance(cur_indent + 2);
-                self.handle_node(0, cur_indent + 2, None)?;
+                self.handle_node(0, cur_indent + 2, None, None)?;
             } else if trimmed.is_empty() {
                 self.scanner.next_line();
                 continue;
@@ -113,6 +121,7 @@ impl<'a> YamlParser<'a> {
 
     pub(crate) fn handle_flow_seq(
         &mut self,
+        _anchor: Option<String>,
         _tag: Option<String>,
     ) -> Result<(), YamlError> {
         todo!()

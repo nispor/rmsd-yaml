@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ErrorKind, YamlError, YamlEvent, YamlParser};
+use crate::{ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 enum ChompingMethod {
@@ -27,14 +27,14 @@ impl<'a> YamlParser<'a> {
                             .unwrap_or_default(),
                     );
                     if self.scanner.advance_if_starts_with("+") {
-                        chomping_method = ChompingMethod::Strip;
-                    } else if self.scanner.advance_if_starts_with("-") {
                         chomping_method = ChompingMethod::Keep;
+                    } else if self.scanner.advance_if_starts_with("-") {
+                        chomping_method = ChompingMethod::Strip;
                     }
                 }
                 '+' => {
                     self.scanner.next_char();
-                    chomping_method = ChompingMethod::Strip;
+                    chomping_method = ChompingMethod::Keep;
                     if let Some(d) = self
                         .scanner
                         .peek_char()
@@ -47,7 +47,7 @@ impl<'a> YamlParser<'a> {
                 }
                 '-' => {
                     self.scanner.next_char();
-                    chomping_method = ChompingMethod::Keep;
+                    chomping_method = ChompingMethod::Strip;
                     if let Some(d) = self
                         .scanner
                         .peek_char()
@@ -65,11 +65,28 @@ impl<'a> YamlParser<'a> {
         (indentation_indicator, chomping_method)
     }
 
+    /// YAML 1.2.2 SPEC, 8.1.1.1. Block Indentation Indicator:
+    ///     If a block scalar has an explicit indentation indicator, then
+    ///     the content indentation level of the scalar is equal to the
+    ///     indentation level of the parent node plus the integer value of
+    ///     the indentation indicator character.
+    fn block_scalar_base_indent(&self, rest_indent_count: usize) -> usize {
+        if self.cur_state().is_block_seq() {
+            // The block scalar is a sequence entry, whose
+            // `rest_indent_count` includes the `- ` entry prefix. The
+            // parent node is the sequence itself.
+            rest_indent_count.saturating_sub(2)
+        } else {
+            rest_indent_count
+        }
+    }
+
     /// Advance the scanner till scalar ends.
     pub(crate) fn handle_scalar(
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
@@ -89,6 +106,7 @@ impl<'a> YamlParser<'a> {
                     self.handle_literal_block_scalar(
                         first_indent_count,
                         rest_indent_count,
+                        anchor,
                         tag,
                     )?;
                 }
@@ -97,22 +115,24 @@ impl<'a> YamlParser<'a> {
                     self.handle_folded_block_scalar(
                         first_indent_count,
                         rest_indent_count,
+                        anchor,
                         tag,
                     )?;
                 }
                 '\'' => {
                     self.scanner.advance_till_non_space();
                     self.scanner.next_char();
-                    self.handle_single_quoted_flow_scalar(tag)?;
+                    self.handle_single_quoted_flow_scalar(anchor, tag)?;
                 }
                 '"' => {
                     self.scanner.advance_till_non_space();
-                    self.handle_double_quoted_flow_scalar(tag)?;
+                    self.handle_double_quoted_flow_scalar(anchor, tag)?;
                 }
                 _ => {
                     self.handle_plain_scalar(
                         first_indent_count,
                         rest_indent_count,
+                        anchor,
                         tag,
                     )?;
                 }
@@ -129,6 +149,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
@@ -147,7 +168,7 @@ impl<'a> YamlParser<'a> {
 
         let leading_space_count = self.scanner.count_block_identation();
         let desired_indent = if let Some(d) = indentation_indicator {
-            d + rest_indent_count
+            d + self.block_scalar_base_indent(rest_indent_count)
         } else {
             leading_space_count
         };
@@ -209,7 +230,14 @@ impl<'a> YamlParser<'a> {
 
         let end_pos = self.scanner.done_pos;
 
-        self.push_event(YamlEvent::Scalar(tag, ret, start_pos, end_pos));
+        self.push_event(YamlEvent::Scalar(
+            anchor,
+            tag,
+            ret,
+            YamlScalarStyle::Literal,
+            start_pos,
+            end_pos,
+        ));
         Ok(())
     }
 
@@ -227,6 +255,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
@@ -258,7 +287,7 @@ impl<'a> YamlParser<'a> {
 
         let leading_space_count = self.scanner.count_block_identation();
         let desired_indent = if let Some(d) = indentation_indicator {
-            d + rest_indent_count
+            d + self.block_scalar_base_indent(rest_indent_count)
         } else {
             leading_space_count
         };
@@ -270,6 +299,7 @@ impl<'a> YamlParser<'a> {
                 if is_empty_line(line) {
                     self.scanner.next_line();
                     lines.push("");
+                    continue;
                 } else {
                     break;
                 }
@@ -284,8 +314,10 @@ impl<'a> YamlParser<'a> {
         let end_pos = self.scanner.done_pos;
 
         self.push_event(YamlEvent::Scalar(
+            anchor,
             tag,
             block_scalar_folding(lines, chomping_method),
+            YamlScalarStyle::Folded,
             start_pos,
             end_pos,
         ));
@@ -294,6 +326,7 @@ impl<'a> YamlParser<'a> {
 
     pub(crate) fn handle_single_quoted_flow_scalar(
         &mut self,
+        _anchor: Option<String>,
         _tag: Option<String>,
     ) -> Result<(), YamlError> {
         todo!()
@@ -302,6 +335,7 @@ impl<'a> YamlParser<'a> {
     /// Should start with `"` and end with `"`
     pub(crate) fn handle_double_quoted_flow_scalar(
         &mut self,
+        anchor: Option<String>,
         tag: Option<String>,
     ) -> Result<(), YamlError> {
         let mut ret = String::new();
@@ -323,8 +357,10 @@ impl<'a> YamlParser<'a> {
         }
 
         self.push_event(YamlEvent::Scalar(
+            anchor,
             tag,
             flow_folding(ret),
+            YamlScalarStyle::DoubleQuoted,
             start_pos,
             self.scanner.done_pos,
         ));
@@ -335,6 +371,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
+        anchor: Option<String>,
         mut tag: Option<String>,
     ) -> Result<(), YamlError> {
         log::trace!(
@@ -380,9 +417,17 @@ impl<'a> YamlParser<'a> {
             if trimmed.starts_with("!") {
                 tag = self.handle_tag();
             }
-            let Some(line) = self.scanner.peek_line() else {
+            let Some(mut line) = self.scanner.peek_line() else {
                 continue;
             };
+            // YAML 1.2.2 SPEC, 7.1. Comment Lines:
+            //      Comments are a presentation detail and must not be
+            //      used to convey content information.
+            if !self.cur_state().is_block_map_key()
+                && let Some(comment_offset) = line.find(" #")
+            {
+                line = &line[..comment_offset];
+            }
             let trimmed = line.trim_start_matches(' ');
 
             self.validate_plain_scalar(line)?;
@@ -394,8 +439,10 @@ impl<'a> YamlParser<'a> {
                 if let Some(offset) = line.find(": ") {
                     self.scanner.advance_offset(offset);
                     self.push_event(YamlEvent::Scalar(
+                        anchor,
                         tag,
                         line[expected_indent_count..offset].to_string(),
+                        YamlScalarStyle::Plain,
                         start_pos,
                         self.scanner.done_pos,
                     ));
@@ -407,16 +454,20 @@ impl<'a> YamlParser<'a> {
                     if line == ":" {
                         // Empty key
                         self.push_event(YamlEvent::Scalar(
+                            anchor,
                             tag,
                             String::new(),
+                            YamlScalarStyle::Plain,
                             start_pos,
                             self.scanner.done_pos,
                         ));
                     } else {
                         self.push_event(YamlEvent::Scalar(
+                            anchor,
                             tag,
                             line[expected_indent_count..line.len() - 1]
                                 .to_string(),
+                            YamlScalarStyle::Plain,
                             start_pos,
                             self.scanner.done_pos,
                         ));
@@ -466,7 +517,14 @@ impl<'a> YamlParser<'a> {
             end_pos.column = start_pos.column + str_val.chars().count() - 1;
         }
 
-        self.push_event(YamlEvent::Scalar(tag, str_val, start_pos, end_pos));
+        self.push_event(YamlEvent::Scalar(
+            anchor,
+            tag,
+            str_val,
+            YamlScalarStyle::Plain,
+            start_pos,
+            end_pos,
+        ));
         Ok(())
     }
 
@@ -491,18 +549,18 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
-                ':' | '?' | '-' => {
-                    if Some(' ') == self.scanner.remains().chars().nth(1) {
-                        return Err(YamlError::new(
-                            ErrorKind::InvalidPlainScalarStart,
-                            format!(
-                                "Plain scalar should not start with \
-                                 '{first_char} '"
-                            ),
-                            self.scanner.next_pos,
-                            self.scanner.next_pos,
-                        ));
-                    }
+                ':' | '?' | '-'
+                    if Some(' ') == self.scanner.remains().chars().nth(1) =>
+                {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidPlainScalarStart,
+                        format!(
+                            "Plain scalar should not start with '{first_char} \
+                             '"
+                        ),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
                 }
                 _ => (),
             }

@@ -34,7 +34,7 @@ fn compose_value(
             YamlEvent::DocumentEnd(_, _) | YamlEvent::StreamEnd => {
                 break;
             }
-            YamlEvent::SequenceStart(tag, pos) => {
+            YamlEvent::SequenceStart(_anchor, tag, pos) => {
                 let array = compose_sequence(events_iter, pos)?;
                 if let Some(tag) = tag {
                     return Ok(YamlValue {
@@ -62,7 +62,7 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::MapStart(tag, pos) => {
+            YamlEvent::MapStart(_anchor, tag, pos) => {
                 let map = compose_map(events_iter, pos)?;
                 if let Some(tag) = tag {
                     return Ok(YamlValue {
@@ -90,7 +90,7 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::Scalar(tag, val, start, end) => {
+            YamlEvent::Scalar(_anchor, tag, val, _style, start, end) => {
                 if let Some(tag) = tag {
                     return Ok(YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
@@ -177,6 +177,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::YamlScalarStyle;
 
     #[test]
     fn test_compose_single_scalar() {
@@ -185,7 +186,9 @@ mod test {
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(1, 3),
             ),
@@ -208,16 +211,20 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::SequenceStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::SequenceStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 3),
                 YamlPosition::new(1, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "def".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 3),
                 YamlPosition::new(2, 5),
             ),
@@ -252,16 +259,20 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 3),
                 YamlPosition::new(1, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "def".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 3),
                 YamlPosition::new(2, 5),
             ),
@@ -299,31 +310,39 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::SequenceStart(None, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::SequenceStart(None, None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 3),
                 YamlPosition::new(1, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "def".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 8),
                 YamlPosition::new(1, 10),
             ),
             YamlEvent::MapEnd(YamlPosition::new(1, 10)),
-            YamlEvent::MapStart(None, YamlPosition::new(2, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(2, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "hig".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 3),
                 YamlPosition::new(2, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "klm".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 8),
                 YamlPosition::new(2, 10),
             ),
@@ -386,29 +405,37 @@ mod test {
         let events = vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(1, 3),
             ),
-            YamlEvent::SequenceStart(None, YamlPosition::new(2, 1)),
+            YamlEvent::SequenceStart(None, None, YamlPosition::new(2, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "def".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 3),
                 YamlPosition::new(2, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "hig".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(3, 3),
                 YamlPosition::new(3, 5),
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "klm".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(4, 3),
                 YamlPosition::new(4, 5),
             ),

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+mod anchor;
 mod compose;
 mod deserializer;
 mod error;
@@ -31,7 +32,7 @@ pub use self::{
     value::{YamlValue, YamlValueData},
 };
 pub(crate) use self::{
-    event::{YamlEvent, YamlEventIter},
+    event::{YamlEvent, YamlEventIter, YamlScalarStyle},
     map::YamlValueMapAccess,
     parser::YamlParser,
     scalar_ser::to_scalar_string,

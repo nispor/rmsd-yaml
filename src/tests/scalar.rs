@@ -2,7 +2,7 @@
 
 use pretty_assertions::assert_eq;
 
-use crate::{YamlEvent, YamlParser, YamlPosition};
+use crate::{YamlEvent, YamlParser, YamlPosition, YamlScalarStyle};
 
 #[test]
 fn test_block_scalar_literal_block_clip_auto() {
@@ -15,7 +15,9 @@ fn test_block_scalar_literal_block_clip_auto() {
             YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc \ndef\n".to_string(),
+                YamlScalarStyle::Literal,
                 YamlPosition::new(2, 2),
                 YamlPosition::new(3, 5)
             ),
@@ -35,7 +37,9 @@ fn test_block_scalar_literal_block_clip_fixed_ident() {
             YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 " abc \n def\n".to_string(),
+                YamlScalarStyle::Literal,
                 YamlPosition::new(2, 4),
                 YamlPosition::new(5, 3),
             ),
@@ -52,7 +56,9 @@ fn test_block_scalar_literal_block_strip_fixed_ident() {
         YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
         YamlEvent::Scalar(
             None,
+            None,
             " abc \n def".to_string(),
+            YamlScalarStyle::Literal,
             YamlPosition::new(2, 4),
             YamlPosition::new(3, 8),
         ),
@@ -60,11 +66,11 @@ fn test_block_scalar_literal_block_strip_fixed_ident() {
         YamlEvent::StreamEnd,
     ];
     assert_eq!(
-        YamlParser::parse_to_events("--- |3+\n    abc \n    def\n").unwrap(),
+        YamlParser::parse_to_events("--- |3-\n    abc \n    def\n").unwrap(),
         expected
     );
     assert_eq!(
-        YamlParser::parse_to_events("--- |+3\n    abc \n    def\n").unwrap(),
+        YamlParser::parse_to_events("--- |-3\n    abc \n    def\n").unwrap(),
         expected
     );
 }
@@ -76,7 +82,9 @@ fn test_block_scalar_literal_block_keep_fixed_ident() {
         YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
         YamlEvent::Scalar(
             None,
+            None,
             " abc \n def  \n\n\n".to_string(),
+            YamlScalarStyle::Literal,
             YamlPosition::new(2, 4),
             YamlPosition::new(5, 1),
         ),
@@ -84,12 +92,12 @@ fn test_block_scalar_literal_block_keep_fixed_ident() {
         YamlEvent::StreamEnd,
     ];
     assert_eq!(
-        YamlParser::parse_to_events("--- |3-\n    abc \n    def  \n   \n\n")
+        YamlParser::parse_to_events("--- |3+\n    abc \n    def  \n   \n\n")
             .unwrap(),
         expected
     );
     assert_eq!(
-        YamlParser::parse_to_events("--- |-3\n    abc \n    def  \n   \n\n")
+        YamlParser::parse_to_events("--- |+3\n    abc \n    def  \n   \n\n")
             .unwrap(),
         expected
     );
@@ -104,7 +112,9 @@ fn test_block_scalar_literal_all_indented() {
             YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "abc\ndef\n".to_string(),
+                YamlScalarStyle::Literal,
                 YamlPosition::new(3, 4),
                 YamlPosition::new(5, 1)
             ),
@@ -126,7 +136,9 @@ fn test_plain_scalar_folding() {
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "1st non-empty\n2nd non-empty 3rd non-empty".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(4, 14)
             ),
@@ -146,7 +158,9 @@ fn test_double_quoted_scalar() {
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 " foo\nbar\nbaz ".to_string(),
+                YamlScalarStyle::DoubleQuoted,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(7, 2)
             ),
@@ -165,7 +179,9 @@ fn test_block_folding_scalar_simple() {
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "folded text\n".to_string(),
+                YamlScalarStyle::Folded,
                 YamlPosition::new(2, 1),
                 YamlPosition::new(4, 1)
             ),
@@ -185,7 +201,9 @@ fn test_block_folding_scalar_more_indented() {
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "foo \n\n\t bar\n\nbaz\n".to_string(),
+                YamlScalarStyle::Folded,
                 YamlPosition::new(2, 1),
                 YamlPosition::new(6, 6)
             ),

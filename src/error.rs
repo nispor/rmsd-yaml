@@ -54,6 +54,12 @@ pub enum ErrorKind {
     LessIndentedWithoutParent,
     /// No support of multiple documents
     NoSupportMultipleDocuments,
+    /// Invalid anchor: empty anchor name, flow indicator character in
+    /// anchor name, or anchor attached to an alias.
+    InvalidAnchor,
+    /// Directive is only allowed before document start marker `---` or
+    /// after document end marker `...`.
+    MissingDocumentEndMarkerBeforeDirective,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -89,6 +95,9 @@ impl std::fmt::Display for ErrorKind {
                     "less_indented_without_parent",
                 Self::NoSupportMultipleDocuments =>
                     "no_support_mulitple_documents",
+                Self::InvalidAnchor => "invalid_anchor",
+                Self::MissingDocumentEndMarkerBeforeDirective =>
+                    "missing_document_end_marker_before_directive",
             }
         )
     }

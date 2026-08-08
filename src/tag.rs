@@ -21,7 +21,9 @@ impl<'a> YamlParser<'a> {
             self.scanner.advance_till_linebreak_or_space();
             return Some(ret);
         } else if let Some(tag) = tag_name.strip_prefix("!") {
-            let ret = tag.to_string();
+            // YAML 1.2.2 SPEC, 6.18. Tag Shorthands:
+            //      A lone `!` or `!<name>` is a local tag.
+            let ret = format!("<!{tag}>");
             self.scanner.advance_till_linebreak_or_space();
             return Some(ret);
         } else if !tag_name.is_empty() {

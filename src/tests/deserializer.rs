@@ -2,7 +2,7 @@
 
 use pretty_assertions::assert_eq;
 
-use crate::{YamlEvent, YamlParser, YamlPosition};
+use crate::{YamlEvent, YamlParser, YamlPosition, YamlScalarStyle};
 
 #[test]
 fn test_map_of_plain_scalar() {
@@ -13,28 +13,36 @@ fn test_map_of_plain_scalar() {
         vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "a".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(1, 1)
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "1".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 4),
                 YamlPosition::new(1, 4)
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "b".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 1),
                 YamlPosition::new(2, 1)
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "2".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 4),
                 YamlPosition::new(2, 4)
             ),
@@ -52,16 +60,20 @@ fn test_map_of_plain_scalar_in_two_lines() {
         vec![
             YamlEvent::StreamStart,
             YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
-            YamlEvent::MapStart(None, YamlPosition::new(1, 1)),
+            YamlEvent::MapStart(None, None, YamlPosition::new(1, 1)),
             YamlEvent::Scalar(
                 None,
+                None,
                 "a".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(1, 1),
                 YamlPosition::new(1, 1)
             ),
             YamlEvent::Scalar(
                 None,
+                None,
                 "b".to_string(),
+                YamlScalarStyle::Plain,
                 YamlPosition::new(2, 3),
                 YamlPosition::new(2, 3)
             ),

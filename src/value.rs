@@ -45,7 +45,7 @@ impl YamlValue {
         } else {
             Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a char, but got {}", &self.data),
+                format!("Expecting a char, but got {}", self.data),
                 self.start,
                 self.end,
             ))
@@ -64,7 +64,7 @@ impl YamlValue {
         } else {
             Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a string, but got {}", &self.data),
+                format!("Expecting a string, but got {}", self.data),
                 self.start,
                 self.end,
             ))
@@ -86,7 +86,7 @@ impl YamlValue {
         } else {
             Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a bool, but got {}", &self.data),
+                format!("Expecting a bool, but got {}", self.data),
                 self.start,
                 self.end,
             ))
@@ -170,7 +170,7 @@ impl YamlValue {
         } else {
             Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a number, but got {}", &self.data),
+                format!("Expecting a number, but got {}", self.data),
                 self.start,
                 self.end,
             ))
@@ -293,7 +293,7 @@ impl YamlValue {
         } else {
             Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a number, but got {}", &self.data),
+                format!("Expecting a number, but got {}", self.data),
                 self.start,
                 self.end,
             ))
