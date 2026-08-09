@@ -15,12 +15,13 @@
 
 ## out.yaml tests
 
-* [ ] Pass the remaining to_yaml tests: the value-based dump
-      (`YamlValue::to_string()`) passes the 93 cases in
-      `SUPPORTED_OUT_YAML_TEST`; the other 120 `out.yaml` files cannot
-      be reproduced by a value dump (anchors/aliases, `---`/`...`
-      markers, block-scalar and quoted styles, multi-document streams;
-      see `DESIGNS.md`)
+* [x] Pass the to_yaml tests: the value-based dump
+      (`YamlValue::to_string()`) passes the 201 cases in
+      `SUPPORTED_OUT_YAML_TEST`; the other 48 `out.yaml` files cannot
+      be reproduced (14 multi-document streams; 34 hand-authored
+      deviations from the canonical events; see `DESIGNS.md`)
+* [ ] Support multi-document streams in the dump (the remaining 14
+      `NoSupportMultipleDocuments` failures)
 
 ## in.json tests
 

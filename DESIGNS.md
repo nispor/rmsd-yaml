@@ -46,12 +46,12 @@ What should change?
   files were hand-tuned afterwards (e.g. `literal-scalars` gained a
   `---` its input never had; `block-scalar-keep` lost one).
 
-**Measurement of the alternatives** (our value dump over all 213
+**Measurement of the alternatives** (our value dump over all 249
 cases with an `out.yaml`, error tests excluded):
 
 | configuration                      | matches |
 |------------------------------------|---------|
-| current default (no `---`)         | **93**  |
+| current default (no `---`)         | 93      |
 | `leading_start_indicator: true`    | 17      |
 | YAML::PP dump, `header=0`          | 50      |
 | YAML::PP dump, `header=1` (default)| 18      |
@@ -67,7 +67,7 @@ that the value dump *ignored* `YamlSerializeOption` entirely
   validates `indent_count >= 2` (`IndentTooSmall`), mirroring the
   serde-path `to_string_with_opt`.
 * `YamlValue::to_string()` uses the default options, so the user's
-  workflow snippet keeps working and the 93 enabled tests stay green.
+  workflow snippet keeps working.
 * `max_width` has no effect on the value dump: `out.yaml` never folds
   long lines (only one line in the whole suite exceeds 80 chars), so
   the value dump never wraps; only the serde path folds.
@@ -77,46 +77,67 @@ the general API (matching YAML::PP's `header=1`), the out.yaml harness
 would have to pass `false` explicitly — that swap was not made because
 it reduces alignment with the actual test data.
 
-## 3. How `SUPPORTED_OUT_YAML_TEST` was enabled
+## 3. Round-trip metadata on `YamlValue` (`YamlValueMeta`)
 
-The list was enabled one test case at a time: add a case, run
-`cargo test --lib yaml_test_suit_out_yaml`, and only when it passes
-enable the next. Failures were fixed (with a commit) as they came up.
-The end state is exactly the set of cases the value dump reproduces
-byte-identically: **93 of 213**.
+To reproduce `out.yaml` byte-identically, the dump needs information
+the value tree does not carry by default. `YamlValue` gained a `meta`
+field (`YamlValueMeta`):
 
-The other 120 cases with an `out.yaml` cannot be reproduced by a
-value-based dump, in the following categories:
+* `scalar_style` — the input style (plain/single/double/literal/
+  folded), set by compose from the events.
+* `anchor` / `alias` — anchor names and alias references.
+* `doc_explicit` / `doc_end_explicit` — whether the document started
+  with `---` / ended with `...`.
 
-1. **Anchors and aliases** (`&a`, `*a`): resolved at compose time,
-   not representable in the `YamlValue` tree. ~30 cases.
-2. **Explicit `---` / `...` document markers**: the value tree does
-   not record them; and the `out.yaml` files are inconsistent about
-   them (some gain a `---`, some lose one — see above). ~50 cases.
-3. **Block scalar styles (`|`, `>`)**: `out.yaml` preserves the input
-   style, the value tree does not. ~35 cases.
-4. **Quoted styles preserved from input**: `"12"` stays `"12"`, etc.
-   ~15 cases.
-5. **Multiple documents in one stream**: `compose()` rejects them
-   (`NoSupportMultipleDocuments`). ~12 cases.
-6. **Hand-authored non-round-tripping `out.yaml`**: e.g.
-   `multiline-scalar-at-top-level` renders `a b c d\ne` as
-   `'a b c d\n\n  e'`, which re-parses to a different value. Not
-   reproducible by any algorithm.
-7. **`null` for empty flow-map values**
-   (`flow-mapping-separate-values`): contradicts the empty rendering
-   used elsewhere.
+`meta.scalar_style` is excluded from `PartialEq`/`Hash` (value
+semantics unchanged), but `anchor`/`alias` are part of the node
+identity: an `&a x` key and a `*a` key are different nodes and must
+both survive in the map. `YamlScalarStyle` is now public.
 
 ## 4. Dump conventions implemented in `YamlValue::to_string()`
 
+The layout follows the `out.yaml` data:
+
 * Non-empty collections are block style; empty collections stay
-  `[]` / `{}`.
-* A sequence value of a mapping entry is written indentless
-  (`key:\n- item`); a mapping value is indented.
+  `[]` / `{}`; a sequence value of a mapping entry is written
+  indentless (`key:\n- item`); a mapping value is indented.
 * Non-simple keys (multiline scalars, non-empty collections) use the
-  explicit `? key` / `: value` form.
-* Scalars: plain is preferred (including number/bool/null-looking
-  text), then single-quoted, then double-quoted with escapes; empty
-  scalars stay empty; non-ASCII is escaped (`\uXXXX`).
+  explicit `? key` / `: value` form; anchored collection keys are
+  indentless.
+* Scalars keep their input style: literal/folded block scalars are
+  re-rendered as `|`/`>` (with chomping and indentation hints,
+  `block_allowed` fitted to the data), single/double quotes are kept
+  (double keeps `\n` escapes; single quotes multiline values with
+  two-space indented continuation lines), plain scalars are re-derived
+  and multiline plain scalars become single-quoted.
+* Anchors (`&name`) and aliases (`*name`) are reproduced.
+* An explicit `---` puts the root node's properties/scalar inline
+  (`--- !!set`, `--- scalar`); an explicit `...` closes the document.
 * Tags are written back as shorthands (`!!int`, `!foo`,
   `!<tag:...>` for unmatched prefixes).
+
+## 5. Coverage: 201 of 249 `out.yaml` cases
+
+The enabled set was grown one test case at a time (enable, run, fix
+with a commit). The final 201/249 (all 7 `error`-marked ones are
+skipped by the harness) are reproduced byte-identically. The
+remaining 48 fall into two categories:
+
+1. **Multi-document streams (14)**: `compose()` rejects streams with
+   more than one document (`NoSupportMultipleDocuments`), so
+   `to_value` fails and nothing is dumped (`spec-example-2-7`,
+   `spec-example-2-28`, `tags-for-root-objects`, `two-scalar-docs-*`,
+   ...). Supporting them needs a multi-document dump API.
+2. **Hand-authored / unreproducible (34)**: the `out.yaml` file
+   disagrees with the canonical `test.event` value or the input, e.g.
+   extra blank lines (`multiline-scalar-at-top-level`,
+   `spec-example-7-9`, `spec-example-7-12`), a `---`/`...` that the
+   input does not contain (`literal-scalars`, `tab-after-document-
+   header`), `null` for empty values (`flow-mapping-separate-values`),
+   re-derived styles (`colon-at-the-beginning-...`), tabs rejected by
+   the parser (`tabs-in-various-contexts/003-009`), the `-1-3`
+   YAML-1.3 variants, and the block-scalar indentation-hint deviation
+   (`spec-example-8-10`, `trailing-whitespace-in-streams/00-02`).
+
+The disabled cases stay out of `SUPPORTED_OUT_YAML_TEST`, each with
+the reason documented here.
