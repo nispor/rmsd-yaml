@@ -5,27 +5,27 @@ use serde::de::{
     value::StrDeserializer,
 };
 
-use crate::{ErrorKind, YamlDeserializer, YamlError, YamlValue, YamlValueData};
+use crate::{Error, ErrorKind, Value, ValueData, YamlDeserializer};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct YamlValueEnumAccess {
-    value: YamlValue,
+pub(crate) struct ValueEnumAccess {
+    value: Value,
 }
 
-impl YamlValueEnumAccess {
-    pub(crate) fn new(value: YamlValue) -> Self {
+impl ValueEnumAccess {
+    pub(crate) fn new(value: Value) -> Self {
         Self { value }
     }
 }
 
-impl<'de> VariantAccess<'de> for YamlValueEnumAccess {
-    type Error = YamlError;
+impl<'de> VariantAccess<'de> for ValueEnumAccess {
+    type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
-        if matches!(self.value.data, YamlValueData::String(_)) {
+        if matches!(self.value.data, ValueData::String(_)) {
             Ok(())
         } else {
-            Err(YamlError::new(
+            Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!(
                     "Expecting enum/variant string, but got {}",
@@ -41,8 +41,8 @@ impl<'de> VariantAccess<'de> for YamlValueEnumAccess {
     where
         T: DeserializeSeed<'de>,
     {
-        if let YamlValueData::Tag(tag) = self.value.data {
-            let value = YamlValue {
+        if let ValueData::Tag(tag) = self.value.data {
+            let value = Value {
                 start: self.value.start,
                 end: self.value.end,
                 data: tag.data,
@@ -83,8 +83,8 @@ impl<'de> VariantAccess<'de> for YamlValueEnumAccess {
     }
 }
 
-impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
-    type Error = YamlError;
+impl<'de> EnumAccess<'de> for ValueEnumAccess {
+    type Error = Error;
     type Variant = Self;
 
     fn variant_seed<V>(
@@ -94,14 +94,14 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
     where
         V: DeserializeSeed<'de>,
     {
-        if let YamlValueData::Tag(tag) = self.value.data {
+        if let ValueData::Tag(tag) = self.value.data {
             let tag_name = StrDeserializer::<Self::Error>::new(
                 variant_name_from_tag(tag.name.as_str()),
             );
             Ok((
                 seed.deserialize(tag_name)?,
                 Self {
-                    value: YamlValue {
+                    value: Value {
                         data: tag.data.clone(),
                         start: self.value.start,
                         end: self.value.end,

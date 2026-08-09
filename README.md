@@ -43,24 +43,24 @@ assert_eq!(
 // Deserialize.
 let back: Config = from_str(&yaml)?;
 assert_eq!(back, config);
-# Ok::<(), rmsd_yaml::YamlError>(())
+# Ok::<(), rmsd_yaml::Error>(())
 ```
 
 ## Working with the value model
 
-`YamlValue` mirrors the YAML document tree, including tags:
+`Value` mirrors the YAML document tree, including tags:
 
 ```rust
-use rmsd_yaml::{to_value, YamlValueData};
+use rmsd_yaml::{from_str, ValueData};
 
-let value = to_value("a: 1\nb: [x, y]\n")?;
+let value = from_str::<Value>("a: 1\nb: [x, y]\n")?;
 match &value.data {
-    YamlValueData::Map(map) => {
+    ValueData::Map(map) => {
         assert!(map.contains_key(&"a".into()));
     }
     _ => unreachable!(),
 }
-# Ok::<(), rmsd_yaml::YamlError>(())
+# Ok::<(), rmsd_yaml::Error>(())
 ```
 
 ## Serialization options
@@ -76,7 +76,7 @@ let yaml = to_string_with_opt(
         max_width: 80,
     },
 )?;
-# Ok::<(), rmsd_yaml::YamlError>(())
+# Ok::<(), rmsd_yaml::Error>(())
 ```
 
 ## Performance

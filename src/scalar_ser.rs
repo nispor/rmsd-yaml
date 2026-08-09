@@ -159,7 +159,7 @@ pub(crate) fn escape_double_quoted(input: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Scalar rendering for the `to_yaml` workflow (parsed `YamlValue` dump).
+// Scalar rendering for the `to_yaml` workflow (parsed `Value` dump).
 //
 // The conventions follow the yaml-test-suite `out.yaml` files: plain
 // scalars are preferred (including number/bool/null-looking text),

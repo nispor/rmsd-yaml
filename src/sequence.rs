@@ -3,18 +3,18 @@
 use serde::de::{DeserializeSeed, SeqAccess};
 
 use crate::{
-    ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
-    YamlParser, YamlScalarStyle, YamlState, YamlValue,
+    Error, ErrorKind, Value, YamlCollectionStyle, YamlDeserializer, YamlEvent,
+    YamlParser, YamlScalarStyle, YamlState,
     parser::{is_document_end_marker, is_document_start_marker},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct YamlValueSeqAccess {
-    data: Vec<YamlValue>,
+pub(crate) struct SequenceAccess {
+    data: Vec<Value>,
 }
 
-impl YamlValueSeqAccess {
-    pub(crate) fn new(data: Vec<YamlValue>) -> Self {
+impl SequenceAccess {
+    pub(crate) fn new(data: Vec<Value>) -> Self {
         // The Vec::pop() is much quicker than Vec::remove(0), so we
         // reverse it.
         let mut data = data;
@@ -23,8 +23,8 @@ impl YamlValueSeqAccess {
     }
 }
 
-impl<'de> SeqAccess<'de> for YamlValueSeqAccess {
-    type Error = YamlError;
+impl<'de> SeqAccess<'de> for SequenceAccess {
+    type Error = Error;
 
     fn next_element_seed<K>(
         &mut self,
@@ -54,7 +54,7 @@ impl<'a> YamlParser<'a> {
         indent_count: usize,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_block_seq {} {:?}",
             indent_count,
@@ -255,7 +255,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         let start_pos = self.scanner.next_pos;
         self.scanner.next_char();
         self.push_event(YamlEvent::SequenceStart(
@@ -274,7 +274,7 @@ impl<'a> YamlParser<'a> {
             loop {
                 self.check_flow_line_start()?;
                 if self.scanner.peek_char() == Some(',') {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::UnfinishedSequenceIndicator,
                         "A flow sequence entry may not start with ','"
                             .to_string(),
@@ -292,7 +292,7 @@ impl<'a> YamlParser<'a> {
                         // separation space) is an error.
                         if self.scanner.peek_char() == Some('#') {
                             return Err(
-                                YamlError::new(
+                                Error::new(
                                     ErrorKind::AmbiguityPlainScalar,
                                     "Comment must be preceded by a space \
                                      after                                  \
@@ -311,7 +311,7 @@ impl<'a> YamlParser<'a> {
                             break;
                         }
                         if self.scanner.peek_char() == Some(',') {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::UnfinishedSequenceIndicator,
                                 format!(
                                     "Expecting an entry after ',' in flow \
@@ -328,7 +328,7 @@ impl<'a> YamlParser<'a> {
                         break;
                     }
                     Some(c) => {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::UnfinishedSequenceIndicator,
                             format!(
                                 "Expecting ',' or ']' in flow sequence, but \
@@ -339,7 +339,7 @@ impl<'a> YamlParser<'a> {
                         ));
                     }
                     None => {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::UnfinishedSequenceIndicator,
                             "Unfinished flow sequence".to_string(),
                             self.scanner.next_pos,
@@ -356,7 +356,7 @@ impl<'a> YamlParser<'a> {
 
     /// Parse a flow sequence entry. An entry containing `key: value` is
     /// a single-pair flow mapping.
-    fn handle_flow_seq_entry(&mut self) -> Result<(), YamlError> {
+    fn handle_flow_seq_entry(&mut self) -> Result<(), Error> {
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some('?')
             && matches!(
@@ -442,7 +442,7 @@ impl<'a> YamlParser<'a> {
             // (YAML 1.2.2 SPEC, 7.4.5), so a key that spans a line
             // break is an error, e.g. `[ key\n  : value ]`.
             if self.scanner.next_pos.line != key_start_line {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidImplicitKey,
                     "Implicit mapping key must be contained in a single line"
                         .to_string(),

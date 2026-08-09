@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use crate::{ErrorKind, YamlError};
+use crate::{Error, ErrorKind};
 
 /// Position of character
 /// Both line and column are starting from 1, e.g. First character is
@@ -38,9 +38,9 @@ impl std::fmt::Display for YamlPosition {
 }
 
 impl TryFrom<&str> for YamlPosition {
-    type Error = YamlError;
+    type Error = Error;
 
-    fn try_from(value: &str) -> Result<Self, YamlError> {
+    fn try_from(value: &str) -> Result<Self, Error> {
         let err_msg = format!(
             "Expecting format `line [0-9]+ column [0-9]+`, but got: {value}"
         );
@@ -48,7 +48,7 @@ impl TryFrom<&str> for YamlPosition {
 
         if splited.len() != 4 || splited[0] != "line" || splited[2] != "column"
         {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidPosition,
                 err_msg.clone(),
                 YamlPosition::new(1, 1),
@@ -57,7 +57,7 @@ impl TryFrom<&str> for YamlPosition {
         }
 
         let line = usize::from_str(splited[1]).map_err(|_| {
-            YamlError::new(
+            Error::new(
                 ErrorKind::InvalidPosition,
                 err_msg.clone(),
                 YamlPosition::new(1, 1),
@@ -66,7 +66,7 @@ impl TryFrom<&str> for YamlPosition {
         })?;
 
         let column = usize::from_str(splited[3]).map_err(|_| {
-            YamlError::new(
+            Error::new(
                 ErrorKind::InvalidPosition,
                 err_msg.clone(),
                 YamlPosition::new(1, 1),

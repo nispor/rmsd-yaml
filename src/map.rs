@@ -6,8 +6,8 @@ use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::{
-    ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
-    YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
+    Error, ErrorKind, Value, YamlCollectionStyle, YamlDeserializer, YamlEvent,
+    YamlParser, YamlPosition, YamlScalarStyle, YamlState,
     parser::{
         find_key_value_separator, flow_collection_is_key,
         is_document_end_marker, is_document_start_marker,
@@ -16,9 +16,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct YamlValueMap(IndexMap<YamlValue, YamlValue>);
+pub struct Mapping(IndexMap<Value, Value>);
 
-impl std::hash::Hash for YamlValueMap {
+impl std::hash::Hash for Mapping {
     fn hash<H>(&self, state: &mut H)
     where
         H: Hasher,
@@ -34,41 +34,47 @@ impl std::hash::Hash for YamlValueMap {
     }
 }
 
-impl YamlValueMap {
-    pub(crate) fn new() -> Self {
+impl Mapping {
+    pub fn new() -> Self {
         Self(IndexMap::new())
     }
 
-    pub(crate) fn insert(&mut self, key: YamlValue, val: YamlValue) {
+    pub fn insert(&mut self, key: Value, val: Value) {
         self.0.insert(key, val);
     }
 
-    pub(crate) fn pop(&mut self) -> Option<(YamlValue, YamlValue)> {
+    pub fn get(&self, key: &Value) -> Option<&Value> {
+        self.0.get(key)
+    }
+
+    pub fn pop(&mut self) -> Option<(Value, Value)> {
         self.0.pop()
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    pub(crate) fn iter(
-        &self,
-    ) -> impl Iterator<Item = (&YamlValue, &YamlValue)> {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Value, &Value)> {
         self.0.iter()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct YamlValueMapAccess {
-    data: YamlValueMap,
+pub(crate) struct MappingAccess {
+    data: Mapping,
     // Used to cache key drained from data
-    cached_key: Option<YamlValue>,
+    cached_key: Option<Value>,
     // Used to cache value drained from data
-    cached_value: Option<YamlValue>,
+    cached_value: Option<Value>,
 }
 
-impl YamlValueMapAccess {
-    pub(crate) fn new(data: YamlValueMap) -> Self {
+impl MappingAccess {
+    pub(crate) fn new(data: Mapping) -> Self {
         Self {
             data,
             cached_key: None,
@@ -77,8 +83,8 @@ impl YamlValueMapAccess {
     }
 }
 
-impl<'de> MapAccess<'de> for YamlValueMapAccess {
-    type Error = YamlError;
+impl<'de> MapAccess<'de> for MappingAccess {
+    type Error = Error;
 
     fn next_key_seed<K>(
         &mut self,
@@ -110,7 +116,7 @@ impl<'de> MapAccess<'de> for YamlValueMapAccess {
             self.cached_key = Some(k);
             v
         } else {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 "Expecting a map value, but none".to_string(),
                 YamlPosition::EOF,
@@ -134,7 +140,7 @@ impl<'a> YamlParser<'a> {
         rest_indent_count: usize,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_block_map {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
@@ -222,7 +228,7 @@ impl<'a> YamlParser<'a> {
                 // `map:\n  key1: v\n key2: v`).
                 if let Some(key_indent) = self.map_key_indent {
                     if cur_indent != key_indent {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::LessIndentedWithoutParent,
                             format!(
                                 "A block mapping key must sit at column \
@@ -254,7 +260,7 @@ impl<'a> YamlParser<'a> {
                 {
                     // A tab in the key indentation followed by
                     // block-node-looking content is invalid.
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidStartOfToken,
                         "Tab(\\t) cannot be used as indentation in a mapping \
                          key"
@@ -430,7 +436,7 @@ impl<'a> YamlParser<'a> {
                         .unwrap_or("")
                         .trim_end();
                     if after_tag.is_empty() {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::InvalidImplicitKey,
                             format!(
                                 "A tagged mapping key must have content or a \
@@ -527,7 +533,7 @@ impl<'a> YamlParser<'a> {
                             || (next_line_indent_count == desired_indent_count
                                 && !is_seq)
                         {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::Bug,
                                 format!(
                                     "The value of a mapping entry must be \
@@ -638,7 +644,7 @@ impl<'a> YamlParser<'a> {
                 } else if trimmed_line.is_empty() {
                     self.scanner.next_line();
                 } else {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::Bug,
                         format!(
                             "Expecting ending with : or contains ': ', but \
@@ -660,7 +666,7 @@ impl<'a> YamlParser<'a> {
                 self.push_state(YamlState::InBlockMapKey);
             }
             if pre_pos == self.scanner.done_pos {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::Bug,
                     format!(
                         "handle_block_map(): Dead loop on: {:?}",
@@ -718,7 +724,7 @@ impl<'a> YamlParser<'a> {
     }
 
     /// Parse the key node of an explicit mapping entry (`? key`).
-    fn handle_explicit_key(&mut self) -> Result<(), YamlError> {
+    fn handle_explicit_key(&mut self) -> Result<(), Error> {
         log::trace!(
             "handle_explicit_key starts at {:?}",
             self.scanner.remains()
@@ -982,7 +988,7 @@ impl<'a> YamlParser<'a> {
 
     /// Parse the value of an explicit mapping entry, with the scanner
     /// positioned right after the `:`.
-    fn parse_explicit_value_after_colon(&mut self) -> Result<(), YamlError> {
+    fn parse_explicit_value_after_colon(&mut self) -> Result<(), Error> {
         // Skip same-line separation (validating tabs) and an inline
         // comment, e.g. `: # comment`.
         self.skip_block_indicator_separation(false)?;
@@ -1056,7 +1062,7 @@ impl<'a> YamlParser<'a> {
     }
 
     /// Parse the value node of an explicit mapping entry after its `:`.
-    fn parse_explicit_value(&mut self) -> Result<(), YamlError> {
+    fn parse_explicit_value(&mut self) -> Result<(), Error> {
         let saved = self.in_explicit_value;
         self.in_explicit_value = true;
         let result = (|| {
@@ -1088,12 +1094,12 @@ impl<'a> YamlParser<'a> {
 
     /// Place the scanner at the `:` following a non-scalar mapping key
     /// (alias or flow collection).
-    fn expect_colon_after_key(&mut self) -> Result<(), YamlError> {
+    fn expect_colon_after_key(&mut self) -> Result<(), Error> {
         while self.scanner.peek_char() == Some(' ') {
             self.scanner.next_char();
         }
         if self.scanner.peek_char() != Some(':') {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidImplicitKey,
                 format!(
                     "Expecting ':' after the mapping key, but got {:?}",
@@ -1114,7 +1120,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         let start_pos = self.scanner.next_pos;
         self.scanner.next_char();
         self.push_event(YamlEvent::MapStart(
@@ -1140,7 +1146,7 @@ impl<'a> YamlParser<'a> {
                         || trimmed.starts_with("---")
                         || trimmed.starts_with("...")
                     {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::InvalidStartOfToken,
                             format!(
                                 "A flow collection line may not start with a \
@@ -1225,7 +1231,7 @@ impl<'a> YamlParser<'a> {
                         // separation space) is an error.
                         if self.scanner.peek_char() == Some('#') {
                             return Err(
-                                YamlError::new(
+                                Error::new(
                                     ErrorKind::AmbiguityPlainScalar,
                                     "Comment must be preceded by a space \
                                      after                                  \
@@ -1244,7 +1250,7 @@ impl<'a> YamlParser<'a> {
                             break;
                         }
                         if self.scanner.peek_char() == Some(',') {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::UnfinishedMapIndicator,
                                 format!(
                                     "Expecting a key after ',' in flow \
@@ -1261,7 +1267,7 @@ impl<'a> YamlParser<'a> {
                         break;
                     }
                     Some(c) => {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::UnfinishedMapIndicator,
                             format!(
                                 "Expecting ',' or '}}' in flow mapping, but \
@@ -1272,7 +1278,7 @@ impl<'a> YamlParser<'a> {
                         ));
                     }
                     None => {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::UnfinishedMapIndicator,
                             "Unfinished flow mapping".to_string(),
                             self.scanner.next_pos,

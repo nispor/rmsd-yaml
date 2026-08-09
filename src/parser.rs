@@ -3,7 +3,7 @@
 use std::{cmp::max, collections::HashMap};
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlScalarStyle, YamlScanner, YamlState,
+    Error, ErrorKind, YamlEvent, YamlScalarStyle, YamlScanner, YamlState,
 };
 
 #[derive(Debug)]
@@ -76,7 +76,7 @@ impl<'a> YamlParser<'a> {
 
     pub(crate) fn parse_to_events(
         input: &'a str,
-    ) -> Result<Vec<YamlEvent>, YamlError> {
+    ) -> Result<Vec<YamlEvent>, Error> {
         let mut parser = Self {
             scanner: YamlScanner::new(input),
             states: Vec::new(),
@@ -96,7 +96,7 @@ impl<'a> YamlParser<'a> {
                 break;
             }
             if parser.scanner.done_pos == cur_pos {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::Bug,
                     format!(
                         "YamlParser::parse_to_events(): dead-loop: remains \
@@ -116,7 +116,7 @@ impl<'a> YamlParser<'a> {
     }
 
     /// Stream started, but not `---` or string other than `b-break` found yet.
-    fn handle_stream(&mut self) -> Result<(), YamlError> {
+    fn handle_stream(&mut self) -> Result<(), Error> {
         self.push_event(YamlEvent::StreamStart);
         log::trace!("handle_stream {:?}", self.scanner.remains());
         // Whether the previous document was terminated by `...` (or no
@@ -188,7 +188,7 @@ impl<'a> YamlParser<'a> {
                         .starts_with(['\'', '"', '[', '{', '*', '|', '>', '-'])
                     && (rest.contains(": ") || rest.ends_with(':'))
                 {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidImplicitKey,
                         "A block mapping may not follow the `---` marker on \
                          the same line"
@@ -210,7 +210,7 @@ impl<'a> YamlParser<'a> {
                 self.yaml_directive_seen = false;
             } else if is_document_end_marker(trimmed) {
                 if self.saw_directive && !doc_started {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidDirective,
                         "Directives must be followed by a document, but the \
                          stream ends with a document end marker"
@@ -233,7 +233,7 @@ impl<'a> YamlParser<'a> {
                 self.yaml_directive_seen = false;
             } else {
                 if !doc_terminated {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::MissingDocumentEndMarkerBeforeDirective,
                         format!(
                             "Expecting document end marker `...` before new \
@@ -257,7 +257,7 @@ impl<'a> YamlParser<'a> {
         }
 
         if self.saw_directive && !doc_started {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidDirective,
                 "Directives must be followed by a document, but the stream \
                  ended without one"
@@ -283,7 +283,7 @@ impl<'a> YamlParser<'a> {
 
     /// Parse a `%YAML`, `%TAG` or reserved directive line. Returns
     /// `Ok(true)` when the line was a directive and has been consumed.
-    fn handle_directive(&mut self, trimmed: &str) -> Result<bool, YamlError> {
+    fn handle_directive(&mut self, trimmed: &str) -> Result<bool, Error> {
         if let Some(rest) = trimmed.strip_prefix("%YAML") {
             if !rest.starts_with([' ', '\t']) {
                 // Not `%YAML `; treat as a reserved directive.
@@ -347,7 +347,7 @@ impl<'a> YamlParser<'a> {
     /// Reject flow-collection lines that start with a tab followed by
     /// content or with a document marker (YAML 1.2.2 SPEC, 7.4;
     /// tabs-in-various-contexts, invalid-document-markers-in-flow-style).
-    pub(crate) fn check_flow_line_start(&self) -> Result<(), YamlError> {
+    pub(crate) fn check_flow_line_start(&self) -> Result<(), Error> {
         if let Some(line) = self.scanner.remains().split(['\n', '\r']).nth(1) {
             let trimmed = line.trim_start_matches([' ', '\t']);
             if (line.starts_with('\t') && !trimmed.is_empty())
@@ -356,7 +356,7 @@ impl<'a> YamlParser<'a> {
                 || trimmed.starts_with("---")
                 || trimmed.starts_with("...")
             {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidStartOfToken,
                     format!(
                         "A flow collection line may not start with a tab or a \
@@ -377,7 +377,7 @@ impl<'a> YamlParser<'a> {
     pub(crate) fn check_flow_entry_indentation(
         &self,
         flow_start_line: usize,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         if let Some(floor) = self.block_indent {
             let pos = self.scanner.next_pos;
             log::trace!(
@@ -388,7 +388,7 @@ impl<'a> YamlParser<'a> {
                 pos.column
             );
             if pos.line > flow_start_line && pos.column <= floor + 1 {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::LessIndentedWithoutParent,
                     format!(
                         "Flow collection entry is not indented enough                          (column {} must be > {floor})",
@@ -424,7 +424,7 @@ impl<'a> YamlParser<'a> {
     pub(crate) fn skip_block_indicator_separation(
         &mut self,
         mut saw_tab: bool,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         while let Some(c) = self.scanner.peek_char() {
             match c {
                 ' ' => {
@@ -442,7 +442,7 @@ impl<'a> YamlParser<'a> {
         }
         let rest = self.scanner.remains();
         if tab_content_is_block_node(rest) {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidStartOfToken,
                 "Tab(\\t) cannot be used as indentation before block node \
                  content"
@@ -454,8 +454,8 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
-    fn invalid_directive(&self, line: &str) -> YamlError {
-        YamlError::new(
+    fn invalid_directive(&self, line: &str) -> Error {
+        Error::new(
             ErrorKind::InvalidDirective,
             format!("Invalid directive: {line}"),
             self.scanner.next_pos,
@@ -470,7 +470,7 @@ impl<'a> YamlParser<'a> {
         rest_indent_count: usize,
         mut anchor: Option<String>,
         mut tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_node {} {} {:?} {:?}, {:?}",
             first_indent_count,
@@ -500,7 +500,7 @@ impl<'a> YamlParser<'a> {
                 if self.cur_state().is_container() {
                     return Ok(());
                 } else {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::LessIndentedWithoutParent,
                         format!("Less indented but without parent: {:?}", line),
                         self.scanner.next_pos,
@@ -524,7 +524,7 @@ impl<'a> YamlParser<'a> {
                     // YAML 1.2.2 SPEC, 8.2.1. Block Sequences:
                     //     A block sequence entry is not allowed on the
                     //     same line as a mapping key.
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidSequnceStartIndicator,
                         format!(
                             "Block sequence entry is not allowed on the \
@@ -656,7 +656,7 @@ impl<'a> YamlParser<'a> {
                     // A block mapping may not be a value on the same
                     // line as its own key (YAML 1.2.2 SPEC, 8.2.2),
                     // e.g. `a: b: c: d` is an error.
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidImplicitKey,
                         format!(
                             "A block mapping cannot be the value of a mapping \
@@ -778,7 +778,7 @@ impl<'a> YamlParser<'a> {
                                 property_found = true;
                                 break;
                             } else {
-                                return Err(YamlError::new(
+                                return Err(Error::new(
                                     ErrorKind::InvalidAnchor,
                                     format!(
                                         "Node can have at most one anchor, \
@@ -789,7 +789,7 @@ impl<'a> YamlParser<'a> {
                                 ));
                             }
                         } else {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::InvalidAnchor,
                                 format!(
                                     "Node can have at most one anchor, but \
@@ -806,7 +806,7 @@ impl<'a> YamlParser<'a> {
                             tag = self.handle_tag()?;
                             property_found = true;
                         } else {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::InvalidAnchor,
                                 format!(
                                     "Node can have at most one tag, but got: \
@@ -821,7 +821,7 @@ impl<'a> YamlParser<'a> {
                     }
                 }
                 if !property_found {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidAnchor,
                         format!(
                             "Node can have at most one anchor and one tag, \
@@ -838,7 +838,7 @@ impl<'a> YamlParser<'a> {
                     if content_trimmed.starts_with("- ")
                         || content_trimmed == "-"
                     {
-                        return Err(YamlError::new(
+                        return Err(Error::new(
                             ErrorKind::InvalidAnchor,
                             format!(
                                 "Node property cannot be placed before a \
@@ -936,7 +936,7 @@ impl<'a> YamlParser<'a> {
                 ));
                 return Ok(());
             } else if trimmed.starts_with('%') {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::MissingDocumentEndMarkerBeforeDirective,
                     format!(
                         "Directive is only allowed before document start \
@@ -953,7 +953,7 @@ impl<'a> YamlParser<'a> {
                 // indicators or key-looking tokens) is rejected.
                 let after_tabs = line.trim_start_matches([' ', '\t']);
                 if tab_content_is_block_node(after_tabs) {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidStartOfToken,
                         "Tab(\\t) cannot be used as start of any YAML node"
                             .to_string(),
@@ -996,7 +996,7 @@ impl<'a> YamlParser<'a> {
 
     /// After a flow collection in block context, only spaces, a line
     /// break, a comment or EOF may follow.
-    fn expect_flow_end_separation(&mut self) -> Result<(), YamlError> {
+    fn expect_flow_end_separation(&mut self) -> Result<(), Error> {
         let mut saw_space = false;
         while self.scanner.peek_char() == Some(' ') {
             saw_space = true;
@@ -1007,7 +1007,7 @@ impl<'a> YamlParser<'a> {
             // The comment must be separated from the closing indicator
             // by a space (`]#comment` is an error).
             Some('#') if saw_space => Ok(()),
-            Some(c) => Err(YamlError::new(
+            Some(c) => Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!(
                     "Expecting a line break or comment after a flow \
@@ -1021,7 +1021,7 @@ impl<'a> YamlParser<'a> {
 
     /// Handle a node inside a flow collection. The entry terminators
     /// (`,` plus `]` or `}`) are handled by the caller.
-    pub(crate) fn handle_flow_node(&mut self) -> Result<(), YamlError> {
+    pub(crate) fn handle_flow_node(&mut self) -> Result<(), Error> {
         self.scanner.skip_flow_separation();
         // YAML 1.2.2 SPEC, 6.9. Node Properties:
         //      Node properties may appear in any order, but each at
@@ -1046,7 +1046,7 @@ impl<'a> YamlParser<'a> {
             Some('{') => self.handle_flow_map(anchor, tag)?,
             Some('*') => {
                 if anchor.is_some() || tag.is_some() {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidAnchor,
                         "Alias cannot carry node properties".to_string(),
                         self.scanner.next_pos,

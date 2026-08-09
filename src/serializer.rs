@@ -10,7 +10,7 @@ use std::fmt::Write;
 use serde::{Serialize, ser};
 
 use crate::{
-    ErrorKind, YamlError, YamlPosition, base64, escape_double_quoted,
+    Error, ErrorKind, YamlPosition, base64, escape_double_quoted,
     to_out_yaml_scalar_plain, to_out_yaml_scalar_sq, to_scalar_string,
 };
 
@@ -51,12 +51,12 @@ pub struct YamlSerializer {
 pub fn to_string_with_opt<T>(
     value: &T,
     option: YamlSerializeOption,
-) -> Result<String, YamlError>
+) -> Result<String, Error>
 where
     T: Serialize,
 {
     if option.indent_count < 2 {
-        return Err(YamlError::new(
+        return Err(Error::new(
             ErrorKind::IndentTooSmall,
             "Minimum supported indent count is 2".to_string(),
             YamlPosition::EOF,
@@ -82,7 +82,7 @@ where
     Ok(serializer.output)
 }
 
-pub fn to_string<T>(value: &T) -> Result<String, YamlError>
+pub fn to_string<T>(value: &T) -> Result<String, Error>
 where
     T: Serialize,
 {
@@ -143,8 +143,8 @@ impl YamlSerializer {
 
     pub(crate) fn serialize_yaml_value(
         &mut self,
-        value: &crate::YamlValue,
-    ) -> Result<(), YamlError> {
+        value: &crate::Value,
+    ) -> Result<(), Error> {
         self.serialize_yaml_value_ctx(value, ValueCtx::Root)
     }
 
@@ -259,10 +259,10 @@ impl YamlSerializer {
 
     fn serialize_yaml_value_ctx(
         &mut self,
-        value: &crate::YamlValue,
+        value: &crate::Value,
         ctx: ValueCtx,
-    ) -> Result<(), YamlError> {
-        use crate::YamlValueData;
+    ) -> Result<(), Error> {
+        use crate::ValueData;
         // Any node written after a keep-chomped block scalar invalidates
         // the pending `...` closing line.
         self.open_ended = false;
@@ -278,12 +278,12 @@ impl YamlSerializer {
             write!(self.output, "&{anchor} ").ok();
         }
         match &value.data {
-            YamlValueData::Null => {
+            ValueData::Null => {
                 // An empty document (no content) renders as nothing.
                 self.pending_tag = false;
                 Ok(())
             }
-            YamlValueData::String(s) => {
+            ValueData::String(s) => {
                 match value.meta.scalar_style {
                     Some(crate::YamlScalarStyle::Literal)
                     | Some(crate::YamlScalarStyle::Folded) => {
@@ -341,7 +341,7 @@ impl YamlSerializer {
                 }
                 Ok(())
             }
-            YamlValueData::Array(items) => {
+            ValueData::Array(items) => {
                 if items.is_empty() {
                     write!(self.output, "{}[]", self.get_indent()).ok();
                     self.pending_tag = false;
@@ -392,8 +392,8 @@ impl YamlSerializer {
                 }
                 Ok(())
             }
-            YamlValueData::Map(map) => {
-                if map.len() == 0 {
+            ValueData::Map(map) => {
+                if map.is_empty() {
                     write!(self.output, "{}{{}}", self.get_indent()).ok();
                     self.pending_tag = false;
                     return Ok(());
@@ -477,20 +477,19 @@ impl YamlSerializer {
                 self.current_indent_level -= 1;
                 Ok(())
             }
-            YamlValueData::Tag(tag) => {
+            ValueData::Tag(tag) => {
                 self.write_tag(&tag_shorthand(&tag.name));
-                let empty =
-                    matches!(
-                        &tag.data,
-                        crate::YamlValueData::String(s) if s.is_empty()
-                    ) || matches!(&tag.data, crate::YamlValueData::Null);
+                let empty = matches!(
+                    &tag.data,
+                    crate::ValueData::String(s) if s.is_empty()
+                ) || matches!(&tag.data, crate::ValueData::Null);
                 // The style/anchor meta lives on the outer node (the
                 // event carried both the tag and the style); propagate
                 // it so the wrapped data is dumped with its style. The
                 // anchor is written once, before the tag.
                 let mut meta = value.meta.clone();
                 meta.anchor = None;
-                let inner = crate::YamlValue {
+                let inner = crate::Value {
                     data: tag.data.clone(),
                     start: value.start,
                     end: value.end,
@@ -518,19 +517,19 @@ enum ValueCtx {
 /// Whether a mapping key can be written in the simple `key: value`
 /// form (a single-line scalar, a tag on a single-line scalar, or an
 /// empty collection).
-fn is_simple_key(key: &crate::YamlValue) -> bool {
+fn is_simple_key(key: &crate::Value) -> bool {
     // An alias is always a simple key (`*name :`), regardless of what
     // it resolves to.
     if key.meta.alias.is_some() {
         return true;
     }
     match &key.data {
-        crate::YamlValueData::String(s) => !s.contains('\n'),
-        crate::YamlValueData::Tag(tag) => {
-            matches!(&tag.data, crate::YamlValueData::String(s) if !s.contains('\n'))
+        crate::ValueData::String(s) => !s.contains('\n'),
+        crate::ValueData::Tag(tag) => {
+            matches!(&tag.data, crate::ValueData::String(s) if !s.contains('\n'))
         }
-        crate::YamlValueData::Array(items) => items.is_empty(),
-        crate::YamlValueData::Map(map) => map.len() == 0,
+        crate::ValueData::Array(items) => items.is_empty(),
+        crate::ValueData::Map(map) => map.is_empty(),
         _ => false,
     }
 }
@@ -538,7 +537,7 @@ fn is_simple_key(key: &crate::YamlValue) -> bool {
 /// The text of a simple key, rendered before the `:` — including a
 /// leading `&anchor ` (so `&a a:` and the anchored empty key `&a :`)
 /// and the `*alias ` spacing for alias keys (`*b : *a`).
-fn simple_key_text(key: &crate::YamlValue) -> String {
+fn simple_key_text(key: &crate::Value) -> String {
     let mut text = String::new();
     if let Some(alias) = &key.meta.alias {
         text.push_str(&format!("*{alias} "));
@@ -548,7 +547,7 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
         text.push_str(&format!("&{anchor} "));
     }
     text.push_str(&match &key.data {
-        crate::YamlValueData::String(s) => match key.meta.scalar_style {
+        crate::ValueData::String(s) => match key.meta.scalar_style {
             Some(crate::YamlScalarStyle::SingleQuoted) => {
                 to_out_yaml_scalar_sq(s, false)
             }
@@ -557,9 +556,9 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
             }
             _ => to_out_yaml_scalar_plain(s),
         },
-        crate::YamlValueData::Tag(tag) => {
+        crate::ValueData::Tag(tag) => {
             let mut tag_text = format!("!{}", tag_shorthand(&tag.name));
-            if let crate::YamlValueData::String(s) = &tag.data {
+            if let crate::ValueData::String(s) = &tag.data {
                 tag_text.push(' ');
                 // An anchored tagged key is rendered with a quoted
                 // scalar (`&a1 !!str "foo"`), matching
@@ -573,8 +572,8 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
             }
             tag_text
         }
-        crate::YamlValueData::Array(_) => "[]".to_string(),
-        crate::YamlValueData::Map(_) => "{}".to_string(),
+        crate::ValueData::Array(_) => "[]".to_string(),
+        crate::ValueData::Map(_) => "{}".to_string(),
         _ => String::new(),
     });
     text
@@ -641,14 +640,14 @@ fn tag_shorthand(name: &str) -> String {
     format!("<{inner}>")
 }
 
-/// Dump a parsed [`YamlValue`] back to YAML (the `to_yaml` workflow),
+/// Dump a parsed [`Value`] back to YAML (the `to_yaml` workflow),
 /// using the default [`YamlSerializeOption`].
-impl crate::YamlValue {
-    pub fn to_string(&self) -> Result<String, YamlError> {
+impl crate::Value {
+    pub fn to_string(&self) -> Result<String, Error> {
         self.to_string_with_opt(YamlSerializeOption::default())
     }
 
-    /// Dump a parsed [`YamlValue`] back to YAML, honoring `option`.
+    /// Dump a parsed [`Value`] back to YAML, honoring `option`.
     ///
     /// `indent_count` controls the block indentation (minimum 2) and
     /// `leading_start_indicator` prepends a `---` document header.
@@ -659,9 +658,9 @@ impl crate::YamlValue {
     pub fn to_string_with_opt(
         &self,
         option: YamlSerializeOption,
-    ) -> Result<String, YamlError> {
+    ) -> Result<String, Error> {
         if option.indent_count < 2 {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::IndentTooSmall,
                 "Minimum supported indent count is 2".to_string(),
                 YamlPosition::EOF,
@@ -710,7 +709,7 @@ impl crate::YamlValue {
 impl ser::Serializer for &mut YamlSerializer {
     type Ok = ();
 
-    type Error = YamlError;
+    type Error = Error;
 
     // Associated types for keeping track of additional state while serializing
     // compound data structures like sequences and maps. In this case no
@@ -727,7 +726,7 @@ impl ser::Serializer for &mut YamlSerializer {
     // Here we go with the simple methods. The following 12 methods receive one
     // of the primitive types of the data model and map it to JSON by appending
     // into the output string.
-    fn serialize_bool(self, v: bool) -> Result<(), YamlError> {
+    fn serialize_bool(self, v: bool) -> Result<(), Error> {
         write!(
             self.output,
             "{}{}",
@@ -739,58 +738,58 @@ impl ser::Serializer for &mut YamlSerializer {
         Ok(())
     }
 
-    fn serialize_i8(self, v: i8) -> Result<(), YamlError> {
+    fn serialize_i8(self, v: i8) -> Result<(), Error> {
         self.serialize_i64(i64::from(v))
     }
 
-    fn serialize_i16(self, v: i16) -> Result<(), YamlError> {
+    fn serialize_i16(self, v: i16) -> Result<(), Error> {
         self.serialize_i64(i64::from(v))
     }
 
-    fn serialize_i32(self, v: i32) -> Result<(), YamlError> {
+    fn serialize_i32(self, v: i32) -> Result<(), Error> {
         self.serialize_i64(i64::from(v))
     }
 
-    fn serialize_i64(self, v: i64) -> Result<(), YamlError> {
+    fn serialize_i64(self, v: i64) -> Result<(), Error> {
         write!(self.output, "{}{v}", self.get_indent()).ok();
         self.pending_tag = false;
         Ok(())
     }
 
-    fn serialize_u8(self, v: u8) -> Result<(), YamlError> {
+    fn serialize_u8(self, v: u8) -> Result<(), Error> {
         self.serialize_u64(u64::from(v))
     }
 
-    fn serialize_u16(self, v: u16) -> Result<(), YamlError> {
+    fn serialize_u16(self, v: u16) -> Result<(), Error> {
         self.serialize_u64(u64::from(v))
     }
 
-    fn serialize_u32(self, v: u32) -> Result<(), YamlError> {
+    fn serialize_u32(self, v: u32) -> Result<(), Error> {
         self.serialize_u64(u64::from(v))
     }
 
-    fn serialize_u64(self, v: u64) -> Result<(), YamlError> {
+    fn serialize_u64(self, v: u64) -> Result<(), Error> {
         write!(self.output, "{}{v}", self.get_indent()).ok();
         self.pending_tag = false;
         Ok(())
     }
 
-    fn serialize_f32(self, v: f32) -> Result<(), YamlError> {
+    fn serialize_f32(self, v: f32) -> Result<(), Error> {
         self.serialize_f64(f64::from(v))
     }
 
-    fn serialize_f64(self, v: f64) -> Result<(), YamlError> {
+    fn serialize_f64(self, v: f64) -> Result<(), Error> {
         write!(self.output, "{}{v}", self.get_indent()).ok();
         self.pending_tag = false;
         Ok(())
     }
 
     // YAML does not have special handling for char, just treat it as str
-    fn serialize_char(self, v: char) -> Result<(), YamlError> {
+    fn serialize_char(self, v: char) -> Result<(), Error> {
         self.serialize_str(&v.to_string())
     }
 
-    fn serialize_str(self, v: &str) -> Result<(), YamlError> {
+    fn serialize_str(self, v: &str) -> Result<(), Error> {
         write!(
             self.output,
             "{}{}",
@@ -807,7 +806,7 @@ impl ser::Serializer for &mut YamlSerializer {
     }
 
     // TODO: use base64 show them and also deserialize
-    fn serialize_bytes(self, v: &[u8]) -> Result<(), YamlError> {
+    fn serialize_bytes(self, v: &[u8]) -> Result<(), Error> {
         write!(
             self.output,
             "{}!!binary {}",
@@ -818,27 +817,24 @@ impl ser::Serializer for &mut YamlSerializer {
         Ok(())
     }
 
-    fn serialize_none(self) -> Result<(), YamlError> {
+    fn serialize_none(self) -> Result<(), Error> {
         write!(self.output, "{}null", self.get_indent()).ok();
         self.pending_tag = false;
         Ok(())
     }
 
-    fn serialize_some<T>(self, value: &T) -> Result<(), YamlError>
+    fn serialize_some<T>(self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
         value.serialize(self)
     }
 
-    fn serialize_unit(self) -> Result<(), YamlError> {
+    fn serialize_unit(self) -> Result<(), Error> {
         self.serialize_none()
     }
 
-    fn serialize_unit_struct(
-        self,
-        _name: &'static str,
-    ) -> Result<(), YamlError> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<(), Error> {
         self.serialize_none()
     }
 
@@ -847,7 +843,7 @@ impl ser::Serializer for &mut YamlSerializer {
         _name: &'static str,
         _variant_index: u32,
         variant: &'static str,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         self.serialize_str(variant)
     }
 
@@ -855,7 +851,7 @@ impl ser::Serializer for &mut YamlSerializer {
         self,
         _name: &'static str,
         value: &T,
-    ) -> Result<(), YamlError>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -868,7 +864,7 @@ impl ser::Serializer for &mut YamlSerializer {
         _variant_index: u32,
         variant: &'static str,
         value: &T,
-    ) -> Result<(), YamlError>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -879,7 +875,7 @@ impl ser::Serializer for &mut YamlSerializer {
     fn serialize_seq(
         self,
         _len: Option<usize>,
-    ) -> Result<Self::SerializeSeq, YamlError> {
+    ) -> Result<Self::SerializeSeq, Error> {
         self.start_collection();
         Ok(self)
     }
@@ -887,7 +883,7 @@ impl ser::Serializer for &mut YamlSerializer {
     fn serialize_tuple(
         self,
         len: usize,
-    ) -> Result<Self::SerializeTuple, YamlError> {
+    ) -> Result<Self::SerializeTuple, Error> {
         self.serialize_seq(Some(len))
     }
 
@@ -895,7 +891,7 @@ impl ser::Serializer for &mut YamlSerializer {
         self,
         _name: &'static str,
         len: usize,
-    ) -> Result<Self::SerializeTupleStruct, YamlError> {
+    ) -> Result<Self::SerializeTupleStruct, Error> {
         self.serialize_seq(Some(len))
     }
 
@@ -907,7 +903,7 @@ impl ser::Serializer for &mut YamlSerializer {
         _variant_index: u32,
         variant: &'static str,
         _len: usize,
-    ) -> Result<Self::SerializeTupleVariant, YamlError> {
+    ) -> Result<Self::SerializeTupleVariant, Error> {
         writeln!(self.output, "{}!{variant}", self.get_indent()).ok();
         self.serialize_seq(Some(_len))
     }
@@ -916,7 +912,7 @@ impl ser::Serializer for &mut YamlSerializer {
     fn serialize_map(
         self,
         _len: Option<usize>,
-    ) -> Result<Self::SerializeMap, YamlError> {
+    ) -> Result<Self::SerializeMap, Error> {
         self.start_collection();
         Ok(self)
     }
@@ -930,7 +926,7 @@ impl ser::Serializer for &mut YamlSerializer {
         self,
         _name: &'static str,
         len: usize,
-    ) -> Result<Self::SerializeStruct, YamlError> {
+    ) -> Result<Self::SerializeStruct, Error> {
         self.serialize_map(Some(len))
     }
 
@@ -942,7 +938,7 @@ impl ser::Serializer for &mut YamlSerializer {
         _variant_index: u32,
         variant: &'static str,
         _len: usize,
-    ) -> Result<Self::SerializeStructVariant, YamlError> {
+    ) -> Result<Self::SerializeStructVariant, Error> {
         writeln!(self.output, "{}!{variant}", self.get_indent()).ok();
         self.serialize_map(Some(_len))
     }
@@ -957,10 +953,10 @@ impl ser::Serializer for &mut YamlSerializer {
 // is called on the Serializer.
 impl ser::SerializeSeq for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
     // Serialize a single element of the sequence.
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), YamlError>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -973,7 +969,7 @@ impl ser::SerializeSeq for &mut YamlSerializer {
     }
 
     // Close the sequence.
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -983,9 +979,9 @@ impl ser::SerializeSeq for &mut YamlSerializer {
 
 impl ser::SerializeTuple for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), YamlError>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -997,7 +993,7 @@ impl ser::SerializeTuple for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -1007,9 +1003,9 @@ impl ser::SerializeTuple for &mut YamlSerializer {
 
 impl ser::SerializeTupleStruct for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), YamlError>
+    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1021,7 +1017,7 @@ impl ser::SerializeTupleStruct for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -1031,9 +1027,9 @@ impl ser::SerializeTupleStruct for &mut YamlSerializer {
 
 impl ser::SerializeTupleVariant for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), YamlError>
+    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1045,7 +1041,7 @@ impl ser::SerializeTupleVariant for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -1055,9 +1051,9 @@ impl ser::SerializeTupleVariant for &mut YamlSerializer {
 
 impl ser::SerializeMap for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
-    fn serialize_key<T>(&mut self, key: &T) -> Result<(), YamlError>
+    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1066,7 +1062,7 @@ impl ser::SerializeMap for &mut YamlSerializer {
         Ok(())
     }
 
-    fn serialize_value<T>(&mut self, value: &T) -> Result<(), YamlError>
+    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1077,7 +1073,7 @@ impl ser::SerializeMap for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -1089,13 +1085,13 @@ impl ser::SerializeMap for &mut YamlSerializer {
 // constant strings.
 impl ser::SerializeStruct for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
     fn serialize_field<T>(
         &mut self,
         key: &'static str,
         value: &T,
-    ) -> Result<(), YamlError>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1108,7 +1104,7 @@ impl ser::SerializeStruct for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }
@@ -1118,13 +1114,13 @@ impl ser::SerializeStruct for &mut YamlSerializer {
 
 impl ser::SerializeStructVariant for &mut YamlSerializer {
     type Ok = ();
-    type Error = YamlError;
+    type Error = Error;
 
     fn serialize_field<T>(
         &mut self,
         key: &'static str,
         value: &T,
-    ) -> Result<(), YamlError>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -1137,7 +1133,7 @@ impl ser::SerializeStructVariant for &mut YamlSerializer {
         Ok(())
     }
 
-    fn end(self) -> Result<(), YamlError> {
+    fn end(self) -> Result<(), Error> {
         if self.current_indent_level > 0 {
             self.current_indent_level -= 1;
         }

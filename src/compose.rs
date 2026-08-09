@@ -3,15 +3,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlEventIter, YamlPosition, YamlTag,
-    YamlValue, YamlValueData, YamlValueMap,
+    Error, ErrorKind, Mapping, Value, ValueData, YamlEvent, YamlEventIter,
+    YamlPosition, YamlTag,
 };
 
-impl YamlValue {
-    pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, YamlError> {
+impl Value {
+    pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, Error> {
         let mut documents = compose_documents(events)?;
         if documents.len() > 1 {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::NoSupportMultipleDocuments,
                 format!(
                     "No support of multiple YAML documents, got {} documents",
@@ -25,13 +25,13 @@ impl YamlValue {
     }
 }
 
-/// Compose every document of an event stream into a `YamlValue`.
+/// Compose every document of an event stream into a `Value`.
 ///
 /// Anchors are scoped per document per the YAML specification, so the
 /// anchor table is reset between documents.
 pub(crate) fn compose_documents(
     events: Vec<YamlEvent>,
-) -> Result<Vec<YamlValue>, YamlError> {
+) -> Result<Vec<Value>, Error> {
     let mut events_iter = YamlEventIter::new(events);
     let mut documents = Vec::new();
     loop {
@@ -42,7 +42,7 @@ pub(crate) fn compose_documents(
                     Some(YamlEvent::DocumentStart(implicit, _)) => implicit,
                     _ => unreachable!(),
                 };
-                let mut anchors: HashMap<String, YamlValue> = HashMap::new();
+                let mut anchors: HashMap<String, Value> = HashMap::new();
                 let mut value = compose_value(&mut events_iter, &mut anchors)?;
                 // Record the explicit `---` / `...` document markers so
                 // the dump can reproduce them.
@@ -66,8 +66,8 @@ pub(crate) fn compose_documents(
 
 fn compose_value(
     events_iter: &mut YamlEventIter,
-    anchors: &mut HashMap<String, YamlValue>,
-) -> Result<YamlValue, YamlError> {
+    anchors: &mut HashMap<String, Value>,
+) -> Result<Value, Error> {
     let mut doc_started_pos: Option<YamlPosition> = None;
     while let Some(event) = events_iter.next() {
         match event {
@@ -87,8 +87,8 @@ fn compose_value(
             YamlEvent::SequenceStart(anchor, tag, _style, pos) => {
                 let array = compose_sequence(events_iter, anchors, pos)?;
                 let mut ret = if let Some(tag) = tag {
-                    YamlValue {
-                        data: YamlValueData::Tag(Box::new(YamlTag {
+                    Value {
+                        data: ValueData::Tag(Box::new(YamlTag {
                             name: tag,
                             data: array.data,
                         })),
@@ -106,7 +106,7 @@ fn compose_value(
                 return Ok(ret);
             }
             YamlEvent::SequenceEnd(pos) => {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::Bug,
                     format!(
                         "Got unexpected event in compose_value(),
@@ -121,8 +121,8 @@ fn compose_value(
             YamlEvent::MapStart(anchor, tag, _style, pos) => {
                 let map = compose_map(events_iter, anchors, pos)?;
                 let mut ret = if let Some(tag) = tag {
-                    YamlValue {
-                        data: YamlValueData::Tag(Box::new(YamlTag {
+                    Value {
+                        data: ValueData::Tag(Box::new(YamlTag {
                             name: tag,
                             data: map.data,
                         })),
@@ -140,7 +140,7 @@ fn compose_value(
                 return Ok(ret);
             }
             YamlEvent::MapEnd(pos) => {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::Bug,
                     format!(
                         "Got unexpected event in compose_value(),
@@ -154,18 +154,18 @@ fn compose_value(
             }
             YamlEvent::Scalar(anchor, tag, val, style, start, end) => {
                 let mut ret = if let Some(tag) = tag {
-                    YamlValue {
-                        data: YamlValueData::Tag(Box::new(YamlTag {
+                    Value {
+                        data: ValueData::Tag(Box::new(YamlTag {
                             name: tag,
-                            data: YamlValueData::String(val),
+                            data: ValueData::String(val),
                         })),
                         start,
                         end,
                         ..Default::default()
                     }
                 } else {
-                    YamlValue {
-                        data: YamlValueData::String(val),
+                    Value {
+                        data: ValueData::String(val),
                         start,
                         end,
                         ..Default::default()
@@ -184,7 +184,7 @@ fn compose_value(
                     ret.meta.alias = Some(name);
                     return Ok(ret);
                 } else {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::UnknownAlias,
                         format!(
                             "Alias *{name} does not reference any anchored \
@@ -203,10 +203,10 @@ fn compose_value(
 
 fn compose_sequence(
     events_iter: &mut YamlEventIter,
-    anchors: &mut HashMap<String, YamlValue>,
+    anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
-) -> Result<YamlValue, YamlError> {
-    let mut ret: Vec<YamlValue> = Vec::new();
+) -> Result<Value, Error> {
+    let mut ret: Vec<Value> = Vec::new();
     let mut end_pos = YamlPosition::default();
     while let Some(event) = events_iter.peek() {
         match event {
@@ -221,8 +221,8 @@ fn compose_sequence(
         }
     }
 
-    Ok(YamlValue {
-        data: YamlValueData::Array(ret),
+    Ok(Value {
+        data: ValueData::Array(ret),
         start: start_pos,
         end: end_pos,
         ..Default::default()
@@ -231,12 +231,12 @@ fn compose_sequence(
 
 fn compose_map(
     events_iter: &mut YamlEventIter,
-    anchors: &mut HashMap<String, YamlValue>,
+    anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
-) -> Result<YamlValue, YamlError> {
-    let mut ret: YamlValueMap = YamlValueMap::new();
+) -> Result<Value, Error> {
+    let mut ret: Mapping = Mapping::new();
     let mut end_pos = YamlPosition::default();
-    let mut key: Option<YamlValue> = None;
+    let mut key: Option<Value> = None;
     while let Some(event) = events_iter.peek() {
         match event {
             YamlEvent::MapEnd(pos) => {
@@ -255,8 +255,8 @@ fn compose_map(
         }
     }
 
-    Ok(YamlValue {
-        data: YamlValueData::Map(Box::new(ret)),
+    Ok(Value {
+        data: ValueData::Map(Box::new(ret)),
         start: start_pos,
         end: end_pos,
         ..Default::default()
@@ -288,9 +288,9 @@ mod test {
         ];
 
         assert_eq!(
-            YamlValue::compose(events).unwrap(),
-            YamlValue {
-                data: YamlValueData::String("abc".to_string()),
+            Value::compose(events).unwrap(),
+            Value {
+                data: ValueData::String("abc".to_string()),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(1, 3),
                 ..Default::default()
@@ -331,17 +331,17 @@ mod test {
         ];
 
         assert_eq!(
-            YamlValue::compose(events).unwrap(),
-            YamlValue {
-                data: YamlValueData::Array(vec![
-                    YamlValue {
-                        data: YamlValueData::String("abc".into()),
+            Value::compose(events).unwrap(),
+            Value {
+                data: ValueData::Array(vec![
+                    Value {
+                        data: ValueData::String("abc".into()),
                         start: YamlPosition::new(1, 3),
                         end: YamlPosition::new(1, 5),
                         ..Default::default()
                     },
-                    YamlValue {
-                        data: YamlValueData::String("def".into()),
+                    Value {
+                        data: ValueData::String("def".into()),
                         start: YamlPosition::new(2, 3),
                         end: YamlPosition::new(2, 5),
                         ..Default::default()
@@ -386,16 +386,16 @@ mod test {
             YamlEvent::StreamEnd,
         ];
 
-        let mut map = YamlValueMap::new();
+        let mut map = Mapping::new();
         map.insert(
-            YamlValue {
-                data: YamlValueData::String("abc".into()),
+            Value {
+                data: ValueData::String("abc".into()),
                 start: YamlPosition::new(1, 3),
                 end: YamlPosition::new(1, 5),
                 ..Default::default()
             },
-            YamlValue {
-                data: YamlValueData::String("def".into()),
+            Value {
+                data: ValueData::String("def".into()),
                 start: YamlPosition::new(2, 3),
                 end: YamlPosition::new(2, 5),
                 ..Default::default()
@@ -403,9 +403,9 @@ mod test {
         );
 
         assert_eq!(
-            YamlValue::compose(events).unwrap(),
-            YamlValue {
-                data: YamlValueData::Map(Box::new(map)),
+            Value::compose(events).unwrap(),
+            Value {
+                data: ValueData::Map(Box::new(map)),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(2, 5),
                 ..Default::default()
@@ -475,31 +475,31 @@ mod test {
             YamlEvent::StreamEnd,
         ];
 
-        let mut map1 = YamlValueMap::new();
+        let mut map1 = Mapping::new();
         map1.insert(
-            YamlValue {
-                data: YamlValueData::String("abc".into()),
+            Value {
+                data: ValueData::String("abc".into()),
                 start: YamlPosition::new(1, 3),
                 end: YamlPosition::new(1, 5),
                 ..Default::default()
             },
-            YamlValue {
-                data: YamlValueData::String("def".into()),
+            Value {
+                data: ValueData::String("def".into()),
                 start: YamlPosition::new(1, 8),
                 end: YamlPosition::new(1, 10),
                 ..Default::default()
             },
         );
-        let mut map2 = YamlValueMap::new();
+        let mut map2 = Mapping::new();
         map2.insert(
-            YamlValue {
-                data: YamlValueData::String("hig".into()),
+            Value {
+                data: ValueData::String("hig".into()),
                 start: YamlPosition::new(2, 3),
                 end: YamlPosition::new(2, 5),
                 ..Default::default()
             },
-            YamlValue {
-                data: YamlValueData::String("klm".into()),
+            Value {
+                data: ValueData::String("klm".into()),
                 start: YamlPosition::new(2, 8),
                 end: YamlPosition::new(2, 10),
                 ..Default::default()
@@ -507,17 +507,17 @@ mod test {
         );
 
         assert_eq!(
-            YamlValue::compose(events).unwrap(),
-            YamlValue {
-                data: YamlValueData::Array(vec![
-                    YamlValue {
-                        data: YamlValueData::Map(Box::new(map1)),
+            Value::compose(events).unwrap(),
+            Value {
+                data: ValueData::Array(vec![
+                    Value {
+                        data: ValueData::Map(Box::new(map1)),
                         start: YamlPosition::new(1, 1),
                         end: YamlPosition::new(1, 10),
                         ..Default::default()
                     },
-                    YamlValue {
-                        data: YamlValueData::Map(Box::new(map2)),
+                    Value {
+                        data: ValueData::Map(Box::new(map2)),
                         start: YamlPosition::new(2, 1),
                         end: YamlPosition::new(2, 10),
                         ..Default::default()
@@ -585,30 +585,30 @@ mod test {
             YamlEvent::StreamEnd,
         ];
 
-        let mut map = YamlValueMap::new();
+        let mut map = Mapping::new();
         map.insert(
-            YamlValue {
-                data: YamlValueData::String("abc".into()),
+            Value {
+                data: ValueData::String("abc".into()),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(1, 3),
                 ..Default::default()
             },
-            YamlValue {
-                data: YamlValueData::Array(vec![
-                    YamlValue {
-                        data: YamlValueData::String("def".into()),
+            Value {
+                data: ValueData::Array(vec![
+                    Value {
+                        data: ValueData::String("def".into()),
                         start: YamlPosition::new(2, 3),
                         end: YamlPosition::new(2, 5),
                         ..Default::default()
                     },
-                    YamlValue {
-                        data: YamlValueData::String("hig".into()),
+                    Value {
+                        data: ValueData::String("hig".into()),
                         start: YamlPosition::new(3, 3),
                         end: YamlPosition::new(3, 5),
                         ..Default::default()
                     },
-                    YamlValue {
-                        data: YamlValueData::String("klm".into()),
+                    Value {
+                        data: ValueData::String("klm".into()),
                         start: YamlPosition::new(4, 3),
                         end: YamlPosition::new(4, 5),
                         ..Default::default()
@@ -620,9 +620,9 @@ mod test {
             },
         );
         assert_eq!(
-            YamlValue::compose(events).unwrap(),
-            YamlValue {
-                data: YamlValueData::Map(Box::new(map)),
+            Value::compose(events).unwrap(),
+            Value {
+                data: ValueData::Map(Box::new(map)),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(4, 5),
                 ..Default::default()

@@ -8,60 +8,83 @@
 use std::str::FromStr;
 
 use serde::{
-    Deserialize,
+    Deserialize, Serialize,
     de::{Deserializer, Visitor},
 };
 
 use crate::{
-    ErrorKind, YamlError, YamlValue, YamlValueData, YamlValueEnumAccess,
-    YamlValueMapAccess, YamlValueSeqAccess,
+    Error, ErrorKind, MappingAccess, SequenceAccess, Value, ValueData,
+    ValueEnumAccess,
 };
 
 #[derive(Debug, Default)]
 pub struct YamlDeserializer {
-    pub(crate) parsed: YamlValue,
+    pub(crate) parsed: Value,
 }
 
-pub fn from_str<'a, T>(s: &'a str) -> Result<T, YamlError>
+pub fn from_str<'a, T>(s: &'a str) -> Result<T, Error>
 where
     T: Deserialize<'a>,
 {
-    let parsed = YamlValue::from_str(s)?;
+    let parsed = Value::from_str(s)?;
     let mut deserializer = YamlDeserializer { parsed };
 
     T::deserialize(&mut deserializer)
 }
 
-pub fn to_value(input: &str) -> Result<YamlValue, YamlError> {
-    YamlValue::from_str(input)
+/// Serialize a value into a [`Value`] tree, mirroring `serde_yaml::to_value`.
+///
+/// The value is first serialized to YAML text and then composed back into a
+/// [`Value`] tree, so the result carries round-trip metadata just like a
+/// parsed document.
+pub fn to_value<T>(value: T) -> Result<Value, Error>
+where
+    T: Serialize,
+{
+    let yaml = crate::to_string(&value)?;
+    Value::from_str(&yaml)
 }
 
-/// Parse a YAML stream and compose every document into a `YamlValue`.
+/// Deserialize an instance of type `T` from an I/O stream of YAML.
 ///
-/// Unlike [`to_value`], which rejects streams containing more than one
-/// document, this returns all documents of the stream:
+/// Mirrors `serde_yaml::from_reader`.
+pub fn from_reader<R, T>(mut rdr: R) -> Result<T, Error>
+where
+    R: std::io::Read,
+    T: serde::de::DeserializeOwned,
+{
+    let mut content = String::new();
+    rdr.read_to_string(&mut content)?;
+    from_str(&content)
+}
+
+/// Parse a YAML stream and compose every document into a `Value`.
+///
+/// Unlike [`from_str::<Value>`](crate::from_str), which rejects streams
+/// containing more than one document, this returns all documents of the
+/// stream:
 ///
 /// ```
 /// use rmsd_yaml::documents;
 ///
 /// let docs = documents("a: 1\n...\nb: 2\n")?;
 /// assert_eq!(docs.len(), 2);
-/// # Ok::<(), rmsd_yaml::YamlError>(())
+/// # Ok::<(), rmsd_yaml::Error>(())
 /// ```
-pub fn documents(input: &str) -> Result<Vec<YamlValue>, YamlError> {
+pub fn documents(input: &str) -> Result<Vec<Value>, Error> {
     let events = crate::YamlParser::parse_to_events(input)?;
     crate::compose::compose_documents(events)
 }
 
 impl<'de> Deserializer<'de> for &mut YamlDeserializer {
-    type Error = YamlError;
+    type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
         match &self.parsed.data {
-            YamlValueData::String(_) => {
+            ValueData::String(_) => {
                 if self.parsed.is_bool() {
                     self.deserialize_bool(visitor)
                 } else if self.parsed.is_integer() {
@@ -74,13 +97,13 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
                     self.deserialize_str(visitor)
                 }
             }
-            YamlValueData::Array(_) => self.deserialize_seq(visitor),
-            YamlValueData::Map(_) => self.deserialize_map(visitor),
-            YamlValueData::Tag(_) => {
-                let access = YamlValueEnumAccess::new(self.parsed.clone());
+            ValueData::Array(_) => self.deserialize_seq(visitor),
+            ValueData::Map(_) => self.deserialize_map(visitor),
+            ValueData::Tag(_) => {
+                let access = ValueEnumAccess::new(self.parsed.clone());
                 visitor.visit_enum(access)
             }
-            v => Err(YamlError::new(
+            v => Err(Error::new(
                 ErrorKind::Bug,
                 format!("deserialize_any() got unexpected data {v:?}"),
                 self.parsed.start,
@@ -203,12 +226,12 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     {
         // Only `!!binary` tagged scalars carry binary data; plain
         // scalars and other tags are rejected like serde_yaml.
-        if let YamlValueData::Tag(tag) = &self.parsed.data
+        if let ValueData::Tag(tag) = &self.parsed.data
             && tag.name == "<tag:yaml.org,2002:binary>"
-            && let YamlValueData::String(s) = &tag.data
+            && let ValueData::String(s) = &tag.data
         {
             let bytes = crate::base64::decode(s).map_err(|e| {
-                YamlError::new(
+                Error::new(
                     ErrorKind::InvalidNumber,
                     format!("Invalid base64 in !!binary tag: {e}"),
                     self.parsed.start,
@@ -217,7 +240,7 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
             })?;
             return visitor.visit_byte_buf(bytes);
         }
-        Err(YamlError::new(
+        Err(Error::new(
             ErrorKind::BytesUnsupported,
             "Deserializing bytes is not supported (expected !!binary tag)"
                 .to_string(),
@@ -244,7 +267,7 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
         if self.parsed.is_null() {
             visitor.visit_unit()
         } else {
-            Err(YamlError::new(
+            Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!("Expecting null, but got {}", self.parsed.data),
                 self.parsed.start,
@@ -279,18 +302,18 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        if let YamlValueData::Array(v) = &self.parsed.data {
+        if let ValueData::Array(v) = &self.parsed.data {
             // TODO: We cannot move data output of `&mut self`, so we use
-            // to_vec() to clone here. Maybe should use `Option<YamlValue>` for
+            // to_vec() to clone here. Maybe should use `Option<Value>` for
             // Self::parsed, where we can use `Option::take()` to move data out.
-            let access = YamlValueSeqAccess::new(v.to_vec());
+            let access = SequenceAccess::new(v.to_vec());
             visitor.visit_seq(access)
-        } else if let YamlValueData::Tag(tag) = &self.parsed.data {
-            if let YamlValueData::Array(v) = &tag.data {
-                let access = YamlValueSeqAccess::new(v.to_vec());
+        } else if let ValueData::Tag(tag) = &self.parsed.data {
+            if let ValueData::Array(v) = &tag.data {
+                let access = SequenceAccess::new(v.to_vec());
                 visitor.visit_seq(access)
             } else {
-                Err(YamlError::new(
+                Err(Error::new(
                     ErrorKind::UnexpectedYamlNodeType,
                     format!(
                         "Expecting a sequence in tag, got {}",
@@ -301,7 +324,7 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
                 ))
             }
         } else {
-            Err(YamlError::new(
+            Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!("Expecting a sequence, got {}", self.parsed.data),
                 self.parsed.start,
@@ -337,17 +360,17 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        if let YamlValueData::Map(v) = &self.parsed.data {
+        if let ValueData::Map(v) = &self.parsed.data {
             // TODO: We cannot move data output of `&mut self`, so we use clone
-            // here. Maybe should use `Option<YamlValue>` for Self::parsed,
+            // here. Maybe should use `Option<Value>` for Self::parsed,
             // where we can use `Option::take()` to move data out.
-            let access = YamlValueMapAccess::new(*v.clone());
+            let access = MappingAccess::new(*v.clone());
             visitor.visit_map(access)
-        } else if let YamlValueData::Null = &self.parsed.data {
-            let access = YamlValueMapAccess::new(Default::default());
+        } else if let ValueData::Null = &self.parsed.data {
+            let access = MappingAccess::new(Default::default());
             visitor.visit_map(access)
         } else {
-            Err(YamlError::new(
+            Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!("Expecting a map, got {}", self.parsed.data),
                 self.parsed.start,
@@ -378,9 +401,9 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
         V: Visitor<'de>,
     {
         // TODO: We cannot move data output of `&mut self`, so we use clone
-        // here. Maybe should use `Option<YamlValue>` for Self::parsed,
+        // here. Maybe should use `Option<Value>` for Self::parsed,
         // where we can use `Option::take()` to move data out.
-        let access = YamlValueEnumAccess::new(self.parsed.clone());
+        let access = ValueEnumAccess::new(self.parsed.clone());
 
         visitor.visit_enum(access)
     }
