@@ -48,9 +48,15 @@ impl<'de> VariantAccess<'de> for ValueEnumAccess {
                 data: tag.data,
                 ..Default::default()
             };
-            seed.deserialize(&mut YamlDeserializer { parsed: value })
+            seed.deserialize(&mut YamlDeserializer {
+                parsed: value,
+                ..Default::default()
+            })
         } else {
-            seed.deserialize(&mut YamlDeserializer { parsed: self.value })
+            seed.deserialize(&mut YamlDeserializer {
+                parsed: self.value,
+                ..Default::default()
+            })
         }
     }
 
@@ -64,6 +70,7 @@ impl<'de> VariantAccess<'de> for ValueEnumAccess {
     {
         YamlDeserializer {
             parsed: self.value.clone(),
+            ..Default::default()
         }
         .deserialize_seq(visitor)
     }
@@ -78,6 +85,7 @@ impl<'de> VariantAccess<'de> for ValueEnumAccess {
     {
         YamlDeserializer {
             parsed: self.value.clone(),
+            ..Default::default()
         }
         .deserialize_map(visitor)
     }
@@ -113,6 +121,7 @@ impl<'de> EnumAccess<'de> for ValueEnumAccess {
             Ok((
                 seed.deserialize(&mut YamlDeserializer {
                     parsed: self.value.clone(),
+                    ..Default::default()
                 })?,
                 self,
             ))
