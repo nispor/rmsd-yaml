@@ -13,7 +13,6 @@ use crate::{
 #[test]
 fn test_map_of_plain_scalar() {
     super::testlib::init_logger();
-
     assert_eq!(
         YamlParser::parse_to_events("a: 1\nb: 2\n").unwrap(),
         vec![
@@ -300,4 +299,30 @@ fn test_seq_entry_map_keys_after_nested_seq_value() {
         entry.get(&Value::from("mac-address")).unwrap().as_str(),
         Ok("00:00:5E:00:00:01")
     );
+}
+
+#[derive(Deserialize, PartialEq, Debug)]
+struct NullableScalar {
+    #[serde(rename = "a")]
+    a: Option<String>,
+}
+
+#[test]
+fn test_quoted_null_like_scalars_are_not_null() {
+    // serde_yaml treats only plain `null`, `Null`, `NULL`, `~` and an
+    // empty value as null; quoted scalars such as `"null"`, `"~"` and
+    // `""` are ordinary strings and must deserialize to Some(...).
+    for (input, expected) in [
+        ("a: null\n", None),
+        ("a: NULL\n", None),
+        ("a: Null\n", None),
+        ("a: ~\n", None),
+        ("a: \n", None),
+        ("a: \"null\"\n", Some("null".to_string())),
+        ("a: \"~\"\n", Some("~".to_string())),
+        ("a: \"\"\n", Some(String::new())),
+    ] {
+        let got: NullableScalar = from_str(input).unwrap();
+        assert_eq!(got.a, expected, "input: {input:?}");
+    }
 }

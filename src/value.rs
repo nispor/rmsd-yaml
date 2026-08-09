@@ -179,6 +179,16 @@ impl Value {
             return true;
         }
         if let ValueData::String(s) = &self.data {
+            // Only a *plain* scalar can be null (YAML 1.2.2 SPEC,
+            // 7.3.1, tag resolution): an explicitly quoted scalar such
+            // as `"null"`, `"~"` or `""` is an ordinary string
+            // (serde_yaml deserializes it into `Some(...)`).
+            if !matches!(
+                self.meta.scalar_style,
+                None | Some(YamlScalarStyle::Plain)
+            ) {
+                return false;
+            }
             return matches!(s.as_str(), "null" | "Null" | "NULL" | "~" | "");
         }
         false
