@@ -1,0 +1,19 @@
+header:
+  license:
+    content: |
+      SPDX-License-Identifier: Apache-2.0
+  paths-ignore:
+    - 'target'
+    - 'yaml-test-suit-data'
+    - 'docs'
+    - '**/*.toml'
+    - '**/*.lock'
+    - '**/*.yml'
+    - '**/*.yaml'
+    - '**/*.json'
+    - '**/*.md'
+    - 'LICENSE'
+    - '.gitignore'
+    - 'tags'
+
+  comment: on-failure

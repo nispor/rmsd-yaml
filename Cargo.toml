@@ -5,6 +5,7 @@ edition = "2024"
 license = "Apache-2.0"
 description = "Rust Minimized Serializer and Deserializer of YAML"
 repository = "https://github.com/nispor/rdsm-yaml"
+rust-version = "1.88"
 
 
 [dependencies]

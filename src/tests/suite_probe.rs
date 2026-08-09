@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Temporary probe: run every yaml-test-suite case and report pass/fail
 // without stopping at the first failure.
 use std::path::Path;
