@@ -49,9 +49,11 @@ fn test_sequences_and_maps() {
         ]),
         "a: 1\nb: 2\n",
     );
+    // A block sequence as a mapping value is written indentless,
+    // matching serde_yaml.
     round_trip(
         &std::collections::BTreeMap::from([("a".to_string(), vec![1u32, 2])]),
-        "a:\n  - 1\n  - 2\n",
+        "a:\n- 1\n- 2\n",
     );
 }
 
@@ -64,7 +66,7 @@ fn test_enum_variants() {
     round_trip(&vec![E::A(1), E::D], "- !A 1\n- D\n");
     round_trip(
         &std::collections::BTreeMap::from([("k".to_string(), E::B(1, 2))]),
-        "k: !B\n  - 1\n  - 2\n",
+        "k: !B\n- 1\n- 2\n",
     );
 }
 
@@ -170,4 +172,50 @@ fn test_leading_start_indicator() {
 fn test_to_value() {
     let v = Value::from_str("- 1\n- 2\n").unwrap();
     assert!(matches!(v.data, crate::ValueData::Array(_)));
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Bridge {
+    name: String,
+    port: Vec<Port>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Port {
+    name: String,
+    vlan: Vlan,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Vlan {
+    mode: String,
+    trunk_tags: Vec<TrunkTag>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct TrunkTag {
+    id: u32,
+}
+
+#[test]
+fn test_map_value_sequence_is_indentless() {
+    // A block sequence used as a mapping value is written indentless
+    // (items at the key's own column), matching serde_yaml and the
+    // yaml-test-suite `out.yaml` convention
+    // (`key:\n- item1`), even when nested several levels deep.
+    let bridge = Bridge {
+        name: "br0".to_string(),
+        port: vec![Port {
+            name: "eth1".to_string(),
+            vlan: Vlan {
+                mode: "access".to_string(),
+                trunk_tags: vec![TrunkTag { id: 101 }],
+            },
+        }],
+    };
+    round_trip(
+        &bridge,
+        "name: br0\nport:\n- name: eth1\n  vlan:\n    mode: access\n    \
+         trunk_tags:\n    - id: 101\n",
+    );
 }

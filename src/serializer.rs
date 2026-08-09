@@ -46,6 +46,13 @@ pub struct YamlSerializer {
     /// Set when the last written node was a keep-chomped block scalar
     /// ending in blank lines; a `...` line is appended at the end.
     open_ended: bool,
+    /// Depth of mapping values being serialized: a block sequence that
+    /// is a mapping value is written indentless (`port:\n- name: eth1`),
+    /// matching `serde_yaml`.
+    map_value_depth: usize,
+    /// Per open sequence: whether it is a mapping value (indentless) so
+    /// `end()` only unwinds the indent it actually added.
+    seq_indentless_stack: Vec<bool>,
 }
 
 pub fn to_string_with_opt<T>(
@@ -124,7 +131,11 @@ impl YamlSerializer {
 
     /// Start a collection: a pending `!Tag ` (or `key: `) is completed
     /// with a line break before the collection body.
-    fn start_collection(&mut self) {
+    ///
+    /// When `indentless` (a block sequence that is a mapping value) the
+    /// collection body is written at the key's own indentation,
+    /// matching `serde_yaml` (`port:\n- name: eth1`).
+    fn start_collection(&mut self, indentless: bool) {
         if self.pending_tag && self.output.ends_with(' ') {
             self.output.pop();
             self.output.push('\n');
@@ -138,7 +149,9 @@ impl YamlSerializer {
         {
             self.output.push('\n');
         }
-        self.current_indent_level += 1;
+        if !indentless {
+            self.current_indent_level += 1;
+        }
     }
 
     pub(crate) fn serialize_yaml_value(
@@ -876,7 +889,14 @@ impl ser::Serializer for &mut YamlSerializer {
         self,
         _len: Option<usize>,
     ) -> Result<Self::SerializeSeq, Error> {
-        self.start_collection();
+        // A block sequence that is a mapping value is written indentless
+        // (serde_yaml: `port:\n- 1\n- 2`), i.e. the items sit at the
+        // key's own indentation. A sequence that is a sequence item
+        // (output ends with `- `) is indented normally.
+        let indentless =
+            self.map_value_depth > 0 && !self.output.ends_with("- ");
+        self.seq_indentless_stack.push(indentless);
+        self.start_collection(indentless);
         Ok(self)
     }
 
@@ -913,7 +933,7 @@ impl ser::Serializer for &mut YamlSerializer {
         self,
         _len: Option<usize>,
     ) -> Result<Self::SerializeMap, Error> {
-        self.start_collection();
+        self.start_collection(false);
         Ok(self)
     }
 
@@ -970,7 +990,9 @@ impl ser::SerializeSeq for &mut YamlSerializer {
 
     // Close the sequence.
     fn end(self) -> Result<(), Error> {
-        if self.current_indent_level > 0 {
+        if self.seq_indentless_stack.pop() == Some(false)
+            && self.current_indent_level > 0
+        {
             self.current_indent_level -= 1;
         }
         Ok(())
@@ -994,7 +1016,9 @@ impl ser::SerializeTuple for &mut YamlSerializer {
     }
 
     fn end(self) -> Result<(), Error> {
-        if self.current_indent_level > 0 {
+        if self.seq_indentless_stack.pop() == Some(false)
+            && self.current_indent_level > 0
+        {
             self.current_indent_level -= 1;
         }
         Ok(())
@@ -1018,7 +1042,9 @@ impl ser::SerializeTupleStruct for &mut YamlSerializer {
     }
 
     fn end(self) -> Result<(), Error> {
-        if self.current_indent_level > 0 {
+        if self.seq_indentless_stack.pop() == Some(false)
+            && self.current_indent_level > 0
+        {
             self.current_indent_level -= 1;
         }
         Ok(())
@@ -1042,7 +1068,9 @@ impl ser::SerializeTupleVariant for &mut YamlSerializer {
     }
 
     fn end(self) -> Result<(), Error> {
-        if self.current_indent_level > 0 {
+        if self.seq_indentless_stack.pop() == Some(false)
+            && self.current_indent_level > 0
+        {
             self.current_indent_level -= 1;
         }
         Ok(())
@@ -1066,7 +1094,10 @@ impl ser::SerializeMap for &mut YamlSerializer {
     where
         T: ?Sized + Serialize,
     {
-        value.serialize(&mut **self)?;
+        self.map_value_depth += 1;
+        let result = value.serialize(&mut **self);
+        self.map_value_depth -= 1;
+        result?;
         if !self.output.ends_with("\n") {
             self.output.push('\n');
         }
@@ -1097,7 +1128,10 @@ impl ser::SerializeStruct for &mut YamlSerializer {
     {
         key.serialize(&mut **self)?;
         self.output += ": ";
-        value.serialize(&mut **self)?;
+        self.map_value_depth += 1;
+        let result = value.serialize(&mut **self);
+        self.map_value_depth -= 1;
+        result?;
         if !self.output.ends_with("\n") {
             self.output += "\n";
         }
@@ -1126,7 +1160,10 @@ impl ser::SerializeStructVariant for &mut YamlSerializer {
     {
         key.serialize(&mut **self)?;
         self.output += ": ";
-        value.serialize(&mut **self)?;
+        self.map_value_depth += 1;
+        let result = value.serialize(&mut **self);
+        self.map_value_depth -= 1;
+        result?;
         if !self.output.ends_with("\n") {
             self.output += "\n";
         }
