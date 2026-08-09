@@ -219,3 +219,27 @@ fn test_map_value_sequence_is_indentless() {
          trunk_tags:\n    - id: 101\n",
     );
 }
+
+#[test]
+fn test_empty_collections_serialized_explicitly() {
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct Empty {}
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct S {
+        routes: Empty,
+        address: Vec<String>,
+        items: Vec<Empty>,
+    }
+    // Empty map/struct and sequence values are rendered explicitly
+    // (`{}` / `[]`), matching serde_yaml, instead of a bare `key:`.
+    round_trip(
+        &S {
+            routes: Empty {},
+            address: vec![],
+            items: vec![],
+        },
+        "routes: {}\naddress: []\nitems: []\n",
+    );
+    round_trip(&Empty {}, "{}\n");
+    round_trip(&vec![Empty {}, Empty {}], "- {}\n- {}\n");
+}
