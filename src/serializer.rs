@@ -257,6 +257,17 @@ impl YamlSerializer {
         // Any node written after a keep-chomped block scalar invalidates
         // the pending `...` closing line.
         self.open_ended = false;
+        // An alias is rendered as `*name` and stops here (its `data` is
+        // the resolved value).
+        if let Some(alias) = &value.meta.alias {
+            write!(self.output, "*{alias}").ok();
+            self.pending_tag = false;
+            return Ok(());
+        }
+        // An anchor is rendered as `&name ` before the node content.
+        if let Some(anchor) = &value.meta.anchor {
+            write!(self.output, "&{anchor} ").ok();
+        }
         match &value.data {
             YamlValueData::Null => {
                 // An empty document (no content) renders as nothing.
@@ -293,6 +304,10 @@ impl YamlSerializer {
                         )
                         .ok();
                         self.pending_tag = false;
+                        if s.is_empty() && value.meta.anchor.is_some() {
+                            // `&name ` alone is the anchored empty scalar.
+                            self.output.pop();
+                        }
                     }
                 }
                 Ok(())
@@ -322,6 +337,11 @@ impl YamlSerializer {
                     && !self.output.ends_with("- ")
                     && !self.output.ends_with("? ")
                 {
+                    // Drop the space after a `&anchor ` written before
+                    // the collection (`seq: &anchor\n- a`).
+                    if self.output.ends_with(' ') {
+                        self.output.pop();
+                    }
                     self.output.push('\n');
                 }
                 if !indentless {
@@ -371,6 +391,11 @@ impl YamlSerializer {
                     && !self.output.ends_with("- ")
                     && !self.output.ends_with("? ")
                 {
+                    // Drop the space after a `&anchor ` written before
+                    // the collection (`top1: &node1\n  key: ...`).
+                    if self.output.ends_with(' ') {
+                        self.output.pop();
+                    }
                     self.output.push('\n');
                 }
                 self.current_indent_level += 1;
@@ -399,7 +424,15 @@ impl YamlSerializer {
                         // Explicit `? key` form, value on its own `: `;
                         // a collection value starts inline on that line.
                         write!(self.output, "{}? ", self.get_indent()).ok();
-                        self.serialize_yaml_value_ctx(key, ValueCtx::SeqItem)?;
+                        // An anchored collection key is written
+                        // indentless (`? &a\n- a`); an unanchored one
+                        // keeps the first item inline (`? - d\n  - e`).
+                        let key_ctx = if key.meta.anchor.is_some() {
+                            ValueCtx::MapValue
+                        } else {
+                            ValueCtx::SeqItem
+                        };
+                        self.serialize_yaml_value_ctx(key, key_ctx)?;
                         if !self.output.ends_with('\n') {
                             self.output.push('\n');
                         }
@@ -426,12 +459,15 @@ impl YamlSerializer {
                     ) || matches!(&tag.data, crate::YamlValueData::Null);
                 // The style/anchor meta lives on the outer node (the
                 // event carried both the tag and the style); propagate
-                // it so the wrapped data is dumped with its style.
+                // it so the wrapped data is dumped with its style. The
+                // anchor is written once, before the tag.
+                let mut meta = value.meta.clone();
+                meta.anchor = None;
                 let inner = crate::YamlValue {
                     data: tag.data.clone(),
                     start: value.start,
                     end: value.end,
-                    meta: value.meta.clone(),
+                    meta,
                 };
                 self.serialize_yaml_value_ctx(&inner, ctx)?;
                 if empty && self.output.ends_with(' ') {
@@ -456,6 +492,11 @@ enum ValueCtx {
 /// form (a single-line scalar, a tag on a single-line scalar, or an
 /// empty collection).
 fn is_simple_key(key: &crate::YamlValue) -> bool {
+    // An alias is always a simple key (`*name :`), regardless of what
+    // it resolves to.
+    if key.meta.alias.is_some() {
+        return true;
+    }
     match &key.data {
         crate::YamlValueData::String(s) => !s.contains('\n'),
         crate::YamlValueData::Tag(tag) => {
@@ -467,28 +508,33 @@ fn is_simple_key(key: &crate::YamlValue) -> bool {
     }
 }
 
-/// The text of a simple key: the scalar itself, a tag on a scalar
-/// (e.g. `!!str a`, and `!!str ` for a tagged empty scalar, so the
-/// following `:` is separated by a space), or an empty collection.
+/// The text of a simple key, rendered before the `:` — including a
+/// leading `&anchor ` (so `&a a:` and the anchored empty key `&a :`)
+/// and the `*alias ` spacing for alias keys (`*b : *a`).
 fn simple_key_text(key: &crate::YamlValue) -> String {
-    match &key.data {
+    let mut text = String::new();
+    if let Some(alias) = &key.meta.alias {
+        text.push_str(&format!("*{alias} "));
+        return text;
+    }
+    if let Some(anchor) = &key.meta.anchor {
+        text.push_str(&format!("&{anchor} "));
+    }
+    text.push_str(&match &key.data {
         crate::YamlValueData::String(s) => to_out_yaml_scalar(s),
         crate::YamlValueData::Tag(tag) => {
-            let mut text = format!("!{}", tag_shorthand(&tag.name));
+            let mut tag_text = format!("!{}", tag_shorthand(&tag.name));
             if let crate::YamlValueData::String(s) = &tag.data {
-                if s.is_empty() {
-                    text.push(' ');
-                } else {
-                    text.push(' ');
-                    text.push_str(s);
-                }
+                tag_text.push(' ');
+                tag_text.push_str(s);
             }
-            text
+            tag_text
         }
         crate::YamlValueData::Array(_) => "[]".to_string(),
         crate::YamlValueData::Map(_) => "{}".to_string(),
         _ => String::new(),
-    }
+    });
+    text
 }
 
 /// Convert a stored tag URI (e.g. `<tag:yaml.org,2002:int>`, `<!foo>`)

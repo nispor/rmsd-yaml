@@ -63,6 +63,7 @@ mod tests;
 pub use self::{
     deserializer::{YamlDeserializer, documents, from_str, to_value},
     error::{ErrorKind, YamlError},
+    event::YamlScalarStyle,
     map::YamlValueMap,
     position::YamlPosition,
     serializer::{
@@ -71,7 +72,7 @@ pub use self::{
     value::{YamlValue, YamlValueData, YamlValueMeta},
 };
 pub(crate) use self::{
-    event::{YamlCollectionStyle, YamlEvent, YamlEventIter, YamlScalarStyle},
+    event::{YamlCollectionStyle, YamlEvent, YamlEventIter},
     map::YamlValueMapAccess,
     parser::YamlParser,
     scalar_ser::{escape_double_quoted, to_out_yaml_scalar, to_scalar_string},

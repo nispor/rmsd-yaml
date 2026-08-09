@@ -33,13 +33,18 @@ pub struct YamlValueMeta {
     pub alias: Option<String>,
 }
 
-// `meta` is excluded from equality/hash so the value semantics of
-// `YamlValue` (and of map keys) are unchanged by the round-trip info.
+// `meta.scalar_style` is excluded from equality/hash so the value
+// semantics of `YamlValue` (and of map keys) are unchanged by the
+// presentation style. The anchor/alias are part of the node identity
+// (an `&a x` key and a `*a` key are different nodes and must both be
+// preserved by the dump).
 impl PartialEq for YamlValue {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data
             && self.start == other.start
             && self.end == other.end
+            && self.meta.anchor == other.meta.anchor
+            && self.meta.alias == other.meta.alias
     }
 }
 
@@ -50,6 +55,8 @@ impl std::hash::Hash for YamlValue {
         self.data.hash(state);
         self.start.hash(state);
         self.end.hash(state);
+        self.meta.anchor.hash(state);
+        self.meta.alias.hash(state);
     }
 }
 
