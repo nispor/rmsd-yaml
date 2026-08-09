@@ -206,6 +206,11 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
+                // The column where the key content starts (1-based);
+                // continuation lines of a same-line value must be
+                // indented deeper than this (e.g.
+                // `- key: value\n   key2: v`).
+                let key_start_column = self.scanner.next_pos.column;
                 let trimmed_key = line.trim_start_matches(' ');
                 if trimmed_key.starts_with('\t')
                     && tab_content_is_block_node(
@@ -499,7 +504,8 @@ impl<'a> YamlParser<'a> {
                             value_rest_indent_count = value_first_indent_count;
                         } else {
                             value_first_indent_count = 0;
-                            value_rest_indent_count = rest_indent_count + 1;
+                            value_rest_indent_count =
+                                rest_indent_count + 1;
                         }
                     } else {
                         // A value on the same line as the key (e.g.
@@ -714,8 +720,13 @@ impl<'a> YamlParser<'a> {
                 self.handle_block_scalar(anchor, tag, false)?;
             }
             (true, Some('-')) => {
-                // A block sequence as key, e.g. `? - a`.
-                self.handle_block_seq(0, anchor, tag)?;
+                // A block sequence as key, e.g. `? - a`: the entries
+                // keep the indentation of the dash itself.
+                self.handle_block_seq(
+                    self.scanner.done_pos.column,
+                    anchor,
+                    tag,
+                )?;
             }
             (true, Some(_)) => {
                 // A plain-scalar key on the `?` line. Unlike an
@@ -833,8 +844,13 @@ impl<'a> YamlParser<'a> {
         match self.scanner.peek_char() {
             Some('-') => {
                 // A block sequence value on the `:` line, e.g.
-                // `: - one` (YAML 1.2.2 SPEC, 8.2.1).
-                self.handle_block_seq(0, None, None)?;
+                // `: - one` (YAML 1.2.2 SPEC, 8.2.1): the entries keep
+                // the indentation of the dash itself.
+                self.handle_block_seq(
+                    self.scanner.done_pos.column,
+                    None,
+                    None,
+                )?;
             }
             _ => {
                 self.handle_node(0, self.scanner.done_pos.column, None, None)?;

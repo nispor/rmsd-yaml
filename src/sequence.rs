@@ -61,7 +61,9 @@ impl<'a> YamlParser<'a> {
             self.scanner.remains()
         );
         let saved_block_indent = self.block_indent;
+        let saved_seq_entry_indent = self.seq_entry_indent;
         self.block_indent = Some(indent_count);
+        self.seq_entry_indent = None;
         self.push_event(YamlEvent::SequenceStart(
             anchor,
             tag,
@@ -99,6 +101,7 @@ impl<'a> YamlParser<'a> {
                     None => entry_indent = Some(cur_indent),
                     _ => {}
                 }
+                self.seq_entry_indent = entry_indent;
             }
 
             if trimmed.starts_with('#')
@@ -170,6 +173,7 @@ impl<'a> YamlParser<'a> {
         self.push_event(YamlEvent::SequenceEnd(self.scanner.done_pos));
         self.pop_state();
         self.block_indent = saved_block_indent;
+        self.seq_entry_indent = saved_seq_entry_indent;
         Ok(())
     }
 

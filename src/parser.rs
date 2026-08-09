@@ -18,6 +18,12 @@ pub(crate) struct YamlParser<'a> {
     /// top-level document node). Block scalar content indentation is
     /// relative to it (YAML 1.2.2 SPEC, 8.1.1.1).
     pub(crate) block_indent: Option<usize>,
+    /// The indentation of the block sequence entries currently being
+    /// parsed, once established by the first line-start entry; `None`
+    /// while the first entry is still mid-line (a compact entry). Used
+    /// to decide whether a deeper-indented `- ` line starts a new
+    /// entry or continues a plain scalar.
+    pub(crate) seq_entry_indent: Option<usize>,
     /// Tag handle (`!`, `!!`, `!name!`) to prefix mapping declared by
     /// `%TAG` directives, scoped to the current document.
     pub(crate) tag_handles: HashMap<String, String>,
@@ -70,6 +76,7 @@ impl<'a> YamlParser<'a> {
             states: Vec::new(),
             events: Vec::new(),
             block_indent: None,
+            seq_entry_indent: None,
             tag_handles: HashMap::new(),
             saw_directive: false,
             yaml_directive_seen: false,

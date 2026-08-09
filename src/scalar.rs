@@ -751,8 +751,22 @@ impl<'a> YamlParser<'a> {
             }
 
             let trimmed = line.trim_start_matches(' ');
+            // A `- ` line at the sequence's entry indentation starts a
+            // new entry; a deeper-indented `- ` is plain scalar content
+            // (yaml-test-suite:
+            // sequence-entry-that-looks-like-two-with-wrong-indentation,
+            // spec-example-6-2-indentation-indicators). While the entry
+            // indentation is not yet established (a compact first
+            // entry), the first line-start `- ` always starts a new
+            // entry.
             if self.cur_state().is_block_seq() && trimmed.starts_with("- ") {
-                break;
+                match self.seq_entry_indent {
+                    None => break,
+                    Some(entry_indent) if cur_indent_count == entry_indent => {
+                        break;
+                    }
+                    _ => {}
+                }
             }
 
             if !self.cur_state().is_block_map_key() && line.contains(": ") {
