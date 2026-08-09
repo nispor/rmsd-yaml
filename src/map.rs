@@ -5,12 +5,14 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
-use crate::parser::{
-    find_key_value_separator, flow_collection_is_key, is_document_end_marker,
-    is_document_start_marker, tab_content_is_block_node,
-};use crate::{
+use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
+    parser::{
+        find_key_value_separator, flow_collection_is_key,
+        is_document_end_marker, is_document_start_marker,
+        tab_content_is_block_node,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -250,7 +252,7 @@ impl<'a> YamlParser<'a> {
                         ErrorKind::InvalidStartOfToken,
                         "Tab(\\t) cannot be used as indentation in a mapping \
                          key"
-                            .to_string(),
+                        .to_string(),
                         self.scanner.next_pos,
                         self.scanner.next_pos,
                     ));
@@ -425,8 +427,8 @@ impl<'a> YamlParser<'a> {
                         return Err(YamlError::new(
                             ErrorKind::InvalidImplicitKey,
                             format!(
-                                "A tagged mapping key must have content or \
-                                 a ':' on the same line, but got: \
+                                "A tagged mapping key must have content or a \
+                                 ':' on the same line, but got: \
                                  {trimmed_key:?}"
                             ),
                             self.scanner.next_pos,
@@ -464,19 +466,11 @@ impl<'a> YamlParser<'a> {
                             self.scanner.peek_char(),
                             Some('\'') | Some('"')
                         ) {
-                            self.handle_scalar(
-                                0,
-                                0,
-                                key_anchor,
-                                key_tag,
-                            )?;
+                            self.handle_scalar(0, 0, key_anchor, key_tag)?;
                             self.expect_colon_after_key()?;
                         } else {
                             self.handle_plain_scalar(
-                                0,
-                                0,
-                                key_anchor,
-                                key_tag,
+                                0, 0, key_anchor, key_tag,
                             )?;
                         }
                     } else if self.scanner.peek_char() == Some(':') {
@@ -552,9 +546,7 @@ impl<'a> YamlParser<'a> {
                         ));
                         break;
                     }
-                } else if line.contains(": ")
-                    || line.contains(":\t")
-                {
+                } else if line.contains(": ") || line.contains(":\t") {
                     self.scanner.advance_offset(2);
                     // A tab right after the `:` is part of the value
                     // separation; validate it like any other block
@@ -575,8 +567,7 @@ impl<'a> YamlParser<'a> {
                         // `key: &x\n!!map`).
                         if self.scanner.done_pos.line
                             != self.scanner.next_pos.line
-                            && property_indent
-                                <= desired_indent_count
+                            && property_indent <= desired_indent_count
                         {
                             break;
                         }
@@ -627,8 +618,7 @@ impl<'a> YamlParser<'a> {
                             value_rest_indent_count = value_first_indent_count;
                         } else {
                             value_first_indent_count = 0;
-                            value_rest_indent_count =
-                                rest_indent_count + 1;
+                            value_rest_indent_count = rest_indent_count + 1;
                         }
                     } else {
                         // A value on the same line as the key (e.g.
@@ -714,9 +704,8 @@ impl<'a> YamlParser<'a> {
             let indent = line.chars().take_while(|c| *c == ' ').count();
             // A zero-indented block sequence is still valid content
             // (e.g. `sequence: !!seq\n- entry`).
-            let is_zero_indented_seq =
-                indent == key_indent_count
-                    && (trimmed == "-" || trimmed.starts_with("- "));
+            let is_zero_indented_seq = indent == key_indent_count
+                && (trimmed == "-" || trimmed.starts_with("- "));
             return indent <= key_indent_count && !is_zero_indented_seq;
         }
         true
@@ -778,9 +767,8 @@ impl<'a> YamlParser<'a> {
                     }
                     continue;
                 }
-                next_indent = Some(
-                    line.chars().take_while(|c| *c == ' ').count(),
-                );
+                next_indent =
+                    Some(line.chars().take_while(|c| *c == ' ').count());
                 is_seq = trimmed == "-" || trimmed.starts_with("- ");
                 break;
             }
@@ -838,10 +826,8 @@ impl<'a> YamlParser<'a> {
                 // by `:`, it is a compact block mapping key, e.g.
                 // `? []: x`.
                 let remainder = self.scanner.remains();
-                let first_line = remainder
-                    .split(['\n', '\r'])
-                    .next()
-                    .unwrap_or_default();
+                let first_line =
+                    remainder.split(['\n', '\r']).next().unwrap_or_default();
                 if flow_collection_is_key(first_line) {
                     let key_column =
                         self.scanner.next_pos.column.saturating_sub(1);
@@ -891,10 +877,8 @@ impl<'a> YamlParser<'a> {
                 // key is a compact block mapping.
                 let key_content =
                     self.scanner.remains().trim_start_matches([' ', '\t']);
-                let key_first_line = key_content
-                    .split(['\n', '\r'])
-                    .next()
-                    .unwrap_or_default();
+                let key_first_line =
+                    key_content.split(['\n', '\r']).next().unwrap_or_default();
                 if find_key_value_separator(key_first_line).is_some()
                     || key_first_line.starts_with(':')
                     || key_first_line.starts_with(": ")
@@ -953,10 +937,8 @@ impl<'a> YamlParser<'a> {
                 }
                 while let Some(next_line) = self.scanner.peek_line() {
                     let next_trimmed = next_line.trim_start_matches(' ');
-                    let next_indent = next_line
-                        .chars()
-                        .take_while(|c| *c == ' ')
-                        .count();
+                    let next_indent =
+                        next_line.chars().take_while(|c| *c == ' ').count();
                     let is_value_line = next_trimmed.starts_with(':')
                         && (next_trimmed == ":"
                             || next_trimmed.starts_with(": ")
@@ -972,8 +954,7 @@ impl<'a> YamlParser<'a> {
                         break;
                     }
                     self.scanner.next_line();
-                    let content =
-                        next_line.trim_matches([' ', '\t']);
+                    let content = next_line.trim_matches([' ', '\t']);
                     if !content.is_empty() {
                         key.push(' ');
                         key.push_str(content);
@@ -1035,9 +1016,8 @@ impl<'a> YamlParser<'a> {
                     }
                     continue;
                 }
-                next_indent = Some(
-                    line.chars().take_while(|c| *c == ' ').count(),
-                );
+                next_indent =
+                    Some(line.chars().take_while(|c| *c == ' ').count());
                 is_seq = trimmed == "-" || trimmed.starts_with("- ");
                 break;
             }
@@ -1157,8 +1137,8 @@ impl<'a> YamlParser<'a> {
                         return Err(YamlError::new(
                             ErrorKind::InvalidStartOfToken,
                             format!(
-                                "A flow collection line may not start with \
-                                 a tab or a document marker: {line}"
+                                "A flow collection line may not start with a \
+                                 tab or a document marker: {line}"
                             ),
                             self.scanner.next_pos,
                             self.scanner.next_pos,
@@ -1183,8 +1163,7 @@ impl<'a> YamlParser<'a> {
                     Some('?')
                         if matches!(
                             self.scanner.remains().chars().nth(1),
-                            None
-                                | Some(' ')
+                            None | Some(' ')
                                 | Some('\t')
                                 | Some('\n')
                                 | Some('\r')
@@ -1239,13 +1218,17 @@ impl<'a> YamlParser<'a> {
                         // A comment directly after the comma (without a
                         // separation space) is an error.
                         if self.scanner.peek_char() == Some('#') {
-                            return Err(YamlError::new(
-                                ErrorKind::AmbiguityPlainScalar,
-                                "Comment must be preceded by a space after                                  ',' in a flow mapping"
-                                    .to_string(),
-                                self.scanner.next_pos,
-                                self.scanner.next_pos,
-                            ));
+                            return Err(
+                                YamlError::new(
+                                    ErrorKind::AmbiguityPlainScalar,
+                                    "Comment must be preceded by a space \
+                                     after                                  \
+                                     ',' in a flow mapping"
+                                        .to_string(),
+                                    self.scanner.next_pos,
+                                    self.scanner.next_pos,
+                                ),
+                            );
                         }
                         self.scanner.skip_flow_separation();
                         // A trailing comma before '}' is tolerated in

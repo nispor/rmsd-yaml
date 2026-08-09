@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::cmp::max;
-
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 
 use crate::{
     ErrorKind, YamlError, YamlEvent, YamlScalarStyle, YamlScanner, YamlState,
@@ -350,12 +348,10 @@ impl<'a> YamlParser<'a> {
     /// content or with a document marker (YAML 1.2.2 SPEC, 7.4;
     /// tabs-in-various-contexts, invalid-document-markers-in-flow-style).
     pub(crate) fn check_flow_line_start(&self) -> Result<(), YamlError> {
-        if let Some(line) =
-            self.scanner.remains().split(['\n', '\r']).nth(1)
-        {
+        if let Some(line) = self.scanner.remains().split(['\n', '\r']).nth(1) {
             let trimmed = line.trim_start_matches([' ', '\t']);
             if (line.starts_with('\t') && !trimmed.is_empty())
-                && trimmed != "]" 
+                && trimmed != "]"
                 && trimmed != "}"
                 || trimmed.starts_with("---")
                 || trimmed.starts_with("...")
@@ -363,8 +359,8 @@ impl<'a> YamlParser<'a> {
                 return Err(YamlError::new(
                     ErrorKind::InvalidStartOfToken,
                     format!(
-                        "A flow collection line may not start with a tab \
-                         or a document marker: {line}"
+                        "A flow collection line may not start with a tab or a \
+                         document marker: {line}"
                     ),
                     self.scanner.next_pos,
                     self.scanner.next_pos,
@@ -385,7 +381,8 @@ impl<'a> YamlParser<'a> {
         if let Some(floor) = self.block_indent {
             let pos = self.scanner.next_pos;
             log::trace!(
-                "check_flow_entry_indentation: floor={floor} line={} start={} col={}",
+                "check_flow_entry_indentation: floor={floor} line={} start={} \
+                 col={}",
                 pos.line,
                 flow_start_line,
                 pos.column
@@ -447,10 +444,9 @@ impl<'a> YamlParser<'a> {
         if tab_content_is_block_node(rest) {
             return Err(YamlError::new(
                 ErrorKind::InvalidStartOfToken,
-                format!(
-                    "Tab(\\t) cannot be used as indentation before block \
-                     node content"
-                ),
+                "Tab(\\t) cannot be used as indentation before block node \
+                 content"
+                    .to_string(),
                 self.scanner.next_pos,
                 self.scanner.next_pos,
             ));
@@ -545,8 +541,7 @@ impl<'a> YamlParser<'a> {
                 // the dash follows a parent entry on the same line (e.g.
                 // `- - a`), the indentation is derived from the parent.
                 let at_line_start = self.scanner.done_pos.column == 0
-                    || self.scanner.done_pos.line
-                        != self.scanner.next_pos.line
+                    || self.scanner.done_pos.line != self.scanner.next_pos.line
                     || matches!(
                         self.scanner.peek_char(),
                         None | Some('\n') | Some('\r')
@@ -597,18 +592,16 @@ impl<'a> YamlParser<'a> {
                     // (rejects e.g. `a: 'b': c`).
                     self.expect_flow_end_separation()?;
                 }
-            } else if trimmed.starts_with('*') {
+            } else if let Some(after_star) = trimmed.strip_prefix('*') {
                 // An alias followed by `:` is a mapping key, e.g.
                 // `*alias1 : scalar3`.
-                let after_star = &trimmed[1..];
                 let name_len = after_star
                     .find(|c: char| {
                         c.is_whitespace()
                             || matches!(c, ',' | '[' | ']' | '{' | '}')
                     })
                     .unwrap_or(after_star.len());
-                let after_name =
-                    after_star[name_len..].trim_start_matches(' ');
+                let after_name = after_star[name_len..].trim_start_matches(' ');
                 if after_name.starts_with(':')
                     && (after_name == ":"
                         || after_name.starts_with(": ")
@@ -666,8 +659,8 @@ impl<'a> YamlParser<'a> {
                     return Err(YamlError::new(
                         ErrorKind::InvalidImplicitKey,
                         format!(
-                            "A block mapping cannot be the value of a \
-                             mapping entry on the same line: {line}"
+                            "A block mapping cannot be the value of a mapping \
+                             entry on the same line: {line}"
                         ),
                         self.scanner.next_pos,
                         self.scanner.next_pos,
@@ -733,10 +726,9 @@ impl<'a> YamlParser<'a> {
                         && self.scanner.done_pos.line
                             != self.scanner.next_pos.line
                         && let Some(floor) = self.block_indent
+                        && property_indent <= floor
                     {
-                        if property_indent <= floor {
-                            break;
-                        }
+                        break;
                     }
                     // A line whose first two tokens are node properties
                     // and which contains `: ` is an implicit mapping key
@@ -1064,7 +1056,9 @@ impl<'a> YamlParser<'a> {
                 let name = self.handle_alias()?;
                 self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
             }
-            Some('"') => self.handle_double_quoted_flow_scalar(anchor, tag, 0)?,
+            Some('"') => {
+                self.handle_double_quoted_flow_scalar(anchor, tag, 0)?
+            }
             Some('\'') => self.handle_single_quoted_flow_scalar(anchor, tag)?,
             Some(',') | Some(']') | Some('}') | None => {
                 // Empty node, e.g. an omitted value in a flow mapping.
@@ -1121,8 +1115,7 @@ pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
     let mut in_squote = false;
     let mut in_dquote = false;
     let mut escaped = false;
-    let mut chars = trimmed.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
+    for (i, c) in trimmed.char_indices() {
         if in_dquote {
             if escaped {
                 escaped = false;
@@ -1148,7 +1141,7 @@ pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
                     // Check for a `:` key separator right after the
                     // matching closing indicator.
                     let after: &str =
-                        &trimmed[i + c.len_utf8()..].trim_start_matches(' ');
+                        trimmed[i + c.len_utf8()..].trim_start_matches(' ');
                     return after == ":"
                         || after.starts_with(": ")
                         || after.starts_with(":\t")
@@ -1178,8 +1171,7 @@ pub(crate) fn is_document_start_marker(trimmed: &str) -> bool {
         return true;
     }
     if let Some(rest) = trimmed.strip_prefix("---") {
-        return rest.starts_with([' ', '\t'])
-            || rest.starts_with('#');
+        return rest.starts_with([' ', '\t']) || rest.starts_with('#');
     }
     false
 }

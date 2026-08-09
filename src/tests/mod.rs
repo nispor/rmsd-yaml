@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod deserializer;
-mod iso;
 mod edge_cases;
+mod iso;
 mod map;
 mod scalar;
 mod sequence;

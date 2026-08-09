@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::parser::{
-    find_comment_start, find_key_value_separator, is_document_end_marker,
-    is_document_start_marker,
+use crate::{
+    ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle,
+    parser::{
+        find_comment_start, find_key_value_separator, is_document_end_marker,
+        is_document_start_marker,
+    },
 };
-use crate::{ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 enum ChompingMethod {
@@ -323,8 +325,8 @@ impl<'a> YamlParser<'a> {
         Ok((max_empty_indent.max(parent_floor), leading_empties))
     }
 
-    /// Parse a single-quoted flow scalar.    /// Parse a single-quoted flow scalar. The scanner must stay at the
-    /// opening `'`.
+    /// Parse a single-quoted flow scalar.    /// Parse a single-quoted flow
+    /// scalar. The scanner must stay at the opening `'`.
     ///
     /// YAML 1.2.2 SPEC, 7.4.2. Single-Quoted Styles:
     ///     A single-quoted scalar may not contain a single quote unless
@@ -343,8 +345,7 @@ impl<'a> YamlParser<'a> {
                 || trimmed == "..."
                 || trimmed.starts_with("... ")
                 || trimmed.starts_with("...\t");
-            if line.chars().take_while(|c| *c == ' ').count() == 0
-                && is_marker
+            if line.chars().take_while(|c| *c == ' ').count() == 0 && is_marker
             {
                 return Err(YamlError::new(
                     ErrorKind::UnfinishedQuote,
@@ -642,20 +643,17 @@ impl<'a> YamlParser<'a> {
                     if !self.cur_state().is_flow()
                         && let Some(next_line) = self.scanner.peek_line()
                     {
-                        let indent = next_line
-                            .chars()
-                            .take_while(|c| *c == ' ')
-                            .count();
+                        let indent =
+                            next_line.chars().take_while(|c| *c == ' ').count();
                         if indent < min_indent
                             && !next_line.trim_matches([' ', '\t']).is_empty()
                         {
                             return Err(YamlError::new(
                                 ErrorKind::LessIndentedWithoutParent,
                                 format!(
-                                    "A continuation line of a quoted \
-                                     scalar must be indented at least \
-                                     {min_indent} spaces, but got: \
-                                     {next_line:?}"
+                                    "A continuation line of a quoted scalar \
+                                     must be indented at least {min_indent} \
+                                     spaces, but got: {next_line:?}"
                                 ),
                                 self.scanner.next_pos,
                                 self.scanner.next_pos,
@@ -747,13 +745,11 @@ impl<'a> YamlParser<'a> {
             // key). This must be checked before the indentation floor,
             // since empty lines fold regardless of their indentation.
             if !is_first_line
-                && line
-                    .chars()
-                    .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n'))
+                && line.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n'))
             {
-                if self.plain_scalar_continues_after_blank_lines(
-                    rest_indent_count,
-                ) {
+                if self
+                    .plain_scalar_continues_after_blank_lines(rest_indent_count)
+                {
                     self.scanner.next_line();
                     string_to_fold.push("");
                     continue;
@@ -866,8 +862,8 @@ impl<'a> YamlParser<'a> {
             let validation_line = if self.cur_state().is_block_map_key() {
                 if let Some(offset) = find_key_value_separator(line) {
                     &line[..offset]
-                } else if line.ends_with(':') {
-                    &line[..line.len() - 1]
+                } else if let Some(stripped) = line.strip_suffix(':') {
+                    stripped
                 } else {
                     line
                 }
@@ -1013,14 +1009,11 @@ impl<'a> YamlParser<'a> {
                 if is_document_start_marker(trimmed) {
                     return false;
                 }
-                if self.cur_state().is_block_seq()
-                    && trimmed.starts_with("- ")
+                if self.cur_state().is_block_seq() && trimmed.starts_with("- ")
                 {
                     return false;
                 }
-                if !self.cur_state().is_block_map_key()
-                    && line.contains(": ")
-                {
+                if !self.cur_state().is_block_map_key() && line.contains(": ") {
                     return false;
                 }
                 return true;

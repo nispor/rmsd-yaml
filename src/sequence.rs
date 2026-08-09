@@ -2,12 +2,10 @@
 
 use serde::de::{DeserializeSeed, SeqAccess};
 
-use crate::parser::{
-    is_document_end_marker, is_document_start_marker,
-};
 use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlScalarStyle, YamlState, YamlValue,
+    parser::{is_document_end_marker, is_document_start_marker},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,9 +151,7 @@ impl<'a> YamlParser<'a> {
                         ));
                     }
                 }
-            } else if trimmed.starts_with("- ")
-                || trimmed.starts_with("-\t")
-            {
+            } else if trimmed.starts_with("- ") || trimmed.starts_with("-\t") {
                 let tab_after_dash = trimmed.starts_with("-\t");
                 self.scanner.advance(cur_indent + 2);
                 self.skip_block_indicator_separation(tab_after_dash)?;
@@ -295,13 +291,17 @@ impl<'a> YamlParser<'a> {
                         // A comment directly after the comma (without a
                         // separation space) is an error.
                         if self.scanner.peek_char() == Some('#') {
-                            return Err(YamlError::new(
-                                ErrorKind::AmbiguityPlainScalar,
-                                "Comment must be preceded by a space after                                  ',' in a flow sequence"
-                                    .to_string(),
-                                self.scanner.next_pos,
-                                self.scanner.next_pos,
-                            ));
+                            return Err(
+                                YamlError::new(
+                                    ErrorKind::AmbiguityPlainScalar,
+                                    "Comment must be preceded by a space \
+                                     after                                  \
+                                     ',' in a flow sequence"
+                                        .to_string(),
+                                    self.scanner.next_pos,
+                                    self.scanner.next_pos,
+                                ),
+                            );
                         }
                         self.scanner.skip_flow_separation();
                         if self.scanner.peek_char() == Some(']') {
@@ -361,7 +361,10 @@ impl<'a> YamlParser<'a> {
         if self.scanner.peek_char() == Some('?')
             && matches!(
                 self.scanner.remains().chars().nth(1),
-                None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                None | Some(' ')
+                    | Some('\t')
+                    | Some('\n')
+                    | Some('\r')
                     | Some('#')
             )
         {
@@ -400,7 +403,10 @@ impl<'a> YamlParser<'a> {
         if self.scanner.peek_char() == Some(':')
             && matches!(
                 self.scanner.remains().chars().nth(1),
-                None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                None | Some(' ')
+                    | Some('\t')
+                    | Some('\n')
+                    | Some('\r')
                     | Some('#')
             )
         {
@@ -438,8 +444,7 @@ impl<'a> YamlParser<'a> {
             if self.scanner.next_pos.line != key_start_line {
                 return Err(YamlError::new(
                     ErrorKind::InvalidImplicitKey,
-                    "Implicit mapping key must be contained in a single \
-                     line"
+                    "Implicit mapping key must be contained in a single line"
                         .to_string(),
                     self.scanner.next_pos,
                     self.scanner.next_pos,

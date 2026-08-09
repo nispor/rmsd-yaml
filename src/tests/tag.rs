@@ -38,7 +38,8 @@ fn test_tag_directive_handle_resolution() {
 
 #[test]
 fn test_tag_directive_primary_and_secondary() {
-    let input = "%TAG ! tag:example.com,2000:app/\n%TAG !! tag:example.org,2000:app/\n---\n- !foo \"a\"\n- !!bar \"b\"\n";
+    let input = "%TAG ! tag:example.com,2000:app/\n%TAG !! \
+                 tag:example.org,2000:app/\n---\n- !foo \"a\"\n- !!bar \"b\"\n";
     let events = scalar_events(input);
     assert_eq!(
         events,
@@ -54,7 +55,8 @@ fn test_tag_directive_scope_resets_between_documents() {
     // `%TAG` declarations only apply to the following document; a
     // named handle used in a later document without re-declaration is
     // an error.
-    let input = "%TAG !prefix! tag:example.com,2011:\n---\n!prefix!A x: 1\n---\n!prefix!B y: 2\n";
+    let input = "%TAG !prefix! tag:example.com,2011:\n---\n!prefix!A x: \
+                 1\n---\n!prefix!B y: 2\n";
     assert!(YamlParser::parse_to_events(input).is_err());
 }
 

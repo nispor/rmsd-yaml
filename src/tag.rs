@@ -14,11 +14,10 @@ impl<'a> YamlParser<'a> {
     /// Tag Shorthands):
     ///
     /// * `!<verbatim>` is taken as-is;
-    /// * `!!suffix` uses the `!!` handle (default prefix
-    ///   `tag:yaml.org,2002:`);
+    /// * `!!suffix` uses the `!!` handle (default prefix `tag:yaml.org,2002:`);
     /// * `!suffix` uses the `!` handle (default local prefix `!`);
-    /// * `!name!suffix` uses the `!name!` handle, which must be
-    ///   declared by a `%TAG` directive.
+    /// * `!name!suffix` uses the `!name!` handle, which must be declared by a
+    ///   `%TAG` directive.
     ///
     /// The returned tag string is `name` wrapped in `<...>`, matching
     /// the event representation used by the yaml-test-suite.

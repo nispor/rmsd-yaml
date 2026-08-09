@@ -26,8 +26,7 @@ impl<'a> YamlParser<'a> {
         // flow indicator (`*b,` in `[a, *b, c]`).
         let mut name = String::new();
         while let Some(c) = self.scanner.peek_char() {
-            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}')
-            {
+            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}') {
                 break;
             }
             name.push(c);
@@ -90,8 +89,7 @@ impl<'a> YamlParser<'a> {
         // flow indicator (`*b,` in `[a, *b, c]`).
         let mut name = String::new();
         while let Some(c) = self.scanner.peek_char() {
-            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}')
-            {
+            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}') {
                 break;
             }
             name.push(c);
