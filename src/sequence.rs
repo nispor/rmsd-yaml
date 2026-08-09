@@ -69,21 +69,37 @@ impl<'a> YamlParser<'a> {
             self.scanner.next_pos,
         ));
         self.push_state(YamlState::InBlockSequnce);
+        // All entries that start on a new line must share the same
+        // indentation as the first new-line entry (YAML 1.2.2 SPEC,
+        // 8.2.1); a `- ` at a different indentation ends the sequence
+        // (e.g. `- key: value\n - item1` is an error).
+        let mut entry_indent: Option<usize> = None;
         while let Some(line) = self.scanner.peek_line() {
             if line.is_empty() {
                 self.scanner.next_line();
                 continue;
             }
             let cur_indent = line.chars().take_while(|c| *c == ' ').count();
-            // A same-line entry (e.g. the inner dash of `- - a`) starts
-            // at the scanner position, so the indent check only applies
-            // from the next line on.
-            let mid_line =
-                self.scanner.done_pos.line == self.scanner.next_pos.line;
-            if !mid_line && cur_indent < indent_count {
+            // A same-line entry (e.g. the inner dash of `- - a` or the
+            // dash after `: `) starts at the scanner position, so the
+            // indentation checks only apply from the next line on.
+            let at_line_start = self.scanner.done_pos.column == 0
+                || self.scanner.done_pos.line != self.scanner.next_pos.line
+                || matches!(
+                    self.scanner.peek_char(),
+                    None | Some('\n') | Some('\r')
+                );
+            if at_line_start && cur_indent < indent_count {
                 break;
             }
             let trimmed = line.trim_start_matches(' ');
+            if at_line_start && (trimmed.starts_with("- ") || trimmed == "-") {
+                match entry_indent {
+                    Some(prev) if cur_indent != prev => break,
+                    None => entry_indent = Some(cur_indent),
+                    _ => {}
+                }
+            }
 
             if trimmed.starts_with('#')
                 && self.scanner.done_pos.line != self.scanner.next_pos.line
@@ -98,7 +114,18 @@ impl<'a> YamlParser<'a> {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
+            if trimmed == "---" || trimmed.starts_with("--- ") {
+                // Document start marker: the sequence ends here.
+                break;
+            }
 
+            if trimmed.starts_with(':')
+                && (trimmed == ":" || trimmed.starts_with(": "))
+            {
+                // An explicit mapping value line (`: value`) ends a
+                // block sequence used as a mapping key.
+                break;
+            }
             if trimmed == "-" {
                 self.scanner.next_line();
                 if let Some(next_line) = self.scanner.peek_line() {
@@ -125,15 +152,11 @@ impl<'a> YamlParser<'a> {
                 self.scanner.next_line();
                 continue;
             } else {
-                return Err(YamlError::new(
-                    ErrorKind::InvalidSequnceStartIndicator,
-                    format!(
-                        "Expecting '-\\n' or '- ' as sequence start \
-                         indicator, but got: {line:?}"
-                    ),
-                    self.scanner.next_pos,
-                    self.scanner.next_pos,
-                ));
+                // A line that is not a `- ` entry at the sequence's
+                // indentation belongs to the parent context (e.g. a
+                // mapping key after a block-sequence value at the same
+                // indentation, as in `foo:\n- 42\nbar: 1`).
+                break;
             }
         }
 
@@ -174,11 +197,25 @@ impl<'a> YamlParser<'a> {
                 match self.scanner.peek_char() {
                     Some(',') => {
                         self.scanner.next_char();
+                        // A comment directly after the comma (without a
+                        // separation space) is an error.
+                        if self.scanner.peek_char() == Some('#') {
+                            return Err(YamlError::new(
+                                ErrorKind::AmbiguityPlainScalar,
+                                "Comment must be preceded by a space after                                  ',' in a flow sequence"
+                                    .to_string(),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
                         self.scanner.skip_flow_separation();
-                        if matches!(
-                            self.scanner.peek_char(),
-                            Some(',') | Some(']')
-                        ) {
+                        if self.scanner.peek_char() == Some(']') {
+                            // A trailing comma before the closing
+                            // bracket is allowed, e.g. `[a, b, ]`.
+                            self.scanner.next_char();
+                            break;
+                        }
+                        if self.scanner.peek_char() == Some(',') {
                             return Err(YamlError::new(
                                 ErrorKind::UnfinishedSequenceIndicator,
                                 format!(
@@ -249,9 +286,23 @@ impl<'a> YamlParser<'a> {
             return Ok(());
         }
         let events_start = self.events_len();
+        let key_start_line = self.scanner.next_pos.line;
         self.handle_flow_node()?;
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some(':') {
+            // An implicit key must be contained in a single line
+            // (YAML 1.2.2 SPEC, 7.4.5), so a key that spans a line
+            // break is an error, e.g. `[ key\n  : value ]`.
+            if self.scanner.next_pos.line != key_start_line {
+                return Err(YamlError::new(
+                    ErrorKind::InvalidImplicitKey,
+                    "Implicit mapping key must be contained in a single \
+                     line"
+                        .to_string(),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
             // Single-pair entry, e.g. `[ key: value ]`. Wrap the
             // already-emitted key node events into a flow mapping.
             let key_events = self.take_events_since(events_start);

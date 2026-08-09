@@ -173,6 +173,10 @@ impl<'a> YamlParser<'a> {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
+            if trimmed_line == "---" || trimmed_line.starts_with("--- ") {
+                // Document start marker: the mapping ends here.
+                break;
+            }
 
             if self.cur_state().is_block_map_value() {
                 self.handle_node(
@@ -194,7 +198,65 @@ impl<'a> YamlParser<'a> {
                 let trimmed_key = line.trim_start_matches(' ');
                 let mut value_anchor = None;
                 let mut value_tag = None;
-                if trimmed_key.starts_with('&') {
+                if trimmed_key == "?" || trimmed_key.starts_with("? ") {
+                    log::trace!(
+                        "handle_block_map explicit key: {trimmed_key:?}"
+                    );
+                    // Explicit key (YAML 1.2.2 SPEC, 8.2.4), e.g.
+                    //     ? explicit key
+                    //     : value
+                    self.scanner.advance(cur_indent);
+                    self.scanner.next_char(); // consume '?'
+                    self.scanner.skip_flow_separation();
+                    self.handle_explicit_key()?;
+                    self.pop_state();
+                    self.push_state(YamlState::InBlockMapValue);
+                    self.scanner.skip_flow_separation();
+                    let mut value_consumed = false;
+                    if self.scanner.peek_char() == Some(':')
+                        && matches!(
+                            self.scanner.remains().chars().nth(1),
+                            None | Some(' ')
+                                | Some('\t')
+                                | Some('\n')
+                                | Some('\r')
+                                | Some('#')
+                        )
+                    {
+                        // Same-line `: value` after the key.
+                        self.scanner.next_char();
+                        self.parse_explicit_value_after_colon()?;
+                        value_consumed = true;
+                    } else if let Some(next_line) = self.scanner.peek_line() {
+                        let next_trimmed = next_line.trim_start_matches(' ');
+                        if next_trimmed == ":"
+                            || next_trimmed.starts_with(": ")
+                            || next_trimmed.starts_with(":\t")
+                            || next_trimmed.starts_with(":#")
+                        {
+                            // Value on the following line: `: value`.
+                            self.scanner.advance_till_non_space();
+                            self.scanner.next_char(); // consume ':'
+                            self.parse_explicit_value_after_colon()?;
+                            value_consumed = true;
+                        }
+                    }
+                    if !value_consumed {
+                        // Explicit key without a value.
+                        self.push_event(YamlEvent::Scalar(
+                            None,
+                            None,
+                            String::new(),
+                            YamlScalarStyle::Plain,
+                            self.scanner.done_pos,
+                            self.scanner.done_pos,
+                        ));
+                    }
+                    self.pop_state();
+                    // Back to key mode for the next iteration.
+                    self.push_state(YamlState::InBlockMapKey);
+                    continue;
+                } else if trimmed_key.starts_with('&') {
                     // e.g. `&a a: b` or `&key [a]: v`: the anchor belongs
                     // to the key node, not the map. After stripping the
                     // anchor, the remains act as a line starting at the
@@ -239,6 +301,33 @@ impl<'a> YamlParser<'a> {
                         self.handle_flow_map(None, None)?;
                     }
                     self.expect_colon_after_key()?;
+                } else if trimmed_key.starts_with('\'')
+                    || trimmed_key.starts_with('"')
+                {
+                    // A quoted scalar as key, e.g. `"foo": 23`
+                    self.scanner.advance(cur_indent);
+                    self.handle_scalar(0, 0, None, None)?;
+                    self.expect_colon_after_key()?;
+                } else if trimmed_key.starts_with('!') {
+                    // A tagged key, e.g. `!!str : value` (empty tagged
+                    // scalar) or `!foo key : value`.
+                    self.scanner.advance(cur_indent);
+                    let key_tag = self.handle_tag()?;
+                    self.scanner.skip_flow_separation();
+                    if self.scanner.peek_char() == Some(':') {
+                        let pos = self.scanner.next_pos;
+                        self.push_event(YamlEvent::Scalar(
+                            None,
+                            key_tag,
+                            String::new(),
+                            YamlScalarStyle::Plain,
+                            pos,
+                            pos,
+                        ));
+                        self.expect_colon_after_key()?;
+                    } else {
+                        self.handle_plain_scalar(0, 0, None, key_tag)?;
+                    }
                 } else {
                     self.handle_plain_scalar(
                         desired_indent_count,
@@ -427,6 +516,154 @@ impl<'a> YamlParser<'a> {
         true
     }
 
+    /// Parse the key node of an explicit mapping entry (`? key`).
+    fn handle_explicit_key(&mut self) -> Result<(), YamlError> {
+        log::trace!(
+            "handle_explicit_key starts at {:?}",
+            self.scanner.remains()
+        );
+        let mut anchor = None;
+        let mut tag = None;
+        loop {
+            match self.scanner.peek_char() {
+                Some(' ') | Some('\t') => {
+                    self.scanner.next_char();
+                }
+                Some('&') if anchor.is_none() => {
+                    anchor = Some(self.handle_anchor()?);
+                }
+                Some('!') if tag.is_none() => {
+                    tag = self.handle_tag()?;
+                }
+                _ => break,
+            }
+        }
+        // The key content must be on the same line as the `?`
+        // indicator; when the line ended, the key is empty. (The
+        // scanner helpers consume the terminating line break, so the
+        // position comparison is the reliable signal.)
+        let same_line =
+            self.scanner.done_pos.line == self.scanner.next_pos.line;
+        match (same_line, self.scanner.peek_char()) {
+            (false, _) | (_, None) | (_, Some('#')) => {
+                log::trace!(
+                    "handle_explicit_key empty, anchor={anchor:?} tag={tag:?}"
+                );
+                // Empty explicit key.
+                self.push_event(YamlEvent::Scalar(
+                    anchor,
+                    tag,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    self.scanner.done_pos,
+                    self.scanner.done_pos,
+                ));
+            }
+            (true, Some('\'')) | (true, Some('"')) => {
+                self.handle_scalar(0, 0, anchor, tag)?;
+            }
+            (true, Some('[')) => {
+                self.handle_flow_seq(anchor, tag)?;
+            }
+            (true, Some('{')) => {
+                self.handle_flow_map(anchor, tag)?;
+            }
+            (true, Some('|')) => {
+                self.scanner.advance_till_non_space();
+                self.scanner.next_char();
+                self.handle_block_scalar(anchor, tag, true)?;
+            }
+            (true, Some('>')) => {
+                self.scanner.advance_till_non_space();
+                self.scanner.next_char();
+                self.handle_block_scalar(anchor, tag, false)?;
+            }
+            (true, Some('-')) => {
+                // A block sequence as key, e.g. `? - a`.
+                self.handle_block_seq(0, anchor, tag)?;
+            }
+            (true, Some(_)) => {
+                // A plain-scalar key on the `?` line. Unlike an
+                // implicit key it does not need a `:`, it simply ends
+                // at the line break (or a comment).
+                let start_pos = self.scanner.next_pos;
+                let mut key = String::new();
+                while let Some(c) = self.scanner.peek_char() {
+                    let next_is_separation = matches!(
+                        self.scanner.remains().chars().nth(1),
+                        None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                    );
+                    match c {
+                        '\n' | '\r' => break,
+                        '#' if key.ends_with(' ') || key.is_empty() => break,
+                        ':' if next_is_separation => break,
+                        _ => {
+                            self.scanner.next_char();
+                            key.push(c);
+                        }
+                    }
+                }
+                let key = key.trim_end_matches([' ', '\t', ':']).to_string();
+                self.push_event(YamlEvent::Scalar(
+                    anchor,
+                    tag,
+                    key,
+                    YamlScalarStyle::Plain,
+                    start_pos,
+                    self.scanner.done_pos,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse the value of an explicit mapping entry, with the scanner
+    /// positioned right after the `:`.
+    fn parse_explicit_value_after_colon(&mut self) -> Result<(), YamlError> {
+        // `:` followed directly by a line break means an empty value.
+        if matches!(self.scanner.peek_char(), None | Some('\n') | Some('\r')) {
+            let pos = self.scanner.next_pos;
+            self.push_event(YamlEvent::Scalar(
+                None,
+                None,
+                String::new(),
+                YamlScalarStyle::Plain,
+                pos,
+                pos,
+            ));
+            return Ok(());
+        }
+        self.scanner.skip_flow_separation();
+        if matches!(self.scanner.peek_char(), None | Some('\n') | Some('\r')) {
+            let pos = self.scanner.next_pos;
+            self.push_event(YamlEvent::Scalar(
+                None,
+                None,
+                String::new(),
+                YamlScalarStyle::Plain,
+                pos,
+                pos,
+            ));
+            return Ok(());
+        }
+        self.parse_explicit_value()
+    }
+
+    /// Parse the value node of an explicit mapping entry after its `:`.
+    fn parse_explicit_value(&mut self) -> Result<(), YamlError> {
+        match self.scanner.peek_char() {
+            Some('-') => {
+                // A block sequence value on the `:` line, e.g.
+                // `: - one` (YAML 1.2.2 SPEC, 8.2.1).
+                self.handle_block_seq(0, None, None)?;
+            }
+            _ => {
+                self.handle_node(0, self.scanner.done_pos.column, None, None)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Place the scanner at the `:` following a non-scalar mapping key
     /// (alias or flow collection).
     fn expect_colon_after_key(&mut self) -> Result<(), YamlError> {
@@ -531,6 +768,17 @@ impl<'a> YamlParser<'a> {
                 match self.scanner.peek_char() {
                     Some(',') => {
                         self.scanner.next_char();
+                        // A comment directly after the comma (without a
+                        // separation space) is an error.
+                        if self.scanner.peek_char() == Some('#') {
+                            return Err(YamlError::new(
+                                ErrorKind::AmbiguityPlainScalar,
+                                "Comment must be preceded by a space after                                  ',' in a flow mapping"
+                                    .to_string(),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
                         self.scanner.skip_flow_separation();
                         // A trailing comma before '}' is tolerated in
                         // flow mappings.

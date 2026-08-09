@@ -5,8 +5,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlPosition, YamlScalarStyle,
-    YamlScanner, YamlState,
+    ErrorKind, YamlError, YamlEvent, YamlScalarStyle, YamlScanner, YamlState,
 };
 
 #[derive(Debug)]
@@ -75,9 +74,12 @@ impl<'a> YamlParser<'a> {
             saw_directive: false,
             yaml_directive_seen: false,
         };
-        while !parser.scanner.is_empty() {
+        loop {
             let cur_pos = parser.scanner.done_pos;
             parser.handle_stream()?;
+            if parser.scanner.is_empty() {
+                break;
+            }
             if parser.scanner.done_pos == cur_pos {
                 return Err(YamlError::new(
                     ErrorKind::Bug,
@@ -154,6 +156,30 @@ impl<'a> YamlParser<'a> {
                         self.scanner.done_pos,
                     ));
                 }
+                // A block mapping may not start on the same line as the
+                // `---` marker (YAML 1.2.2 SPEC, 9.1.2.3), e.g.
+                // `--- a: b` or `--- &anchor a: b`.
+                let mut rest = line[offset + 4..].trim_start_matches(' ');
+                if rest.starts_with('&') || rest.starts_with('!') {
+                    rest = rest
+                        .split_once([' ', '\t'])
+                        .map(|(_, after)| after.trim_start())
+                        .unwrap_or("");
+                }
+                if !rest.is_empty()
+                    && !rest
+                        .starts_with(['\'', '"', '[', '{', '*', '|', '>', '-'])
+                    && (rest.contains(": ") || rest.ends_with(':'))
+                {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidImplicitKey,
+                        "A block mapping may not follow the `---` marker on \
+                         the same line"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 self.push_event(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
@@ -176,11 +202,7 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
-                if self
-                    .events
-                    .iter()
-                    .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)))
-                {
+                if doc_started {
                     self.push_event(YamlEvent::DocumentEnd(
                         true,
                         self.scanner.next_pos,
@@ -229,12 +251,8 @@ impl<'a> YamlParser<'a> {
         }
 
         if !had_any_document {
-            // Empty content
-            self.push_event(YamlEvent::DocumentStart(false, YamlPosition::EOF));
-            self.push_event(YamlEvent::DocumentEnd(
-                false,
-                self.scanner.done_pos,
-            ));
+            // An empty stream has no documents (e.g. empty input or a
+            // bare `...`).
         } else if !doc_terminated {
             // The last document did not end with an explicit `...`.
             self.push_event(YamlEvent::DocumentEnd(
@@ -434,6 +452,18 @@ impl<'a> YamlParser<'a> {
                 let expected_indent_count =
                     rest_indent_count + indent_count - first_indent_count;
                 self.handle_block_seq(expected_indent_count, anchor, tag)?;
+            } else if !self.cur_state().is_block_map_value()
+                && (trimmed.starts_with('\'') || trimmed.starts_with('"'))
+                && quoted_scalar_is_key(trimmed)
+            {
+                // A quoted scalar followed by `:` is a mapping key,
+                // e.g. `"foo\nbar": 23`.
+                self.handle_block_map(
+                    max(first_indent_count, indent_count),
+                    max(rest_indent_count, indent_count),
+                    anchor,
+                    tag,
+                )?;
             } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
                 // Flow style does not care indentation
                 self.handle_scalar(0, 0, anchor, tag)?;
@@ -454,6 +484,14 @@ impl<'a> YamlParser<'a> {
             } else if trimmed.contains(": ") {
                 // Guess out the indent
 
+                self.handle_block_map(
+                    max(first_indent_count, indent_count),
+                    max(rest_indent_count, indent_count),
+                    anchor,
+                    tag,
+                )?;
+            } else if trimmed == "?" || trimmed.starts_with("? ") {
+                // Explicit mapping keys, e.g. `? key`.
                 self.handle_block_map(
                     max(first_indent_count, indent_count),
                     max(rest_indent_count, indent_count),
@@ -621,12 +659,17 @@ impl<'a> YamlParser<'a> {
                         tag,
                     )?;
                 } else {
-                    self.handle_node(
-                        first_indent_count,
-                        rest_indent_count,
+                    // The node properties decorate an empty node: the
+                    // next line belongs to the parent context (e.g.
+                    // `- &a\n- a`), so emit an empty scalar.
+                    self.push_event(YamlEvent::Scalar(
                         anchor,
                         tag,
-                    )?;
+                        String::new(),
+                        YamlScalarStyle::Plain,
+                        self.scanner.done_pos,
+                        self.scanner.done_pos,
+                    ));
                 }
             } else if is_document_end_marker(trimmed) {
                 // Document end marker with an empty document: emit an
@@ -686,11 +729,16 @@ impl<'a> YamlParser<'a> {
     /// After a flow collection in block context, only spaces, a line
     /// break, a comment or EOF may follow.
     fn expect_flow_end_separation(&mut self) -> Result<(), YamlError> {
+        let mut saw_space = false;
         while self.scanner.peek_char() == Some(' ') {
+            saw_space = true;
             self.scanner.next_char();
         }
         match self.scanner.peek_char() {
-            None | Some('\n') | Some('\r') | Some('#') => Ok(()),
+            None | Some('\n') | Some('\r') => Ok(()),
+            // The comment must be separated from the closing indicator
+            // by a space (`]#comment` is an error).
+            Some('#') if saw_space => Ok(()),
             Some(c) => Err(YamlError::new(
                 ErrorKind::UnexpectedYamlNodeType,
                 format!(
@@ -760,6 +808,34 @@ impl<'a> YamlParser<'a> {
     }
 }
 
+/// Whether a line starting with a quoted scalar is followed by `:`,
+/// i.e. the quoted scalar is a mapping key (`"foo": 23`) rather than a
+/// standalone scalar (`"foo"`).
+pub(crate) fn quoted_scalar_is_key(trimmed: &str) -> bool {
+    let Some(quote) = trimmed.chars().next() else {
+        return false;
+    };
+    if quote != '\'' && quote != '"' {
+        return false;
+    }
+    let mut escaped = false;
+    for (i, c) in trimmed.char_indices().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if c == '\\' && quote == '"' {
+            escaped = true;
+            continue;
+        }
+        if c == quote {
+            let rest = &trimmed[i + c.len_utf8()..];
+            return rest.trim_start_matches(' ').starts_with(':');
+        }
+    }
+    false
+}
+
 /// Whether a trimmed line is a document end marker `...`, optionally
 /// followed by a comment (YAML 1.2.2 SPEC, 9.3.2.3).
 pub(crate) fn is_document_end_marker(trimmed: &str) -> bool {
@@ -802,6 +878,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::YamlPosition;
 
     #[test]
     fn test_document_explcitly_start() {

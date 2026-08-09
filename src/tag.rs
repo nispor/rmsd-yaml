@@ -23,8 +23,34 @@ impl<'a> YamlParser<'a> {
     /// The returned tag string is `name` wrapped in `<...>`, matching
     /// the event representation used by the yaml-test-suite.
     pub(crate) fn handle_tag(&mut self) -> Result<Option<String>, YamlError> {
-        let tag_name = self.scanner.peek_till_linebreak_or_space().to_string();
-        self.scanner.advance_till_linebreak_or_space();
+        // Scan the tag token, stopping at separation characters (a
+        // space, line break or a flow indicator like `,`). A verbatim
+        // tag `!<...>` may contain flow indicators inside the brackets.
+        let mut tag_name = String::new();
+        let mut in_verbatim = false;
+        while let Some(c) = self.scanner.peek_char() {
+            if !in_verbatim && tag_name.starts_with("!<") {
+                in_verbatim = true;
+            }
+            if !in_verbatim
+                && (c.is_whitespace() || matches!(c, ',' | ']' | '}'))
+            {
+                break;
+            }
+            tag_name.push(c);
+            self.scanner.next_char();
+            if in_verbatim && c == '>' {
+                break;
+            }
+        }
+        // Consume the separating character (space or line break)
+        // following the tag token.
+        if matches!(
+            self.scanner.peek_char(),
+            Some(' ') | Some('\t') | Some('\n') | Some('\r')
+        ) {
+            self.scanner.next_char();
+        }
 
         let Some(rest) = tag_name.strip_prefix('!') else {
             log::trace!("Unknown tag {tag_name}");

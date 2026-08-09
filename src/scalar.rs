@@ -322,6 +322,27 @@ impl<'a> YamlParser<'a> {
     /// YAML 1.2.2 SPEC, 7.4.2. Single-Quoted Styles:
     ///     A single-quoted scalar may not contain a single quote unless
     ///     it is escaped by two adjacent single quotes (`''`).
+    /// A quoted scalar may not span a `---`/`...` document marker at
+    /// the start of a line (YAML 1.2.2 SPEC, 6.3).
+    fn check_quoted_scalar_document_marker(&self) -> Result<(), YamlError> {
+        if let Some(line) = self.scanner.peek_line() {
+            let trimmed = line.trim_start_matches(' ');
+            if line.chars().take_while(|c| *c == ' ').count() == 0
+                && (trimmed == "---"
+                    || trimmed.starts_with("--- ")
+                    || is_document_end_marker(trimmed))
+            {
+                return Err(YamlError::new(
+                    ErrorKind::UnfinishedQuote,
+                    "Quoted scalar cannot span a document marker".to_string(),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn handle_single_quoted_flow_scalar(
         &mut self,
         anchor: Option<String>,
@@ -351,6 +372,12 @@ impl<'a> YamlParser<'a> {
                     closed = true;
                     break;
                 }
+            } else if c == '\r' || c == '\n' {
+                if c == '\r' && self.scanner.peek_char() == Some('\n') {
+                    self.scanner.next_char();
+                }
+                self.check_quoted_scalar_document_marker()?;
+                ret.push(c);
             } else {
                 ret.push(c);
             }
@@ -366,10 +393,24 @@ impl<'a> YamlParser<'a> {
                 self.scanner.done_pos,
             ));
         }
+        let value = flow_folding(ret);
+        if self.cur_state().is_block_map_key()
+            && start_pos.line != self.scanner.done_pos.line
+        {
+            // An implicit mapping key must be contained in a single
+            // line (YAML 1.2.2 SPEC, 7.4.5).
+            return Err(YamlError::new(
+                ErrorKind::InvalidImplicitKey,
+                "Implicit mapping key must be contained in a single line"
+                    .to_string(),
+                start_pos,
+                self.scanner.done_pos,
+            ));
+        }
         self.push_event(YamlEvent::Scalar(
             anchor,
             tag,
-            flow_folding(ret),
+            value,
             YamlScalarStyle::SingleQuoted,
             start_pos,
             self.scanner.done_pos,
@@ -509,9 +550,11 @@ impl<'a> YamlParser<'a> {
         // content and must never be folded, so they are pushed verbatim.
         let mut pending_breaks = 0usize;
 
+        let mut closed = false;
         while let Some(c) = self.scanner.next_char() {
             match c {
                 '"' if first_quote_found => {
+                    closed = true;
                     // The closing quote plays the role of the final
                     // line's content when resolving pending breaks.
                     if pending_breaks == 1 {
@@ -528,6 +571,27 @@ impl<'a> YamlParser<'a> {
                     first_quote_found = true;
                 }
                 '\\' => {
+                    if matches!(
+                        self.scanner.peek_char(),
+                        Some('\n') | Some('\r')
+                    ) {
+                        // An escaped line break (`\` followed by a real
+                        // line break) is a line continuation: the break
+                        // and the following separation spaces are
+                        // removed entirely (YAML 1.2.2 SPEC, 7.3.4.2).
+                        if self.scanner.peek_char() == Some('\r') {
+                            self.scanner.next_char();
+                        }
+                        self.scanner.next_char();
+                        self.check_quoted_scalar_document_marker()?;
+                        while matches!(
+                            self.scanner.peek_char(),
+                            Some(' ') | Some('\t')
+                        ) {
+                            self.scanner.next_char();
+                        }
+                        continue;
+                    }
                     let esc = self.read_escaped_char()?;
                     if pending_breaks == 1 {
                         ret.push(' ');
@@ -543,6 +607,7 @@ impl<'a> YamlParser<'a> {
                     if c == '\r' && self.scanner.peek_char() == Some('\n') {
                         self.scanner.next_char();
                     }
+                    self.check_quoted_scalar_document_marker()?;
                     // Separation spaces at the end of the current line
                     // are a presentation detail.
                     let trimmed_len = ret.trim_end_matches([' ', '\t']).len();
@@ -567,6 +632,28 @@ impl<'a> YamlParser<'a> {
             }
         }
 
+        if !closed {
+            return Err(YamlError::new(
+                ErrorKind::UnfinishedQuote,
+                "Unfinished double-quoted scalar: missing closing \""
+                    .to_string(),
+                start_pos,
+                self.scanner.done_pos,
+            ));
+        }
+        if self.cur_state().is_block_map_key()
+            && start_pos.line != self.scanner.done_pos.line
+        {
+            // An implicit mapping key must be contained in a single
+            // line (YAML 1.2.2 SPEC, 7.4.5).
+            return Err(YamlError::new(
+                ErrorKind::InvalidImplicitKey,
+                "Implicit mapping key must be contained in a single line"
+                    .to_string(),
+                start_pos,
+                self.scanner.done_pos,
+            ));
+        }
         self.push_event(YamlEvent::Scalar(
             anchor,
             tag,
@@ -962,6 +1049,7 @@ const NS_ESC_ESCAPE: char = 'e';
 const NS_ESC_SLASH: char = '/';
 // Escaped ASCII back slash (x5C).
 const NS_ESC_BACKSLASH: char = '\\';
+const NS_ESC_DOUBLE_QUOTE: char = '"';
 // Escaped Unicode next line (x85) character.
 const NS_ESC_NEXT_LINE: char = 'N';
 // Escaped Unicode non_breaking space (xA0) character.
@@ -995,7 +1083,8 @@ impl<'a> YamlParser<'a> {
             NS_ESC_NULL => '\0',
             NS_ESC_BELL => '\u{07}',
             NS_ESC_BACKSPACE => '\u{08}',
-            NS_ESC_HORIZONTAL_TAB | NS_ESC_HORIZONTAL_TAB_2 => '\t',
+            NS_ESC_HORIZONTAL_TAB | NS_ESC_HORIZONTAL_TAB_2 | '\t' => '\t',
+            ' ' => ' ',
             NS_ESC_LINE_FEED => '\n',
             NS_ESC_VERTICAL_TAB => '\u{0b}',
             NS_ESC_FORM_FEED => '\u{0c}',
@@ -1003,6 +1092,7 @@ impl<'a> YamlParser<'a> {
             NS_ESC_ESCAPE => '\u{1b}',
             NS_ESC_SLASH => '/',
             NS_ESC_BACKSLASH => '\\',
+            NS_ESC_DOUBLE_QUOTE => '"',
             NS_ESC_NEXT_LINE => '\u{85}',
             NS_ESC_NON_BREAKING_SPACE => '\u{a0}',
             NS_ESC_LINE_SEPARATOR => '\u{2028}',

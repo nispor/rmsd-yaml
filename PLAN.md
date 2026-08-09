@@ -9,8 +9,8 @@ RMSD-YAML is a pure Rust, minimised YAML library targeting serde compatibility a
 * Core parser/scanner infrastructure exists (YAML spec 1.2.2)
 * Compose phase converts events to YamlValue tree
 * Deserializer/Serializer implement serde traits
-* 216 of 402 yaml-test-suite cases enabled and passing
-* 66 cargo unit tests pass (serializer, deserializer, scalar, base64, tag)
+* 251 of 402 yaml-test-suite cases enabled and passing
+* 76 cargo unit tests pass (serializer, deserializer, scalar, base64, tag, edge)
 * Anchors and aliases are parsed and resolved in block and flow
   contexts; flow sequences/mappings (incl. nested and single-pair
   forms) are supported
@@ -227,20 +227,43 @@ Tasks:
 - [x] Enabled 22 yaml-test-suite tests: 196 -> 216 cases passing
   (205 top-level names); new `src/tests/tag.rs` unit tests
 
-### M7 - Edge Cases & Compliance
+### M7 - Edge Cases & Compliance (in progress)
 
-**Goal:** Achieve 100% yaml-test-suite conformance.
+**Goal:** Expand yaml-test-suite coverage and fix edge cases.
 
-Tasks:
-- [ ] Handle all edge cases identified in disabled test list:
-  - Bare documents, stream parsing
-  - Escape sequences in double-quoted scalars
-  - Unicode handling (NFC/NFD normalization)
-  - Tab/space indentation conflicts
-  - Line-length limits and max_width enforcement
-- [ ] Add error validation for invalid YAML (ensure proper `Error` type coverage)
-- [ ] Implement all remaining deserializer methods
-- [ ] Run full test suite, fix failures
+Done so far (216 -> 251 cases passing, 240 top-level names):
+- [x] Explicit block mapping keys (`? key` / `: value`): plain, quoted,
+  tagged, anchored, block-scalar and block-sequence keys; empty values;
+  values on a following `:` line; explicit keys in seq entries
+- [x] Quoted implicit keys (`"foo": 23`, `'x': 24`); escaped newlines
+  inside quoted keys allowed, keys spanning real lines rejected
+- [x] Tagged implicit keys (`!!str : value`); tags on empty scalars
+- [x] Anchors on empty scalars (`- &a` emits an empty anchored scalar)
+- [x] Empty documents emit empty scalars; empty streams have no
+  documents; `...` with no document in progress emits no event
+- [x] Double-quoted escape fixes: `\"`, `\ ` and `\`+line-break
+  (continuation) escapes; quoted scalars may not span document markers
+- [x] `--- a: b` (block mapping on the doc-start line) rejected;
+  `... # comment` terminates scalars/block scalars/maps/sequences
+- [x] Flow collections: trailing commas allowed, double commas and
+  `,#comment` (no space) rejected; `]#comment` rejected; flow entries
+  on a new line must be more indented than the enclosing block
+  collection; multiline implicit flow keys rejected
+- [x] Block sequences: entries must share the first entry's
+  indentation (wrong-indented-sequence-item rejected); seqs end at
+  `---` markers and non-`-` lines at their indentation (same-indent
+  block maps as seq values supported, e.g. `foo:\n- 42\nbar: 1`)
+- [x] Tag token scanning stops at flow indicators (`!!str,` in flow);
+  `%YAML`/`%TAG`/reserved-directive handling refined
+- [x] New `src/tests/edge_cases.rs` unit tests (explicit keys, quoted
+  keys, empty docs/scalars, flow commas, escaped line breaks)
+
+Remaining (deferred, deep edge cases):
+- [ ] Explicit/empty keys in flow collections (`{ ? foo :, : bar }`,
+  `{ foo : !!str }`)
+- [ ] Explicit-key edge cases (`? : x`, `? []: x` nested structures)
+- [ ] Unicode NFC/NFD normalization
+- [ ] Line-length limits / max_width enforcement in the parser
 
 ### M8 - Performance & Polish
 
