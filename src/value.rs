@@ -46,9 +46,15 @@ pub struct ValueMeta {
 // preserved by the dump).
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
+        // Two nodes are equal when their data is equal and their
+        // round-trip metadata (anchor/alias) matches. Positions and
+        // scalar style do not take part, so e.g. a single-quoted and a
+        // plain scalar with the same text compare equal. Anchors and
+        // aliases take part so that an anchored node and a distinct
+        // alias reference to it stay separate map keys, preserving
+        // byte-identical round-trip (yaml-test-suite:
+        // aliases-in-flow-objects).
         self.data == other.data
-            && self.start == other.start
-            && self.end == other.end
             && self.meta.anchor == other.meta.anchor
             && self.meta.alias == other.meta.alias
     }
@@ -59,8 +65,6 @@ impl Eq for Value {}
 impl std::hash::Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.data.hash(state);
-        self.start.hash(state);
-        self.end.hash(state);
         self.meta.anchor.hash(state);
         self.meta.alias.hash(state);
     }

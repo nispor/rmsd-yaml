@@ -47,6 +47,10 @@ impl Mapping {
         self.0.get(key)
     }
 
+    pub fn contains_key(&self, key: &Value) -> bool {
+        self.0.contains_key(key)
+    }
+
     pub fn pop(&mut self) -> Option<(Value, Value)> {
         self.0.pop()
     }

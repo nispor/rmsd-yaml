@@ -697,9 +697,23 @@ impl<'a> YamlParser<'a> {
                     tag,
                 )?;
             } else if trimmed.ends_with(":") {
+                // A block mapping key ending with `:`. Guess out the
+                // indent: the mapping's entries sit at the key's own
+                // column. For a key that follows content on the same
+                // line (e.g. a block sequence entry `- key:` where the
+                // key sits at column 3) that is the scanner's column,
+                // for a key at the start of a new line it is the
+                // line's indentation.
+                let key_column = if self.scanner.done_pos.line
+                    == self.scanner.next_pos.line
+                {
+                    self.scanner.next_pos.column.saturating_sub(1)
+                } else {
+                    indent_count
+                };
                 self.handle_block_map(
                     max(first_indent_count, indent_count),
-                    max(rest_indent_count, indent_count),
+                    max(rest_indent_count, key_column),
                     anchor,
                     tag,
                 )?;
