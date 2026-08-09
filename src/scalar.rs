@@ -759,7 +759,9 @@ impl<'a> YamlParser<'a> {
             // indentation is not yet established (a compact first
             // entry), the first line-start `- ` always starts a new
             // entry.
-            if self.cur_state().is_block_seq() && trimmed.starts_with("- ") {
+            if self.cur_state().is_block_seq()
+                && (trimmed.starts_with("- ") || trimmed.starts_with("-\t"))
+            {
                 match self.seq_entry_indent {
                     None => break,
                     Some(entry_indent) if cur_indent_count == entry_indent => {

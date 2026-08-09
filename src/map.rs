@@ -616,12 +616,17 @@ impl<'a> YamlParser<'a> {
             remains = &remains[offset + 1..];
         }
         for line in remains.split(['\n', '\r']) {
-            let trimmed = line.trim_start_matches(' ');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
-            return line.chars().take_while(|c| *c == ' ').count()
-                <= key_indent_count;
+            let indent = line.chars().take_while(|c| *c == ' ').count();
+            // A zero-indented block sequence is still valid content
+            // (e.g. `sequence: !!seq\n- entry`).
+            let is_zero_indented_seq =
+                indent == key_indent_count
+                    && (trimmed == "-" || trimmed.starts_with("- "));
+            return indent <= key_indent_count && !is_zero_indented_seq;
         }
         true
     }
