@@ -5,7 +5,9 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
-use crate::parser::{is_document_end_marker, tab_content_is_block_node};use crate::{
+use crate::parser::{
+    is_document_end_marker, is_document_start_marker, tab_content_is_block_node,
+};use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
 };
@@ -181,7 +183,7 @@ impl<'a> YamlParser<'a> {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
-            if trimmed_line == "---" || trimmed_line.starts_with("--- ") {
+            if is_document_start_marker(trimmed_line) {
                 // Document start marker: the mapping ends here.
                 break;
             }

@@ -155,7 +155,9 @@ impl<'a> YamlParser<'a> {
                 had_any_document = true;
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
-            } else if let Some(offset) = line.find("--- ") {
+            } else if let Some(offset) =
+                line.find("--- ").or_else(|| line.find("---\t"))
+            {
                 if doc_started {
                     self.tag_handles.clear();
                     self.push_event(YamlEvent::DocumentEnd(
@@ -1058,6 +1060,20 @@ pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
 /// callers.
 pub(crate) fn find_key_value_separator(line: &str) -> Option<usize> {
     line.find(": ").or_else(|| line.find(":\t"))
+}
+
+/// Whether a trimmed line is a document start marker `---`, optionally
+/// followed by separation (space or tab), a comment or nothing
+/// (YAML 1.2.2 SPEC, 6.3 / 9.1).
+pub(crate) fn is_document_start_marker(trimmed: &str) -> bool {
+    if trimmed == "---" {
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("---") {
+        return rest.starts_with([' ', '\t'])
+            || rest.starts_with('#');
+    }
+    false
 }
 
 /// Find the start of an inline comment: a `#` preceded by a space or

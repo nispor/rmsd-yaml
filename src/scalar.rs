@@ -2,6 +2,7 @@
 
 use crate::parser::{
     find_comment_start, find_key_value_separator, is_document_end_marker,
+    is_document_start_marker,
 };
 use crate::{ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle};
 
@@ -330,8 +331,7 @@ impl<'a> YamlParser<'a> {
         if let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
             if line.chars().take_while(|c| *c == ' ').count() == 0
-                && (trimmed == "---"
-                    || trimmed.starts_with("--- ")
+                && (is_document_start_marker(trimmed)
                     || is_document_end_marker(trimmed))
             {
                 return Err(YamlError::new(
@@ -970,7 +970,7 @@ impl<'a> YamlParser<'a> {
                 if is_document_end_marker(trimmed) {
                     return false;
                 }
-                if trimmed == "---" || trimmed.starts_with("--- ") {
+                if is_document_start_marker(trimmed) {
                     return false;
                 }
                 if self.cur_state().is_block_seq()

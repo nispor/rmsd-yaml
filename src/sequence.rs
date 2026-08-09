@@ -2,7 +2,9 @@
 
 use serde::de::{DeserializeSeed, SeqAccess};
 
-use crate::parser::is_document_end_marker;
+use crate::parser::{
+    is_document_end_marker, is_document_start_marker,
+};
 use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlScalarStyle, YamlState, YamlValue,
@@ -117,7 +119,7 @@ impl<'a> YamlParser<'a> {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
-            if trimmed == "---" || trimmed.starts_with("--- ") {
+            if is_document_start_marker(trimmed) {
                 // Document start marker: the sequence ends here.
                 break;
             }
