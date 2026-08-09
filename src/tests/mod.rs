@@ -2,7 +2,6 @@
 
 mod deserializer;
 mod edge_cases;
-mod iso;
 mod map;
 mod scalar;
 mod sequence;

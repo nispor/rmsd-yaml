@@ -589,13 +589,13 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
 /// Fitted to the yaml-test-suite `out.yaml` data (libyaml's
 /// `yaml_emitter_analyze_scalar`, with the tab handling relaxed to
 /// match the hand-authored files):
-/// * a space followed by a line break (`space_break`) or by a tab is
-///   not allowed (e.g. `block-scalar-keep`, `spec-example-6-4`);
+/// * a space followed by a line break (`space_break`) or by a tab is not
+///   allowed (e.g. `block-scalar-keep`, `spec-example-6-4`);
 /// * a tab followed by a line break is not allowed in folded scalars
 ///   (`spec-example-8-2`) but is fine in literal ones
 ///   (`tabs-in-various-contexts/001`);
-/// * a tab at the start of a content line is fine
-///   (`spec-example-5-12`, `spec-example-8-7`);
+/// * a tab at the start of a content line is fine (`spec-example-5-12`,
+///   `spec-example-8-7`);
 /// * the value must not end in a space or tab.
 fn block_allowed(value: &str, style: crate::YamlScalarStyle) -> bool {
     if value.is_empty() {
