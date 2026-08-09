@@ -548,7 +548,12 @@ impl<'a> YamlParser<'a> {
                     )?;
                 } else {
                     // Flow style does not care indentation
-                    self.handle_scalar(0, 0, anchor, tag)?;
+                    self.handle_scalar(
+                        first_indent_count,
+                        rest_indent_count,
+                        anchor,
+                        tag,
+                    )?;
                     // In block context a quoted scalar may only be
                     // followed by a line break, comment or EOF
                     // (rejects e.g. `a: 'b': c`).
@@ -959,7 +964,7 @@ impl<'a> YamlParser<'a> {
                 let name = self.handle_alias()?;
                 self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
             }
-            Some('"') => self.handle_double_quoted_flow_scalar(anchor, tag)?,
+            Some('"') => self.handle_double_quoted_flow_scalar(anchor, tag, 0)?,
             Some('\'') => self.handle_single_quoted_flow_scalar(anchor, tag)?,
             Some(',') | Some(']') | Some('}') | None => {
                 // Empty node, e.g. an omitted value in a flow mapping.

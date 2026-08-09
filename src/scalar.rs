@@ -109,7 +109,11 @@ impl<'a> YamlParser<'a> {
                 }
                 '"' => {
                     self.scanner.advance_till_non_space();
-                    self.handle_double_quoted_flow_scalar(anchor, tag)?;
+                    self.handle_double_quoted_flow_scalar(
+                        anchor,
+                        tag,
+                        rest_indent_count,
+                    )?;
                 }
                 _ => {
                     self.handle_plain_scalar(
@@ -541,6 +545,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
+        min_indent: usize,
     ) -> Result<(), YamlError> {
         let mut ret = String::new();
         let mut first_quote_found = false;
@@ -622,6 +627,33 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_char();
                     }
                     self.check_quoted_scalar_document_marker()?;
+                    // In block context, continuation lines must be
+                    // indented at least as much as the parent requires
+                    // (yaml-test-suite:
+                    // wrong-indented-multiline-quoted-scalar).
+                    if !self.cur_state().is_flow()
+                        && let Some(next_line) = self.scanner.peek_line()
+                    {
+                        let indent = next_line
+                            .chars()
+                            .take_while(|c| *c == ' ')
+                            .count();
+                        if indent < min_indent
+                            && !next_line.trim_matches([' ', '\t']).is_empty()
+                        {
+                            return Err(YamlError::new(
+                                ErrorKind::LessIndentedWithoutParent,
+                                format!(
+                                    "A continuation line of a quoted \
+                                     scalar must be indented at least \
+                                     {min_indent} spaces, but got: \
+                                     {next_line:?}"
+                                ),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
+                    }
                     // Separation spaces at the end of the current line
                     // are a presentation detail; escaped content (e.g. a
                     // `\t` escape) is never trailing whitespace.

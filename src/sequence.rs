@@ -159,13 +159,71 @@ impl<'a> YamlParser<'a> {
                 let tab_after_dash = trimmed.starts_with("-\t");
                 self.scanner.advance(cur_indent + 2);
                 self.skip_block_indicator_separation(tab_after_dash)?;
-                // Continuation lines of the entry content only need to
-                // be indented more than the sequence's own
-                // indentation, not as much as the content column
-                // (yaml-test-suite: legal-tab-after-indentation,
-                // sequence-entry-that-looks-like-two-with-wrong-indentation).
-                let entry_floor = self.block_indent.unwrap_or(cur_indent) + 1;
-                self.handle_node(0, entry_floor, None, None)?;
+                if self.scanner.peek_char() == Some('#') {
+                    // A comment after the entry indicator: the entry
+                    // is empty unless content follows at a deeper
+                    // indentation (e.g. `- # Empty\n- |` is an empty
+                    // entry, `- # c\n  seq2` has value `seq2`).
+                    let seq_indent = self.block_indent.unwrap_or(cur_indent);
+                    let mut rest = self.scanner.remains();
+                    let mut next_indent: Option<usize> = None;
+                    loop {
+                        let line = rest
+                            .split_once(['\n', '\r'])
+                            .map(|(s, _)| s)
+                            .unwrap_or(rest);
+                        let trimmed = line.trim_start_matches([' ', '\t']);
+                        if trimmed.is_empty() || trimmed.starts_with('#') {
+                            match rest.find(['\n', '\r']) {
+                                Some(i) => {
+                                    rest = &rest[i + 1..];
+                                    if rest.starts_with('\n') {
+                                        rest = &rest[1..];
+                                    }
+                                }
+                                None => break,
+                            }
+                            continue;
+                        }
+                        next_indent = Some(
+                            line.chars().take_while(|c| *c == ' ').count(),
+                        );
+                        break;
+                    }
+                    match next_indent {
+                        Some(indent) if indent > seq_indent => {
+                            while !matches!(
+                                self.scanner.peek_char(),
+                                None | Some('\n') | Some('\r')
+                            ) {
+                                self.scanner.next_char();
+                            }
+                            self.scanner.next_char(); // '\n'
+                            self.skip_comment_and_empty_lines();
+                            self.handle_node(indent, indent, None, None)?;
+                        }
+                        _ => {
+                            let pos = self.scanner.done_pos;
+                            self.push_event(YamlEvent::Scalar(
+                                None,
+                                None,
+                                String::new(),
+                                YamlScalarStyle::Plain,
+                                pos,
+                                pos,
+                            ));
+                        }
+                    }
+                } else {
+                    // Continuation lines of the entry content only need
+                    // to be indented more than the sequence's own
+                    // indentation, not as much as the content column
+                    // (yaml-test-suite: legal-tab-after-indentation,
+                    // sequence-entry-that-looks-like-two-with-wrong-indentation).
+                    let entry_floor =
+                        self.block_indent.unwrap_or(cur_indent) + 1;
+                    self.handle_node(0, entry_floor, None, None)?;
+                }
             } else if trimmed.is_empty() {
                 self.scanner.next_line();
                 continue;
