@@ -123,6 +123,16 @@ fn test_wrong_indented_sequence_item() {
 }
 
 #[test]
+fn test_multiple_documents() {
+    use crate::documents;
+    let docs = documents("a: 1\n...\nb: 2\n").unwrap();
+    assert_eq!(docs.len(), 2);
+    // A single-document stream still works.
+    let docs = documents("- 1\n- 2\n").unwrap();
+    assert_eq!(docs.len(), 1);
+}
+
+#[test]
 fn test_double_quoted_escaped_line_break() {
     // `\` + line break is a line continuation (removed).
     assert_eq!(scalar_values("\"a\\\nb\"\n"), vec!["ab"]);

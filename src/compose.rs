@@ -9,10 +9,44 @@ use crate::{
 
 impl YamlValue {
     pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, YamlError> {
-        let mut events_iter = YamlEventIter::new(events);
-        let mut anchors: HashMap<String, YamlValue> = HashMap::new();
-        compose_value(&mut events_iter, &mut anchors)
+        let mut documents = compose_documents(events)?;
+        if documents.len() > 1 {
+            return Err(YamlError::new(
+                ErrorKind::NoSupportMultipleDocuments,
+                format!(
+                    "No support of multiple YAML documents, got {} documents",
+                    documents.len()
+                ),
+                YamlPosition::default(),
+                YamlPosition::default(),
+            ));
+        }
+        Ok(documents.pop().unwrap_or_default())
     }
+}
+
+/// Compose every document of an event stream into a `YamlValue`.
+///
+/// Anchors are scoped per document per the YAML specification, so the
+/// anchor table is reset between documents.
+pub(crate) fn compose_documents(
+    events: Vec<YamlEvent>,
+) -> Result<Vec<YamlValue>, YamlError> {
+    let mut events_iter = YamlEventIter::new(events);
+    let mut documents = Vec::new();
+    loop {
+        match events_iter.peek() {
+            None | Some(YamlEvent::StreamEnd) => break,
+            Some(YamlEvent::DocumentStart(_, _)) => {
+                let mut anchors: HashMap<String, YamlValue> = HashMap::new();
+                documents.push(compose_value(&mut events_iter, &mut anchors)?);
+            }
+            Some(_) => {
+                events_iter.next();
+            }
+        }
+    }
+    Ok(documents)
 }
 
 fn compose_value(
@@ -24,13 +58,10 @@ fn compose_value(
         match event {
             YamlEvent::StreamStart => (),
             YamlEvent::DocumentStart(_, pos) => {
-                if let Some(doc_started_pos) = doc_started_pos {
-                    return Err(YamlError::new(
-                        ErrorKind::NoSupportMultipleDocuments,
-                        "No support of multiple YAML documents".to_string(),
-                        doc_started_pos,
-                        pos,
-                    ));
+                if let Some(_doc_started_pos) = doc_started_pos {
+                    // Another document follows: the current one has
+                    // ended (its DocumentEnd is implied).
+                    return Ok(Default::default());
                 } else {
                     doc_started_pos = Some(pos);
                 }

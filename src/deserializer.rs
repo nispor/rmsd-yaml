@@ -36,6 +36,23 @@ pub fn to_value(input: &str) -> Result<YamlValue, YamlError> {
     YamlValue::from_str(input)
 }
 
+/// Parse a YAML stream and compose every document into a `YamlValue`.
+///
+/// Unlike [`to_value`], which rejects streams containing more than one
+/// document, this returns all documents of the stream:
+///
+/// ```
+/// use rmsd_yaml::documents;
+///
+/// let docs = documents("a: 1\n...\nb: 2\n")?;
+/// assert_eq!(docs.len(), 2);
+/// # Ok::<(), rmsd_yaml::YamlError>(())
+/// ```
+pub fn documents(input: &str) -> Result<Vec<YamlValue>, YamlError> {
+    let events = crate::YamlParser::parse_to_events(input)?;
+    crate::compose::compose_documents(events)
+}
+
 impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     type Error = YamlError;
 
