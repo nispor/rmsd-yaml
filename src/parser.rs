@@ -720,6 +720,20 @@ impl<'a> YamlParser<'a> {
                         property_line.trim_start_matches(' ');
                     let property_indent =
                         property_line.chars().take_while(|c| *c == ' ').count();
+                    // Node properties of a mapping value on a new line
+                    // must be indented deeper than the mapping; a line
+                    // at the same indentation belongs to the parent
+                    // (e.g. `key: &x\n!!map` — the `!!map` is a new
+                    // key).
+                    if self.cur_state().is_block_map_value()
+                        && self.scanner.done_pos.line
+                            != self.scanner.next_pos.line
+                        && let Some(floor) = self.block_indent
+                    {
+                        if property_indent <= floor {
+                            break;
+                        }
+                    }
                     if property_trimmed.starts_with('&') {
                         if anchor.is_none() {
                             self.scanner.advance(property_indent);

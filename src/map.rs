@@ -538,6 +538,17 @@ impl<'a> YamlParser<'a> {
                             .chars()
                             .take_while(|c| *c == ' ')
                             .count();
+                        // A property on a new line must be indented
+                        // deeper than the mapping; a line at the same
+                        // indentation is a sibling key (e.g.
+                        // `key: &x\n!!map`).
+                        if self.scanner.done_pos.line
+                            != self.scanner.next_pos.line
+                            && property_indent
+                                <= desired_indent_count
+                        {
+                            break;
+                        }
                         if property_trimmed.starts_with('&')
                             && value_anchor.is_none()
                         {
