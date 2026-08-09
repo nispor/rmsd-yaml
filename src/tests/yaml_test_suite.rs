@@ -28,18 +28,44 @@ const OUT_YAML_FILE_NAME: &str = "out.yaml";
 /// round-trip. Only the cases that can be reproduced byte-identically
 /// are enabled here.
 const SUPPORTED_OUT_YAML_TEST: &[&str] = &[
+    "aliases-in-explicit-block-mapping",
+    "aliases-in-flow-objects",
+    "aliases-in-implicit-block-mapping",
     "allowed-characters-in-keys",
     "allowed-characters-in-plain-scalars",
+    "allowed-characters-in-quoted-mapping-key",
+    "anchor-before-zero-indented-sequence",
+    "anchor-for-empty-node",
+    "anchor-with-colon-in-the-middle",
+    "anchor-with-unicode-character",
+    "anchors-and-tags",
+    "anchors-on-empty-scalars",
+    "anchors-with-colon-in-name",
     "backslashes-in-singlequotes",
     "blank-lines",
     "block-mapping-with-missing-values",
     "block-mapping-with-multiline-scalars",
     "block-mappings-in-block-sequence",
+    "block-scalar-indicator-order",
     "block-sequence-in-block-mapping",
+    "block-sequence-indentation",
+    "colon-and-adjacent-value-after-comment-on-next-line",
+    "colon-and-adjacent-value-on-next-line",
+    "colon-followed-by-comma",
     "comment-and-document-end-marker",
+    "comment-in-flow-sequence-before-comma",
+    "directive-variants/02",
+    "directive-variants/03",
+    "directive-variants/04",
+    "directive-variants/05",
+    "directive-variants/06",
     "document-end-marker",
+    "doublequoted-scalar-starting-with-a-tab",
+    "empty-flow-collections",
     "empty-implicit-key-in-single-pair-flow-sequences",
     "empty-lines-between-mapping-elements",
+    "escaped-slash-in-double-quotes",
+    "explicit-key-and-value-seperated-by-comment",
     "flow-mapping",
     "flow-mapping-edge-cases",
     "flow-mapping-in-block-sequence",
@@ -47,75 +73,200 @@ const SUPPORTED_OUT_YAML_TEST: &[&str] = &[
     "flow-sequence-in-block-mapping",
     "flow-sequence-in-flow-mapping",
     "flow-sequence-in-flow-sequence",
+    "folded-block-scalar",
     "implicit-flow-mapping-key-on-one-line",
     "inline-tabs-in-double-quoted/01",
     "inline-tabs-in-double-quoted/02",
+    "key-with-anchor-after-missing-explicit-mapping-value",
+    "leading-tab-content-in-literals/00",
+    "leading-tab-content-in-literals/01",
     "legal-tab-after-indentation",
+    "literal-block-scalar",
+    "literal-unicode",
     "mixed-block-mapping-explicit-to-implicit",
     "mixed-block-mapping-implicit-to-explicit",
-    "multiline-scalar-in-mapping",
-    "nested-top-level-flow-mapping",
-    "plain-url-in-flow-mapping",
-    "question-mark-edge-cases/00",
-    "question-mark-edge-cases/01",
-    "question-marks-in-scalars",
-    "scalars-in-flow-start-with-syntax-char/00",
-    "scalars-in-flow-start-with-syntax-char/01",
-    "sequence-entry-that-looks-like-two-with-wrong-indentation",
-    "sequence-indent",
-    "single-character-streams/00",
-    "single-character-streams/01",
-    "spec-example-2-11-mapping-between-sequences",
-    "spec-example-2-17-quoted-scalars",
-    "spec-example-2-18-multi-line-flow-scalars",
-    "spec-example-2-2-mapping-scalars-to-scalars",
-    "spec-example-2-3-mapping-scalars-to-sequences",
-    "spec-example-2-4-sequence-of-mappings",
-    "spec-example-2-5-sequence-of-sequences",
-    "spec-example-2-6-mapping-of-mappings",
-    "spec-example-5-3-block-structure-indicators",
-    "spec-example-5-4-flow-collection-indicators",
-    "spec-example-5-5-comment-indicator",
-    "spec-example-6-10-comment-lines",
-    "spec-example-6-11-multi-line-comments",
-    "spec-example-6-12-separation-spaces",
-    "spec-example-6-2-indentation-indicators",
-    "spec-example-6-24-verbatim-tags",
-    "spec-example-6-3-separation-spaces",
-    "spec-example-6-7-block-folding",
-    "spec-example-6-8-flow-folding",
-    "spec-example-6-9-separated-comment",
-    "spec-example-7-11-plain-implicit-keys",
-    "spec-example-7-13-flow-sequence",
-    "spec-example-7-15-flow-mappings",
-    "spec-example-7-16-flow-mapping-entries",
-    "spec-example-7-19-single-pair-flow-mappings",
-    "spec-example-7-2-empty-content",
-    "spec-example-7-20-single-pair-explicit-entry",
-    "spec-example-7-5-double-quoted-line-breaks",
-    "spec-example-7-6-double-quoted-lines",
-    "spec-example-8-14-block-sequence",
-    "spec-example-8-16-block-mappings",
-    "spec-example-8-22-block-collection-nodes",
-    "spec-example-8-7-literal-scalar",
-    "spec-example-8-8-literal-content",
-    "tab-at-beginning-of-line-followed-by-a-flow-mapping",
-    "tabs-in-various-contexts/002",
-    "tabs-in-various-contexts/010",
-    "tags-for-block-objects",
-    "tags-for-flow-objects",
-    "tags-in-block-sequence",
-    "tags-in-explicit-mapping",
-    "tags-in-implicit-mapping",
-    "tags-on-empty-scalars",
-    "three-dashes-and-content-without-space",
-    "trailing-spaces-after-flow-collection",
-    "trailing-tabs-in-double-quoted/00",
-    "trailing-tabs-in-double-quoted/01",
-    "trailing-tabs-in-double-quoted/02",
-    "trailing-tabs-in-double-quoted/03",
-    "various-trailing-tabs",
+    "multiline-double-quoted-flow-mapping-key",
+    "multiline-doublequoted-flow-mapping-key-without-value",
+    "multiline-plain-flow-mapping-key",
 ];
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /// Collect the test directories under `test_data_dir`. A test directory is
 /// either a direct child with a `===` description file, or a subdirectory
