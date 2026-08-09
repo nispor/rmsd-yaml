@@ -276,6 +276,15 @@ impl<'a> YamlParser<'a> {
         } else {
             loop {
                 self.scanner.skip_flow_separation();
+                if self.scanner.peek_char() == Some(',') {
+                    return Err(YamlError::new(
+                        ErrorKind::UnfinishedSequenceIndicator,
+                        "A flow sequence entry may not start with ','"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 self.check_flow_entry_indentation(flow_start_line)?;
                 self.handle_flow_seq_entry()?;
                 self.scanner.skip_flow_separation();

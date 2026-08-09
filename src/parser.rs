@@ -614,6 +614,22 @@ impl<'a> YamlParser<'a> {
                     self.expect_flow_end_separation()?;
                 }
             } else if find_key_value_separator(trimmed).is_some() {
+                if self.cur_state().is_block_map_value()
+                    && self.scanner.done_pos.line == self.scanner.next_pos.line
+                {
+                    // A block mapping may not be a value on the same
+                    // line as its own key (YAML 1.2.2 SPEC, 8.2.2),
+                    // e.g. `a: b: c: d` is an error.
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidImplicitKey,
+                        format!(
+                            "A block mapping cannot be the value of a \
+                             mapping entry on the same line: {line}"
+                        ),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 // Guess out the indent: the mapping's entries sit at
                 // the key's own column. For a key that follows content
                 // on the same line (e.g. a block sequence entry

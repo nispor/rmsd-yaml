@@ -334,9 +334,17 @@ impl<'a> YamlParser<'a> {
     fn check_quoted_scalar_document_marker(&self) -> Result<(), YamlError> {
         if let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
+            // A `---`/`...` marker followed by separation (space or
+            // tab) ends the quoted scalar even when content follows
+            // (`... x`), but `...x` without separation is content.
+            let is_marker = trimmed == "---"
+                || trimmed.starts_with("--- ")
+                || trimmed.starts_with("---\t")
+                || trimmed == "..."
+                || trimmed.starts_with("... ")
+                || trimmed.starts_with("...\t");
             if line.chars().take_while(|c| *c == ' ').count() == 0
-                && (is_document_start_marker(trimmed)
-                    || is_document_end_marker(trimmed))
+                && is_marker
             {
                 return Err(YamlError::new(
                     ErrorKind::UnfinishedQuote,
