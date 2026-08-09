@@ -698,8 +698,8 @@ impl<'a> YamlParser<'a> {
                 )?;
             } else if trimmed.ends_with(":") {
                 self.handle_block_map(
-                    first_indent_count,
-                    rest_indent_count,
+                    max(first_indent_count, indent_count),
+                    max(rest_indent_count, indent_count),
                     anchor,
                     tag,
                 )?;
