@@ -117,3 +117,31 @@ fn test_value_get_and_as_mapping() {
     assert!(value.as_sequence().is_none());
     assert!(value.get("interfaces").unwrap().as_mapping().is_none());
 }
+
+#[test]
+fn test_empty_value_followed_by_sibling_key() {
+    // `a:` with no value and a sibling key at the same indentation:
+    // the value of `a` is empty and `b` is a new entry.
+    let value: crate::Value = crate::Value::from_str("a:\nb: 1\n").unwrap();
+    assert!(value.get("a").unwrap().is_null());
+    assert_eq!(value.get("b").unwrap().as_str().unwrap(), "1");
+    assert_eq!(value.as_mapping().unwrap().len(), 2);
+}
+
+#[test]
+fn test_empty_value_followed_by_dedent() {
+    // `a:` inside a nested block with a dedent after it: the value of
+    // `a` is empty and the dedented line closes the inner block.
+    let value: crate::Value =
+        crate::Value::from_str("x:\n  a:\nb: 1\n").unwrap();
+    assert!(value.get("x").unwrap().get("a").unwrap().is_null());
+    assert_eq!(value.get("b").unwrap().as_str().unwrap(), "1");
+}
+
+#[test]
+fn test_zero_indent_sequence_value_still_valid() {
+    // A zero-indented block sequence stays the value of the key
+    // (YAML 1.2.2 SPEC, 8.2.2), not an empty value + sibling.
+    let value: crate::Value = crate::Value::from_str("a:\n- 1\n- 2\n").unwrap();
+    assert_eq!(value.get("a").unwrap().as_sequence().unwrap().len(), 2);
+}

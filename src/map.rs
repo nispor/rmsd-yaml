@@ -564,15 +564,23 @@ impl<'a> YamlParser<'a> {
                             || (next_line_indent_count == desired_indent_count
                                 && !is_seq)
                         {
-                            return Err(Error::new(
-                                ErrorKind::Bug,
-                                format!(
-                                    "The value of a mapping entry must be \
-                                     indented more than the key: {next_line}"
-                                ),
-                                self.scanner.next_pos,
-                                self.scanner.next_pos,
+                            // The value of this entry is empty: the
+                            // next line is either a sibling key at the
+                            // same indentation (`a:\nb: 1`) or a dedent
+                            // closing this block. Emit the empty value
+                            // and leave the line for the outer loop.
+                            self.push_event(YamlEvent::Scalar(
+                                None,
+                                None,
+                                String::new(),
+                                YamlScalarStyle::Plain,
+                                self.scanner.done_pos,
+                                self.scanner.done_pos,
                             ));
+                            self.pop_state();
+                            // Back to key mode for the next iteration.
+                            self.push_state(YamlState::InBlockMapKey);
+                            continue;
                         } else {
                             value_first_indent_count = next_line_indent_count;
                             value_rest_indent_count = next_line_indent_count;
