@@ -203,6 +203,14 @@ impl<'a> YamlParser<'a> {
                             self.handle_node(indent, indent, None, None)?;
                         }
                         _ => {
+                            // Empty entry: consume the comment line.
+                            while !matches!(
+                                self.scanner.peek_char(),
+                                None | Some('\n') | Some('\r')
+                            ) {
+                                self.scanner.next_char();
+                            }
+                            self.scanner.next_char(); // '\n' or '\r'
                             let pos = self.scanner.done_pos;
                             self.push_event(YamlEvent::Scalar(
                                 None,

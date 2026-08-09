@@ -1029,8 +1029,20 @@ impl<'a> YamlParser<'a> {
                             pos,
                         ));
                     }
-                    Some('?') => {
-                        // Explicit key, e.g. `{? key : value}`
+                    Some('?')
+                        if matches!(
+                            self.scanner.remains().chars().nth(1),
+                            None
+                                | Some(' ')
+                                | Some('\t')
+                                | Some('\n')
+                                | Some('\r')
+                                | Some('#')
+                        ) =>
+                    {
+                        // Explicit key, e.g. `{? key : value}`; a `?`
+                        // followed directly by content (`{?foo: bar}`)
+                        // is a plain scalar key.
                         self.scanner.next_char();
                         self.scanner.skip_flow_separation();
                         if self.scanner.peek_char() == Some(':') {
