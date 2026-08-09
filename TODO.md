@@ -1,8 +1,6 @@
 # TODO
 
-Open tasks extracted from `PLAN.md` (removed).
-
-## M7 - Edge Cases & Compliance
+## Edge Cases & Compliance
 
 * [ ] Explicit/empty keys in flow collections (`{ ? foo :, : bar }`,
       `{ foo : !!str }`)
@@ -10,7 +8,7 @@ Open tasks extracted from `PLAN.md` (removed).
 * [ ] Unicode NFC/NFD normalization
 * [ ] Line-length limits / max_width enforcement in the parser
 
-## M8 - Performance & Polish
+## Performance & Polish
 
 * [ ] Streaming `Deserializer` (incremental, without the intermediate
       `YamlValue` tree)
@@ -21,3 +19,8 @@ Open tasks extracted from `PLAN.md` (removed).
       `yaml_test_suit_out_yaml` passes every case in
       `SUPPORTED_OUT_YAML_TEST` (currently empty; enable cases as the
       emitter matures)
+
+## in.json tests
+
+* [ ] Enable in.json test suite: deserialize each `in.yaml` and compare
+      the result with the JSON value in `in.json`
