@@ -821,9 +821,6 @@ impl<'a> YamlParser<'a> {
                     self.handle_flow_map(anchor, tag)?;
                 }
             }
-            (true, Some('{')) => {
-                self.handle_flow_map(anchor, tag)?;
-            }
             (true, Some('|')) => {
                 self.scanner.advance_till_non_space();
                 self.scanner.next_char();

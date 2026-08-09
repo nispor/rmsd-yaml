@@ -734,6 +734,33 @@ impl<'a> YamlParser<'a> {
                             break;
                         }
                     }
+                    // A line whose first two tokens are node properties
+                    // and which contains `: ` is an implicit mapping key
+                    // of this node, not another property (e.g.
+                    // `&a !!str key: v`, `!!str &a key: v`).
+                    let first_token = property_trimmed
+                        .split([' ', '\t'])
+                        .next()
+                        .unwrap_or("");
+                    let is_prop_first = first_token.starts_with('!')
+                        || first_token.starts_with('&');
+                    let rest_after_first = property_trimmed
+                        [first_token.len()..]
+                        .trim_start_matches([' ', '\t']);
+                    let second_token = rest_after_first
+                        .split([' ', '\t'])
+                        .next()
+                        .unwrap_or("");
+                    let is_prop_second = second_token.starts_with('!')
+                        || second_token.starts_with('&');
+                    if is_prop_first
+                        && is_prop_second
+                        && (property_trimmed.contains(": ")
+                            || property_trimmed.ends_with(':'))
+                    {
+                        property_found = true;
+                        break;
+                    }
                     if property_trimmed.starts_with('&') {
                         if anchor.is_none() {
                             self.scanner.advance(property_indent);
