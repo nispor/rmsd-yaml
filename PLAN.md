@@ -9,11 +9,11 @@ RMSD-YAML is a pure Rust, minimised YAML library targeting serde compatibility a
 * Core parser/scanner infrastructure exists (YAML spec 1.2.2)
 * Compose phase converts events to YamlValue tree
 * Deserializer/Serializer implement serde traits
-* 109 of 402 yaml-test-suite cases enabled and passing
-* Anchors are parsed in block mapping/sequence contexts; alias
-  resolution in compose is still missing
-* Missing: flow collections, single-quoted scalars, tag/directive
-  handling, alias events
+* 175 of 402 yaml-test-suite cases enabled and passing
+* Anchors and aliases are parsed and resolved in block and flow
+  contexts; flow sequences/mappings (incl. nested and single-pair
+  forms) are supported
+* Missing: explicit `?` block keys, tag/directive handling
 
 ## Milestones
 
@@ -60,31 +60,66 @@ Extra work done to make the enabled cases pass:
 * [x] Enabled every suite case that currently passes (100 top-level
       names, 109 counted cases)
 
-### M2 - Deserializer Completeness
+### M2 - Deserializer Completeness (DONE)
 
-**Goal:** Full serde `Deserializer` trait implementation that matches serde_yaml behavior.
-
-Tasks:
-- [ ] Replace `todo!()` stubs in `deserializer.rs`:
-  - `deserialize_char` (line ~140)
-  - `deserialize_byte_buf` (line ~147)
-  - All enum deserialization methods (lines ~200-230)
-  - `deserialize_bytes`, `deserialize_seq_key`, `deserialize_newtype_struct`
-- [ ] Handle anchor reference resolution in compose phase
-- [ ] Implement proper alias node handling in `YamlValueEnumAccess`
-- [ ] Add type coercion tests for bool/char/int/string edge cases
-
-### M3 - Flow Collections + Anchors + Aliases
-
-**Goal:** Full flow collection and anchor/alias coverage.
+**Goal:** Full serde `Deserializer` trait implementation that matches
+serde_yaml behavior. Reached: 118/402 cases pass.
 
 Tasks:
-- [ ] Implement flow sequence parsing (`[item1, item2]`)
-- [ ] Implement flow mapping parsing (`{key: val}`)
-- [ ] Track node IDs for anchors, resolve aliases by reference
-- [ ] Handle nested flow collections (`[[1, 2], {a: [3]}]`)
-- [ ] Add anchor name deduplication validation
-- [ ] Enable all `anchors-*` and `aliases-*` test cases (15+ tests)
+* [x] Replace `todo!()` stubs in `deserializer.rs` (`deserialize_char`,
+      the enum methods and `deserialize_newtype_struct` were already
+      implemented; the remaining stubs were `deserialize_f32/f64`,
+      `deserialize_unit`, `deserialize_unit_struct`, `deserialize_bytes`
+      and `deserialize_byte_buf`)
+* [x] Match serde_yaml: `deserialize_f32` delegates to f64; bytes and
+      byte_buf are unsupported; floats accept `.inf`/`.nan`
+* [x] Handle anchor reference resolution in compose phase (anchor
+      table; aliases resolve to a clone of the anchored node; unknown
+      alias raises `UnknownAlias`)
+* [x] Implement proper alias node handling in `YamlValueEnumAccess`
+      (aliases resolve in compose; enum variant names are unwrapped
+      from `<!Variant>`/`<tag:...:Variant>` tags)
+* [x] Add type coercion tests for bool/char/int/float/string/unit/
+      option/bytes/enum edge cases
+
+Extra work done to make the enabled cases pass:
+* [x] Parser: `Alias` event (`=ALI *name`), alias as mapping key
+      (`*b : *a`), anchored empty values (`a: &anchor\nb: *anchor`)
+* [x] Fix latent parser state bug: `pop_state()` only popped the state
+      when trace logging was enabled (side effect inside `log!`)
+* [x] Enable every suite case that currently passes (109 top-level
+      names, 118 counted cases)
+
+### M3 - Flow Collections + Anchors + Aliases (DONE)
+
+**Goal:** Full flow collection and anchor/alias coverage. Reached:
+175/402 cases pass.
+
+Tasks:
+* [x] Implement flow sequence parsing (`[item1, item2]`), including
+      single-pair mappings inside a sequence (`[ a: b ]`)
+* [x] Implement flow mapping parsing (`{key: val}`), including
+      empty keys/values and explicit `?` flow keys
+* [x] Track node anchors in compose and resolve aliases by reference
+      (done in M2)
+* [x] Handle nested flow collections (`[[1, 2], {a: [3]}]`) and flow
+      collections inside block context, including as mapping keys
+* [x] Anchor duplication: a second anchor on the same node is
+      rejected; redefining an anchor for a later node is allowed
+      (YAML 1.2.2 behavior)
+* [x] Single-quoted flow scalars
+* [x] Enable every passing `anchors-*`, `aliases-*` and flow test
+      case
+
+Extra work done to make the enabled cases pass:
+* [x] Nested block sequences on one line (`- - - []`)
+* [x] Reject a block sequence entry on the same line as a mapping key
+      (`key: - a`) and adjacent content after a flow collection
+      (`{a: b}c`)
+
+Remaining anchor/alias cases need explicit `?` block-key support:
+`aliases-in-explicit-block-mapping`, `anchors-on-empty-scalars`,
+`key-with-anchor-after-missing-explicit-mapping-value`.
 
 ### M4 - Block Scalars & Chomping
 
