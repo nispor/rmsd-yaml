@@ -358,6 +358,45 @@ impl<'a> YamlParser<'a> {
     /// a single-pair flow mapping.
     fn handle_flow_seq_entry(&mut self) -> Result<(), YamlError> {
         self.scanner.skip_flow_separation();
+        if self.scanner.peek_char() == Some('?')
+            && matches!(
+                self.scanner.remains().chars().nth(1),
+                None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                    | Some('#')
+            )
+        {
+            // An explicit-key entry, e.g. `[ ? foo\n   : bar ]`: the
+            // key (and the value after `:`) are flow nodes and may
+            // span lines.
+            let start_pos = self.scanner.next_pos;
+            self.scanner.next_char(); // consume '?'
+            self.push_event(YamlEvent::MapStart(
+                None,
+                None,
+                YamlCollectionStyle::Flow,
+                start_pos,
+            ));
+            self.scanner.skip_flow_separation();
+            self.handle_flow_node()?;
+            self.scanner.skip_flow_separation();
+            if self.scanner.peek_char() == Some(':') {
+                self.scanner.next_char();
+                self.scanner.skip_flow_separation();
+                self.handle_flow_node()?;
+            } else {
+                let pos = self.scanner.next_pos;
+                self.push_event(YamlEvent::Scalar(
+                    None,
+                    None,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    pos,
+                    pos,
+                ));
+            }
+            self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
+            return Ok(());
+        }
         if self.scanner.peek_char() == Some(':')
             && matches!(
                 self.scanner.remains().chars().nth(1),
