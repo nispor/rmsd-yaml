@@ -671,21 +671,30 @@ impl crate::YamlValue {
             ..Default::default()
         };
         serializer.serialize_yaml_value(self)?;
-        if serializer.output.is_empty() {
+        let mut output = std::mem::take(&mut serializer.output);
+        if output.is_empty() {
+            // An empty document renders as nothing, or as `---` when
+            // the document was explicit.
+            if self.meta.doc_explicit {
+                return Ok("---\n".to_string());
+            }
             return Ok(String::new());
         }
-        if serializer.open_ended {
-            // A keep-chomped block scalar ending in blank lines at the
-            // end of the document is closed with an explicit `...`.
-            serializer.output.push_str("...\n");
+        if serializer.open_ended || self.meta.doc_end_explicit {
+            // A keep-chomped block scalar ending in blank lines, or an
+            // explicit `...` document-end marker, closes the document.
+            output.push_str("...\n");
         }
-        if serializer.output.ends_with("\n\n") {
-            serializer.output.pop();
+        if output.ends_with("\n\n") {
+            output.pop();
         }
-        if !serializer.output.ends_with('\n') {
-            serializer.output.push('\n');
+        if !output.ends_with('\n') {
+            output.push('\n');
         }
-        Ok(serializer.output)
+        if self.meta.doc_explicit {
+            output.insert_str(0, "---\n");
+        }
+        Ok(output)
     }
 }
 

@@ -31,6 +31,10 @@ pub struct YamlValueMeta {
     /// The alias this node was produced from (`*name`). The `data` is
     /// the resolved value; the dump renders `*name` instead.
     pub alias: Option<String>,
+    /// The document started with an explicit `---` marker.
+    pub doc_explicit: bool,
+    /// The document ended with an explicit `...` marker.
+    pub doc_end_explicit: bool,
 }
 
 // `meta.scalar_style` is excluded from equality/hash so the value

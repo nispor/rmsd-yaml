@@ -38,8 +38,23 @@ pub(crate) fn compose_documents(
         match events_iter.peek() {
             None | Some(YamlEvent::StreamEnd) => break,
             Some(YamlEvent::DocumentStart(_, _)) => {
+                let implicit = match events_iter.next() {
+                    Some(YamlEvent::DocumentStart(implicit, _)) => implicit,
+                    _ => unreachable!(),
+                };
                 let mut anchors: HashMap<String, YamlValue> = HashMap::new();
-                documents.push(compose_value(&mut events_iter, &mut anchors)?);
+                let mut value = compose_value(&mut events_iter, &mut anchors)?;
+                // Record the explicit `---` / `...` document markers so
+                // the dump can reproduce them.
+                value.meta.doc_explicit = implicit;
+                if let Some(YamlEvent::DocumentEnd(end_implicit, _)) =
+                    events_iter.peek()
+                {
+                    let end_implicit = *end_implicit;
+                    events_iter.next();
+                    value.meta.doc_end_explicit = end_implicit;
+                }
+                documents.push(value);
             }
             Some(_) => {
                 events_iter.next();
