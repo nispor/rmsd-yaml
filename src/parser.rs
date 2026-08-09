@@ -628,6 +628,10 @@ impl<'a> YamlParser<'a> {
                         name,
                         self.scanner.next_pos,
                     ));
+                    // Consume a trailing comment on the alias's own line
+                    // (e.g. `- *a # comment`) so the enclosing block
+                    // collection sees the next line.
+                    self.skip_comment_and_empty_lines();
                 }
             } else if trimmed.starts_with("[") || trimmed.starts_with("{") {
                 if flow_collection_is_key(trimmed) {
@@ -1325,5 +1329,23 @@ mod test {
                 YamlEvent::StreamEnd,
             ]
         )
+    }
+
+    #[test]
+    fn test_alias_with_trailing_comment_in_sequence() {
+        // A trailing comment on the alias's own line must not end the
+        // enclosing block sequence (yaml-test-suite:
+        // spec-example-2-10-node-for-sammy-sosa-appears-twice-in-this-document).
+        let events =
+            YamlParser::parse_to_events("- *a # comment\n- b\n").unwrap();
+        let mut events_str = String::new();
+        for event in events {
+            events_str.push_str(&event.to_string());
+            events_str.push('\n');
+        }
+        assert_eq!(
+            "+STR\n+DOC\n+SEQ\n=ALI *a\n=VAL :b\n-SEQ\n-DOC\n-STR\n",
+            events_str
+        );
     }
 }
