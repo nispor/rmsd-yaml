@@ -129,20 +129,6 @@ impl YamlSerializer {
         self.current_indent_level += 1;
     }
 
-    /// Serialize a parsed [`YamlValue`] back to YAML. This is the
-    /// `to_yaml` workflow:
-    ///
-    /// ```ignore
-    /// let value: YamlValue = to_value(input)?;
-    /// let yaml = value.to_string()?;
-    /// ```
-    ///
-    /// The layout follows the yaml-test-suite `out.yaml` conventions:
-    /// block collections, an indentless block sequence as a mapping
-    /// value, an explicit `? ` key for non-simple keys, and the
-    /// `out.yaml` scalar quoting (see `to_out_yaml_scalar`). The
-    /// dynamic tags carried by `YamlValueData::Tag` (which the serde
-    /// data model cannot express) are written as shorthands.
     pub(crate) fn serialize_yaml_value(
         &mut self,
         value: &crate::YamlValue,

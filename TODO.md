@@ -15,10 +15,12 @@
 
 ## out.yaml tests
 
-* [ ] Pass all to_yaml tests: implement the event-to-YAML emitter so
-      `yaml_test_suit_out_yaml` passes every case in
-      `SUPPORTED_OUT_YAML_TEST` (currently empty; enable cases as the
-      emitter matures)
+* [ ] Pass the remaining to_yaml tests: the value-based dump
+      (`YamlValue::to_string()`) passes the 93 cases in
+      `SUPPORTED_OUT_YAML_TEST`; the other 120 `out.yaml` files cannot
+      be reproduced by a value dump (anchors/aliases, `---`/`...`
+      markers, block-scalar and quoted styles, multi-document streams;
+      see `DESIGNS.md`)
 
 ## in.json tests
 
