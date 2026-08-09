@@ -865,12 +865,11 @@ impl<'a> YamlParser<'a> {
                     .take_while(|c| matches!(c, ' ' | '\t'))
                     .count();
                 self.scanner.advance(leading);
-                self.handle_node(
-                    first_indent_count,
-                    rest_indent_count,
-                    anchor,
-                    tag,
-                )?;
+                // Parse the content as a fresh node at the current
+                // scanner position (the original indentation arguments
+                // describe the line start, not the content after the
+                // tabs).
+                self.handle_node(0, 0, anchor, tag)?;
             } else {
                 self.handle_scalar(
                     first_indent_count,
