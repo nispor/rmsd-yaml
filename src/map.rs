@@ -6,7 +6,8 @@ use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::parser::{
-    is_document_end_marker, is_document_start_marker, tab_content_is_block_node,
+    find_key_value_separator, is_document_end_marker,
+    is_document_start_marker, tab_content_is_block_node,
 };use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
@@ -797,6 +798,24 @@ impl<'a> YamlParser<'a> {
                 ));
             }
             (true, Some(_)) => {
+                // A plain-scalar key on the `?` line; when the content
+                // looks like a mapping (`? earth: blue`, `? : x`), the
+                // key is a compact block mapping.
+                let key_content =
+                    self.scanner.remains().trim_start_matches([' ', '\t']);
+                let key_first_line = key_content
+                    .split(['\n', '\r'])
+                    .next()
+                    .unwrap_or_default();
+                if find_key_value_separator(key_first_line).is_some()
+                    || key_first_line.starts_with(':')
+                    || key_first_line.starts_with(": ")
+                {
+                    let key_column =
+                        self.scanner.next_pos.column.saturating_sub(1);
+                    self.handle_block_map(0, key_column, anchor, tag)?;
+                    return Ok(());
+                }
                 // A plain-scalar key on the `?` line. Unlike an
                 // implicit key it does not need a `:`, it simply ends
                 // at the line break (or a comment); continuation lines

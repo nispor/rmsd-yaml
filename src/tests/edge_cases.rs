@@ -21,9 +21,11 @@ fn test_explicit_mapping_keys() {
     // Explicit key with an empty value.
     let input = "? explicit key # Empty value\n";
     assert_eq!(scalar_values(input), vec!["explicit key", ""]);
-    // Empty explicit key with a value.
+    // `? : x`: the key is the compact single-pair map `{: x}` and the
+    // explicit value is empty (yaml-test-suite:
+    // question-mark-edge-cases/00).
     let input = "- ? : x\n";
-    assert_eq!(scalar_values(input), vec!["", "x"]);
+    assert_eq!(scalar_values(input), vec!["", "x", ""]);
     // Tagged explicit key.
     let input = "? !!str a\n: !!int 47\n";
     let events = YamlParser::parse_to_events(input).unwrap();
