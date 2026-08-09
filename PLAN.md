@@ -10,6 +10,7 @@ RMSD-YAML is a pure Rust, minimised YAML library targeting serde compatibility a
 * Compose phase converts events to YamlValue tree
 * Deserializer/Serializer implement serde traits
 * 196 of 402 yaml-test-suite cases enabled and passing
+* 54 cargo unit tests pass (serializer, deserializer, scalar, base64)
 * Anchors and aliases are parsed and resolved in block and flow
   contexts; flow sequences/mappings (incl. nested and single-pair
   forms) are supported
@@ -158,19 +159,39 @@ Extra work done to make the enabled cases pass:
       indentation (e.g. `!foo` before `>1`)
 - [x] Event DSL escapes `\`, `\t` in addition to `\n`
 
-### M5 - Serializer Improvements
+### M5 - Serializer Improvements ✅ DONE
 
-**Goal:** Complete serde `Serializer` trait and produce indistinguishable output from serde_yaml.
+**Goal:** Complete serde `Serializer` trait and produce round-trippable output.
 
 Tasks:
-- [ ] Replace `todo!()` in serializer:
-  - Anchor rendering (line ~306)
-  - Tag handling (line ~292, ~195)
-  - Various serialization methods (~431, ~435, ~514, ~518)
-- [ ] Implement base64 encoding for binary tags
-- [ ] Fix long-line breaking in scalar_ser.rs
-- [ ] Add indentation validation (already exists but add tests)
-- [ ] Support custom tag rendering
+- [x] Replace all `todo!()` in `serializer.rs`:
+  - `serialize_tuple_variant` / `serialize_struct_variant` render
+    `!Variant` + block sequence / mapping (matching serde_yaml)
+  - `SerializeTupleVariant` / `SerializeStructVariant` field methods
+    implemented
+- [x] Implement base64 encoding/decoding for `!!binary` tags
+  (new `src/base64.rs`, RFC 4648, dependency-free)
+- [x] `serialize_bytes` emits `!!binary <base64>`; `deserialize_bytes` /
+  `deserialize_byte_buf` decode it (CString & `&[u8]` visitors)
+- [x] Fix long-line breaking in `scalar_ser.rs` (folded double-quoted
+  output round-trips; done in M4, covered by serializer tests)
+- [x] Add indentation validation tests (`indent_count < 2` rejected)
+- [x] Fix `serialize_unit_struct` -> `null` and `serialize_newtype_struct`
+  passthrough (previously wrote wrong `!name null` / `!name` lines)
+- [x] Fix tuple / tuple-struct elements missing the trailing newline
+- [x] Fix `pending_tag` leaking into following collections after a
+  tagged scalar (cleared on every scalar write)
+- [x] Fix nested block map state leak: the map loop now restores its own
+  `InBlockMapKey` state after each value, so sibling keys are no longer
+  swallowed into nested maps (`a:\n  b: 1\n  c: 2` parses correctly)
+- [x] Fix double-quoted scalar escapes: escaped `\n` is content and no
+  longer folded to a space by flow folding (read-time folding only
+  applies to real line breaks)
+- [x] `deserialize_option` / `deserialize_unit` treat `null`, `~` and
+  empty scalars as None/unit (Core Schema)
+- [x] Serializer test module `src/tests/serializer.rs`: round-trips for
+  seqs/maps/enums/structs/options, binary tags, long-line folding,
+  leading `---`, indentation validation
 
 ### M6 - Tags & Directives
 

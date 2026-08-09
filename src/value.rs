@@ -97,6 +97,18 @@ impl YamlValue {
         self.as_bool().is_ok()
     }
 
+    /// Whether the value resolves to null per the YAML Core Schema:
+    /// `null`, `Null`, `NULL`, `~` or an empty scalar.
+    pub fn is_null(&self) -> bool {
+        if self.data == YamlValueData::Null {
+            return true;
+        }
+        if let YamlValueData::String(s) = &self.data {
+            return matches!(s.as_str(), "null" | "Null" | "NULL" | "~" | "");
+        }
+        false
+    }
+
     pub fn is_integer(&self) -> bool {
         if let YamlValueData::String(s) = &self.data {
             str_is_integer(s)

@@ -170,30 +170,40 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
         visitor.visit_string(self.parsed.as_str()?.to_string())
     }
 
-    fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        // Keep the same behavior as serde_yaml.
-        Err(YamlError::new(
-            ErrorKind::BytesUnsupported,
-            "Deserializing bytes is not supported".to_string(),
-            self.parsed.start,
-            self.parsed.end,
-        ))
+        self.deserialize_byte_buf(visitor)
     }
 
     fn deserialize_byte_buf<V>(
         self,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        // Keep the same behavior as serde_yaml.
+        // Only `!!binary` tagged scalars carry binary data; plain
+        // scalars and other tags are rejected like serde_yaml.
+        if let YamlValueData::Tag(tag) = &self.parsed.data
+            && tag.name == "<tag:yaml.org,2002:binary>"
+            && let YamlValueData::String(s) = &tag.data
+        {
+            let bytes = crate::base64::decode(s).map_err(|e| {
+                YamlError::new(
+                    ErrorKind::InvalidNumber,
+                    format!("Invalid base64 in !!binary tag: {e}"),
+                    self.parsed.start,
+                    self.parsed.end,
+                )
+            })?;
+            return visitor.visit_byte_buf(bytes);
+        }
         Err(YamlError::new(
             ErrorKind::BytesUnsupported,
-            "Deserializing byte_buf is not supported".to_string(),
+            "Deserializing bytes is not supported (expected !!binary tag)"
+                .to_string(),
             self.parsed.start,
             self.parsed.end,
         ))
@@ -203,9 +213,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        match self.parsed.data {
-            YamlValueData::Null => visitor.visit_none(),
-            _ => visitor.visit_some(self),
+        if self.parsed.is_null() {
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self)
         }
     }
 
@@ -213,7 +224,7 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        if self.parsed.data == YamlValueData::Null {
+        if self.parsed.is_null() {
             visitor.visit_unit()
         } else {
             Err(YamlError::new(

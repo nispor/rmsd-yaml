@@ -181,6 +181,8 @@ impl<'a> YamlParser<'a> {
                     None,
                 )?;
                 self.pop_state();
+                // Back to key mode for the next iteration.
+                self.push_state(YamlState::InBlockMapKey);
             } else {
                 if !self.cur_state().is_block_map_key() {
                     self.push_state(YamlState::InBlockMapKey);
@@ -321,10 +323,26 @@ impl<'a> YamlParser<'a> {
                             self.scanner.done_pos,
                         ));
                         self.pop_state();
+                        // Back to key mode for the next iteration.
+                        self.push_state(YamlState::InBlockMapKey);
                         continue;
                     }
-                    value_first_indent_count = 0;
-                    value_rest_indent_count = self.scanner.done_pos.column;
+                    if self.scanner.done_pos.line != self.scanner.next_pos.line
+                        && let Some(content_line) = self.scanner.peek_line()
+                    {
+                        // The node properties decorate a node whose
+                        // content sits on the following lines (e.g.
+                        // `a: !B\n  - 1`); re-derive the content
+                        // indentation from the first content line.
+                        value_first_indent_count = content_line
+                            .chars()
+                            .take_while(|c| *c == ' ')
+                            .count();
+                        value_rest_indent_count = value_first_indent_count;
+                    } else {
+                        value_first_indent_count = 0;
+                        value_rest_indent_count = self.scanner.done_pos.column;
+                    }
                 } else if trimmed_line.is_empty() {
                     self.scanner.next_line();
                 } else {
@@ -346,6 +364,8 @@ impl<'a> YamlParser<'a> {
                     value_tag,
                 )?;
                 self.pop_state();
+                // Back to key mode for the next iteration.
+                self.push_state(YamlState::InBlockMapKey);
             }
             if pre_pos == self.scanner.done_pos {
                 return Err(YamlError::new(

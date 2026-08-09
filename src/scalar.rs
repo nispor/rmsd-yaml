@@ -492,25 +492,75 @@ impl<'a> YamlParser<'a> {
         let mut ret = String::new();
         let mut first_quote_found = false;
         let mut start_pos = self.scanner.next_pos;
+        // Flow folding (YAML 1.2.2, 6.5) applies to *real* line breaks
+        // only: a break folds to a single space, unless followed by an
+        // empty line, in which case the break is trimmed and each empty
+        // line becomes a line feed. Escaped line feeds (e.g. `\n`) are
+        // content and must never be folded, so they are pushed verbatim.
+        let mut pending_breaks = 0usize;
+
         while let Some(c) = self.scanner.next_char() {
-            if c == '"' {
-                if first_quote_found {
+            match c {
+                '"' if first_quote_found => {
+                    // The closing quote plays the role of the final
+                    // line's content when resolving pending breaks.
+                    if pending_breaks == 1 {
+                        ret.push(' ');
+                    } else {
+                        for _ in 1..pending_breaks {
+                            ret.push('\n');
+                        }
+                    }
                     break;
-                } else {
+                }
+                '"' => {
                     start_pos = self.scanner.done_pos;
                     first_quote_found = true;
                 }
-            } else if c == '\\' {
-                ret.push(self.read_escaped_char()?);
-            } else {
-                ret.push(c);
+                '\\' => {
+                    let esc = self.read_escaped_char()?;
+                    if pending_breaks == 1 {
+                        ret.push(' ');
+                    } else {
+                        for _ in 1..pending_breaks {
+                            ret.push('\n');
+                        }
+                    }
+                    pending_breaks = 0;
+                    ret.push(esc);
+                }
+                '\r' | '\n' => {
+                    if c == '\r' && self.scanner.peek_char() == Some('\n') {
+                        self.scanner.next_char();
+                    }
+                    // Separation spaces at the end of the current line
+                    // are a presentation detail.
+                    let trimmed_len = ret.trim_end_matches([' ', '\t']).len();
+                    ret.truncate(trimmed_len);
+                    pending_breaks += 1;
+                }
+                ' ' | '\t' if pending_breaks > 0 => {
+                    // Leading separation spaces of a continuation line
+                    // are a presentation detail.
+                }
+                c => {
+                    if pending_breaks == 1 {
+                        ret.push(' ');
+                    } else {
+                        for _ in 1..pending_breaks {
+                            ret.push('\n');
+                        }
+                    }
+                    pending_breaks = 0;
+                    ret.push(c);
+                }
             }
         }
 
         self.push_event(YamlEvent::Scalar(
             anchor,
             tag,
-            flow_folding(ret),
+            ret,
             YamlScalarStyle::DoubleQuoted,
             start_pos,
             self.scanner.done_pos,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod anchor;
+mod base64;
 mod compose;
 mod deserializer;
 mod error;
