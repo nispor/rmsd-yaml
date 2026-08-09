@@ -346,23 +346,17 @@ impl<'a> YamlParser<'a> {
         Ok(false)
     }
 
-    /// In a block collection, a flow collection entry that starts on a
-    /// new line must be more indented than the enclosing block
-    /// collection (YAML 1.2.2 SPEC, 7.4.1 Flow Sequences / 7.4.2 Flow
-    /// Mappings).
-    pub(crate) fn check_flow_entry_indentation(
-        &self,
-        flow_start_line: usize,
-    ) -> Result<(), YamlError> {
-        // A line of a flow collection must not start with a tab
-        // followed by content, nor with a document marker (YAML 1.2.2
-        // SPEC, 7.4; tabs-in-various-contexts,
-        // invalid-document-markers-in-flow-style).
+    /// Reject flow-collection lines that start with a tab followed by
+    /// content or with a document marker (YAML 1.2.2 SPEC, 7.4;
+    /// tabs-in-various-contexts, invalid-document-markers-in-flow-style).
+    pub(crate) fn check_flow_line_start(&self) -> Result<(), YamlError> {
         if let Some(line) =
             self.scanner.remains().split(['\n', '\r']).nth(1)
         {
             let trimmed = line.trim_start_matches([' ', '\t']);
             if (line.starts_with('\t') && !trimmed.is_empty())
+                && trimmed != "]" 
+                && trimmed != "}"
                 || trimmed.starts_with("---")
                 || trimmed.starts_with("...")
             {
@@ -377,6 +371,17 @@ impl<'a> YamlParser<'a> {
                 ));
             }
         }
+        Ok(())
+    }
+
+    /// In a block collection, a flow collection entry that starts on a
+    /// new line must be more indented than the enclosing block
+    /// collection (YAML 1.2.2 SPEC, 7.4.1 Flow Sequences / 7.4.2 Flow
+    /// Mappings).
+    pub(crate) fn check_flow_entry_indentation(
+        &self,
+        flow_start_line: usize,
+    ) -> Result<(), YamlError> {
         if let Some(floor) = self.block_indent {
             let pos = self.scanner.next_pos;
             log::trace!(

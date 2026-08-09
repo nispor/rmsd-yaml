@@ -270,12 +270,13 @@ impl<'a> YamlParser<'a> {
         ));
         self.push_state(YamlState::InFlowSequnce);
         let flow_start_line = self.scanner.done_pos.line;
+        self.check_flow_line_start()?;
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some(']') {
             self.scanner.next_char();
         } else {
             loop {
-                self.scanner.skip_flow_separation();
+                self.check_flow_line_start()?;
                 if self.scanner.peek_char() == Some(',') {
                     return Err(YamlError::new(
                         ErrorKind::UnfinishedSequenceIndicator,

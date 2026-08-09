@@ -1105,7 +1105,27 @@ impl<'a> YamlParser<'a> {
             self.scanner.next_char();
         } else {
             loop {
-                // Key
+                // Key: the next flow line must not start with a tab
+                // followed by content or a document marker.
+                if let Some(line) =
+                    self.scanner.remains().split(['\n', '\r']).nth(1)
+                {
+                    let trimmed = line.trim_start_matches([' ', '\t']);
+                    if (line.starts_with('\t') && !trimmed.is_empty())
+                        || trimmed.starts_with("---")
+                        || trimmed.starts_with("...")
+                    {
+                        return Err(YamlError::new(
+                            ErrorKind::InvalidStartOfToken,
+                            format!(
+                                "A flow collection line may not start with \
+                                 a tab or a document marker: {line}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                }
                 self.scanner.skip_flow_separation();
                 self.check_flow_entry_indentation(flow_start_line)?;
                 match self.scanner.peek_char() {
