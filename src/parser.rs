@@ -553,9 +553,37 @@ impl<'a> YamlParser<'a> {
                     self.expect_flow_end_separation()?;
                 }
             } else if trimmed.starts_with('*') {
-                self.scanner.advance(indent_count);
-                let name = self.handle_alias()?;
-                self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
+                // An alias followed by `:` is a mapping key, e.g.
+                // `*alias1 : scalar3`.
+                let after_star = &trimmed[1..];
+                let name_len = after_star
+                    .find(|c: char| {
+                        c.is_whitespace()
+                            || matches!(c, ',' | '[' | ']' | '{' | '}')
+                    })
+                    .unwrap_or(after_star.len());
+                let after_name =
+                    after_star[name_len..].trim_start_matches(' ');
+                if after_name.starts_with(':')
+                    && (after_name == ":"
+                        || after_name.starts_with(": ")
+                        || after_name.starts_with(":\t")
+                        || after_name.starts_with(":#"))
+                {
+                    self.handle_block_map(
+                        max(first_indent_count, indent_count),
+                        max(rest_indent_count, indent_count),
+                        anchor,
+                        tag,
+                    )?;
+                } else {
+                    self.scanner.advance(indent_count);
+                    let name = self.handle_alias()?;
+                    self.push_event(YamlEvent::Alias(
+                        name,
+                        self.scanner.next_pos,
+                    ));
+                }
             } else if trimmed.starts_with("[") || trimmed.starts_with("{") {
                 if flow_collection_is_key(trimmed) {
                     // A flow collection used as a block mapping key,

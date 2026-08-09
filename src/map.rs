@@ -333,6 +333,12 @@ impl<'a> YamlParser<'a> {
                             self.handle_flow_map(key_anchor, None)?;
                             self.expect_colon_after_key()?;
                         }
+                        Some('\'') | Some('"') => {
+                            // An anchored quoted key, e.g.
+                            // `&anchor 'key': value`.
+                            self.handle_scalar(0, 0, key_anchor, None)?;
+                            self.expect_colon_after_key()?;
+                        }
                         _ => {
                             self.handle_plain_scalar(0, 0, key_anchor, None)?;
                         }
@@ -372,7 +378,42 @@ impl<'a> YamlParser<'a> {
                     self.scanner.advance(cur_indent);
                     let key_tag = self.handle_tag()?;
                     self.scanner.skip_flow_separation();
-                    if self.scanner.peek_char() == Some(':') {
+                    if self.scanner.peek_char() == Some('&') {
+                        // A tagged and anchored key, e.g.
+                        // `!!str &a "foo": value`.
+                        let key_anchor = Some(self.handle_anchor()?);
+                        self.scanner.skip_flow_separation();
+                        if self.scanner.peek_char() == Some(':') {
+                            let pos = self.scanner.next_pos;
+                            self.push_event(YamlEvent::Scalar(
+                                key_anchor,
+                                key_tag,
+                                String::new(),
+                                YamlScalarStyle::Plain,
+                                pos,
+                                pos,
+                            ));
+                            self.expect_colon_after_key()?;
+                        } else if matches!(
+                            self.scanner.peek_char(),
+                            Some('\'') | Some('"')
+                        ) {
+                            self.handle_scalar(
+                                0,
+                                0,
+                                key_anchor,
+                                key_tag,
+                            )?;
+                            self.expect_colon_after_key()?;
+                        } else {
+                            self.handle_plain_scalar(
+                                0,
+                                0,
+                                key_anchor,
+                                key_tag,
+                            )?;
+                        }
+                    } else if self.scanner.peek_char() == Some(':') {
                         let pos = self.scanner.next_pos;
                         self.push_event(YamlEvent::Scalar(
                             None,
