@@ -101,7 +101,7 @@ const SUPPORTED_OUT_YAML_TEST: &[&str] = &[
     "spec-example-8-14-block-sequence",
     "spec-example-8-16-block-mappings",
     "spec-example-8-22-block-collection-nodes",
-    "spec-example-8-7-literal-scalar-1-3",
+    "spec-example-8-7-literal-scalar",
     "spec-example-8-8-literal-content",
     "spec-example-8-8-literal-content-1-3",
     "tab-at-beginning-of-line-followed-by-a-flow-mapping",

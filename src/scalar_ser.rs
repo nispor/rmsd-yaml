@@ -128,7 +128,7 @@ fn looks_like_non_string(input: &str) -> bool {
 /// YAML 1.2.2 SPEC, 7.3.4.2 (NS_ESC_* productions). Non-ASCII
 /// characters are escaped as `\uXXXX` (the generator that produced
 /// the `out.yaml` test files did not allow unicode).
-fn escape_double_quoted(input: &str) -> String {
+pub(crate) fn escape_double_quoted(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for c in input.chars() {
         match c {

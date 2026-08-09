@@ -10,8 +10,8 @@ use std::fmt::Write;
 use serde::{Serialize, ser};
 
 use crate::{
-    ErrorKind, YamlError, YamlPosition, base64, to_out_yaml_scalar,
-    to_scalar_string,
+    ErrorKind, YamlError, YamlPosition, base64, escape_double_quoted,
+    to_out_yaml_scalar, to_scalar_string,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +43,9 @@ pub struct YamlSerializer {
     /// Set when a `!Tag ` was written for a newtype variant; the tag is
     /// followed by a space only when the value is a scalar.
     pending_tag: bool,
+    /// Set when the last written node was a keep-chomped block scalar
+    /// ending in blank lines; a `...` line is appended at the end.
+    open_ended: bool,
 }
 
 pub fn to_string_with_opt<T>(
@@ -136,20 +139,113 @@ impl YamlSerializer {
         self.serialize_yaml_value_ctx(value, ValueCtx::Root)
     }
 
-    /// Serialize the data of a [`YamlValueData::Tag`] (or nested tag),
-    /// keeping the current layout context.
-    fn serialize_yaml_value_data(
+    /// Write a block scalar (`|` or `>` style) at the current position,
+    /// ported from libyaml's `yaml_emitter_write_literal_scalar` /
+    /// `yaml_emitter_write_folded_scalar` (which is what the
+    /// yaml-test-suite `out.yaml` files follow).
+    fn write_block_scalar(
         &mut self,
-        data: &crate::YamlValueData,
-        ctx: ValueCtx,
-    ) -> Result<(), YamlError> {
-        let value = crate::YamlValue {
-            data: data.clone(),
-            start: YamlPosition::EOF,
-            end: YamlPosition::EOF,
-            ..Default::default()
+        value: &str,
+        style: crate::YamlScalarStyle,
+    ) {
+        use crate::YamlScalarStyle::*;
+        // Content is indented two spaces past the indentation of the
+        // enclosing collection (the block scalar's "block indent").
+        let indent = self.current_indent_level.saturating_sub(1)
+            * self.option.indent_count
+            + 2;
+        // Chomping: strip when the value does not end in a line break,
+        // keep when it ends in two or more (the trailing blank lines
+        // are preserved as content and the document is closed with
+        // `...`), otherwise clip (default, no indicator).
+        let chomp = if value.is_empty() || !value.ends_with('\n') {
+            "-"
+        } else if value == "\n" || value.ends_with("\n\n") {
+            "+"
+        } else {
+            ""
         };
-        self.serialize_yaml_value_ctx(&value, ctx)
+        if chomp == "+" {
+            self.open_ended = true;
+        }
+        // An explicit indentation indicator is only needed when the
+        // value starts with a space or a line break.
+        let hint = if value.starts_with(' ') || value.starts_with('\n') {
+            "2"
+        } else {
+            ""
+        };
+        let indicator = if style == Literal { "|" } else { ">" };
+        writeln!(self.output, "{indicator}{hint}{chomp}").ok();
+        let chars: Vec<char> = value.chars().collect();
+        match style {
+            Literal => self.write_literal_content(&chars, indent),
+            Folded => self.write_folded_content(&chars, indent),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Write the content lines of a literal (`|`) block scalar. Every
+    /// line break starts a new line (blank lines stay blank); content
+    /// lines are indented by `indent`.
+    fn write_literal_content(&mut self, chars: &[char], indent: usize) {
+        let mut breaks = true;
+        for &c in chars {
+            if c == '\n' {
+                self.output.push('\n');
+                breaks = true;
+            } else {
+                if breaks {
+                    for _ in 0..indent {
+                        self.output.push(' ');
+                    }
+                }
+                self.output.push(c);
+                breaks = false;
+            }
+        }
+    }
+
+    /// Write the content lines of a folded (`>`) block scalar, ported
+    /// from libyaml's `yaml_emitter_write_folded_scalar`: a single
+    /// line break followed by non-blank content becomes a line break;
+    /// breaks at the end of the value (blank lines) are kept as
+    /// empty lines.
+    fn write_folded_content(&mut self, chars: &[char], indent: usize) {
+        let mut breaks = true;
+        let mut leading_spaces = true;
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\n' {
+                if !breaks && !leading_spaces {
+                    // A single break followed by non-blank content is
+                    // written as a line break; a break followed by a
+                    // blank line or the end stays a folded space.
+                    let mut k = i;
+                    while k < chars.len() && chars[k] == '\n' {
+                        k += 1;
+                    }
+                    if k < chars.len() && !matches!(chars[k], ' ' | '\t' | '\n')
+                    {
+                        self.output.push('\n');
+                    }
+                }
+                self.output.push('\n');
+                i += 1;
+                breaks = true;
+            } else {
+                if breaks {
+                    for _ in 0..indent {
+                        self.output.push(' ');
+                    }
+                    leading_spaces = c == ' ';
+                }
+                self.output.push(c);
+                i += 1;
+                breaks = false;
+            }
+        }
     }
 
     fn serialize_yaml_value_ctx(
@@ -158,6 +254,9 @@ impl YamlSerializer {
         ctx: ValueCtx,
     ) -> Result<(), YamlError> {
         use crate::YamlValueData;
+        // Any node written after a keep-chomped block scalar invalidates
+        // the pending `...` closing line.
+        self.open_ended = false;
         match &value.data {
             YamlValueData::Null => {
                 // An empty document (no content) renders as nothing.
@@ -165,14 +264,37 @@ impl YamlSerializer {
                 Ok(())
             }
             YamlValueData::String(s) => {
-                write!(
-                    self.output,
-                    "{}{}",
-                    self.get_indent(),
-                    to_out_yaml_scalar(s)
-                )
-                .ok();
-                self.pending_tag = false;
+                match value.meta.scalar_style {
+                    Some(crate::YamlScalarStyle::Literal)
+                    | Some(crate::YamlScalarStyle::Folded) => {
+                        if block_allowed(s, value.meta.scalar_style.unwrap()) {
+                            let style = value.meta.scalar_style.unwrap();
+                            self.write_block_scalar(s, style);
+                        } else {
+                            // A block scalar whose content cannot be
+                            // re-rendered as a block (e.g. a line
+                            // starting with a space) is double-quoted.
+                            write!(
+                                self.output,
+                                "{}\"{}\"",
+                                self.get_indent(),
+                                escape_double_quoted(s)
+                            )
+                            .ok();
+                        }
+                        self.pending_tag = false;
+                    }
+                    _ => {
+                        write!(
+                            self.output,
+                            "{}{}",
+                            self.get_indent(),
+                            to_out_yaml_scalar(s)
+                        )
+                        .ok();
+                        self.pending_tag = false;
+                    }
+                }
                 Ok(())
             }
             YamlValueData::Array(items) => {
@@ -302,7 +424,16 @@ impl YamlSerializer {
                         &tag.data,
                         crate::YamlValueData::String(s) if s.is_empty()
                     ) || matches!(&tag.data, crate::YamlValueData::Null);
-                self.serialize_yaml_value_data(&tag.data, ctx)?;
+                // The style/anchor meta lives on the outer node (the
+                // event carried both the tag and the style); propagate
+                // it so the wrapped data is dumped with its style.
+                let inner = crate::YamlValue {
+                    data: tag.data.clone(),
+                    start: value.start,
+                    end: value.end,
+                    meta: value.meta.clone(),
+                };
+                self.serialize_yaml_value_ctx(&inner, ctx)?;
                 if empty && self.output.ends_with(' ') {
                     self.output.pop();
                 }
@@ -364,6 +495,49 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
 /// back to its YAML shorthand form (`!!int`, `!foo`), keeping unmatched
 /// prefixes verbatim (`!<tag:...>`). The leading `!` is omitted: the
 /// caller (e.g. `write_tag`) prepends it.
+/// Whether a scalar value can be rendered as a block scalar (`|`/`>`).
+///
+/// Fitted to the yaml-test-suite `out.yaml` data (libyaml's
+/// `yaml_emitter_analyze_scalar`, with the tab handling relaxed to
+/// match the hand-authored files):
+/// * a space followed by a line break (`space_break`) or by a tab is
+///   not allowed (e.g. `block-scalar-keep`, `spec-example-6-4`);
+/// * a tab followed by a line break is not allowed in folded scalars
+///   (`spec-example-8-2`) but is fine in literal ones
+///   (`tabs-in-various-contexts/001`);
+/// * a tab at the start of a content line is fine
+///   (`spec-example-5-12`, `spec-example-8-7`);
+/// * the value must not end in a space or tab.
+fn block_allowed(value: &str, style: crate::YamlScalarStyle) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    if value.ends_with(' ') || value.ends_with('\t') {
+        return false;
+    }
+    let chars: Vec<char> = value.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            ' ' => {
+                if chars.get(i + 1).is_some_and(|&n| n == '\n' || n == '\t') {
+                    return false;
+                }
+            }
+            '\t' => {
+                if style == crate::YamlScalarStyle::Folded
+                    && chars.get(i + 1) == Some(&'\n')
+                {
+                    return false;
+                }
+            }
+            c if (c as u32) < 0x20 && c != '\n' => return false,
+            c if (0x7f..=0x9f).contains(&(c as u32)) => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
 fn tag_shorthand(name: &str) -> String {
     let inner = name
         .strip_prefix('<')
@@ -417,6 +591,11 @@ impl crate::YamlValue {
         serializer.serialize_yaml_value(self)?;
         if serializer.output.is_empty() {
             return Ok(String::new());
+        }
+        if serializer.open_ended {
+            // A keep-chomped block scalar ending in blank lines at the
+            // end of the document is closed with an explicit `...`.
+            serializer.output.push_str("...\n");
         }
         if serializer.output.ends_with("\n\n") {
             serializer.output.pop();
