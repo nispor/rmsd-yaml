@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use pretty_assertions::assert_eq;
 
 use crate::{
@@ -94,4 +96,24 @@ fn test_map_of_plain_scalar_in_two_lines() {
             YamlEvent::StreamEnd,
         ]
     )
+}
+
+#[test]
+fn test_value_get_and_as_mapping() {
+    let value: crate::Value =
+        crate::Value::from_str("interfaces:\n  - name: eth1\n    mtu: 1500\n")
+            .unwrap();
+    let ifaces = value
+        .get("interfaces")
+        .and_then(crate::Value::as_sequence)
+        .unwrap();
+    assert_eq!(ifaces.len(), 1);
+    let iface = &ifaces[0];
+    assert_eq!(iface.get("name").unwrap().as_str().unwrap(), "eth1");
+    assert_eq!(iface.get("mtu").unwrap().as_str().unwrap(), "1500");
+    assert!(iface.get("absent-key").is_none());
+    assert!(value.as_mapping().is_some());
+    assert!(iface.as_mapping().is_some());
+    assert!(value.as_sequence().is_none());
+    assert!(value.get("interfaces").unwrap().as_mapping().is_none());
 }

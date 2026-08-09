@@ -146,6 +146,34 @@ impl Value {
         }
     }
 
+    /// Access a value inside a mapping by string key, mirroring
+    /// `serde_yaml::Value::get()`. Returns `None` when the value is
+    /// not a mapping or the key is absent.
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        match &self.data {
+            ValueData::Map(map) => map.get(&Value::from(key)),
+            _ => None,
+        }
+    }
+
+    /// The value as a sequence, mirroring
+    /// `serde_yaml::Value::as_sequence()`.
+    pub fn as_sequence(&self) -> Option<&Vec<Value>> {
+        match &self.data {
+            ValueData::Array(values) => Some(values),
+            _ => None,
+        }
+    }
+
+    /// The value as a mapping, mirroring
+    /// `serde_yaml::Value::as_mapping()`.
+    pub fn as_mapping(&self) -> Option<&Mapping> {
+        match &self.data {
+            ValueData::Map(map) => Some(map),
+            _ => None,
+        }
+    }
+
     pub fn as_bool(&self) -> Result<bool, Error> {
         if let ValueData::String(s) = &self.data {
             match s.as_str() {
