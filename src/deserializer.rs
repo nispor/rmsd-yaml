@@ -28,23 +28,16 @@ pub struct YamlDeserializer {
 
 impl YamlDeserializer {
     /// Build a `serde_yaml`-style `invalid type` error message
-    /// (`{path}: invalid type: {actual}, expected {expected}`) for the
-    /// value currently being deserialized, keeping the original error
-    /// kind (e.g. `NumberOverflow`).
+    /// (`invalid type: {actual}, expected {expected}`) for the value
+    /// currently being deserialized, keeping the original error kind
+    /// (e.g. `NumberOverflow`).
     fn invalid_type_error<'de, V>(&self, kind: ErrorKind, visitor: &V) -> Error
     where
         V: Visitor<'de>,
     {
         let actual = self.parsed.unexpected();
         let expected: &dyn Expected = visitor;
-        let msg = if self.path.is_empty() {
-            format!("invalid type: {actual}, expected {expected}")
-        } else {
-            format!(
-                "{}: invalid type: {actual}, expected {expected}",
-                self.path
-            )
-        };
+        let msg = format!("invalid type: {actual}, expected {expected}");
         Error::new(kind, msg, self.parsed.start, self.parsed.end)
     }
 }

@@ -153,8 +153,9 @@ impl<'de> MapAccess<'de> for MappingAccess {
 
         seed.deserialize(&mut YamlDeserializer {
             parsed: value,
-            path,
+            path: path.clone(),
         })
+        .map_err(|e| e.with_path(&path))
     }
 
     fn size_hint(&self) -> Option<usize> {
