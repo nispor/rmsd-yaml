@@ -490,12 +490,23 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance(indent_count);
                 let name = self.handle_alias()?;
                 self.push_event(YamlEvent::Alias(name, self.scanner.next_pos));
-            } else if trimmed.starts_with("[") {
-                self.handle_flow_seq(anchor, tag)?;
-                self.expect_flow_end_separation()?;
-            } else if trimmed.starts_with("{") {
-                self.handle_flow_map(anchor, tag)?;
-                self.expect_flow_end_separation()?;
+            } else if trimmed.starts_with("[") || trimmed.starts_with("{") {
+                if flow_collection_is_key(trimmed) {
+                    // A flow collection used as a block mapping key,
+                    // e.g. `[flow]: block` or `{a: b}: value`.
+                    self.handle_block_map(
+                        max(first_indent_count, indent_count),
+                        max(rest_indent_count, indent_count),
+                        anchor,
+                        tag,
+                    )?;
+                } else if trimmed.starts_with("[") {
+                    self.handle_flow_seq(anchor, tag)?;
+                    self.expect_flow_end_separation()?;
+                } else {
+                    self.handle_flow_map(anchor, tag)?;
+                    self.expect_flow_end_separation()?;
+                }
             } else if trimmed.contains(": ") {
                 // Guess out the indent
 
@@ -855,6 +866,56 @@ pub(crate) fn quoted_scalar_is_key(trimmed: &str) -> bool {
         if c == quote {
             let rest = &trimmed[i + c.len_utf8()..];
             return rest.trim_start_matches(' ').starts_with(':');
+        }
+    }
+    false
+}
+
+/// Whether a trimmed line is a flow collection used as a block
+/// mapping key, e.g. `[flow]: block` or `{a: b}: value`: the line
+/// starts with `[`/`{` and a `:` key separator follows the matching
+/// closing indicator.
+pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
+    let mut depth = 0usize;
+    let mut in_squote = false;
+    let mut in_dquote = false;
+    let mut escaped = false;
+    let mut chars = trimmed.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if in_dquote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_dquote = false;
+            }
+            continue;
+        }
+        if in_squote {
+            if c == '\'' {
+                in_squote = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_dquote = true,
+            '\'' => in_squote = true,
+            '[' | '{' => depth += 1,
+            ']' | '}' => {
+                if depth == 1 {
+                    // Check for a `:` key separator right after the
+                    // matching closing indicator.
+                    let after: &str =
+                        &trimmed[i + c.len_utf8()..].trim_start_matches(' ');
+                    return after == ":"
+                        || after.starts_with(": ")
+                        || after.starts_with(":\t")
+                        || after.starts_with(":#");
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
         }
     }
     false

@@ -904,6 +904,7 @@ impl<'a> YamlParser<'a> {
                         // A trailing comma before '}' is tolerated in
                         // flow mappings.
                         if self.scanner.peek_char() == Some('}') {
+                            self.scanner.next_char();
                             break;
                         }
                         if self.scanner.peek_char() == Some(',') {
