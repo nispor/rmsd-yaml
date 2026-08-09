@@ -194,6 +194,36 @@ impl Value {
         false
     }
 
+    /// The serde `Unexpected` describing what this value actually is,
+    /// mirroring `serde_yaml`'s `invalid_type` error reporting, e.g.
+    /// `Unexpected::Signed(-20)` for the scalar `-20`.
+    pub(crate) fn unexpected<'a>(&'a self) -> serde::de::Unexpected<'a> {
+        if self.is_null() {
+            return serde::de::Unexpected::Unit;
+        }
+        if self.is_bool() {
+            return serde::de::Unexpected::Bool(
+                self.as_bool().unwrap_or(false),
+            );
+        }
+        if self.is_signed_integer() {
+            return serde::de::Unexpected::Signed(self.as_i64().unwrap_or(0));
+        }
+        if self.is_integer() {
+            return serde::de::Unexpected::Unsigned(self.as_u64().unwrap_or(0));
+        }
+        if self.is_float() {
+            return serde::de::Unexpected::Float(self.as_f64().unwrap_or(0.0));
+        }
+        let unexpected: serde::de::Unexpected<'a> = match &self.data {
+            ValueData::String(s) => serde::de::Unexpected::Str(s),
+            ValueData::Array(_) => serde::de::Unexpected::Seq,
+            ValueData::Map(_) => serde::de::Unexpected::Map,
+            _ => serde::de::Unexpected::Other("tagged value"),
+        };
+        unexpected
+    }
+
     pub fn is_integer(&self) -> bool {
         if let ValueData::String(s) = &self.data {
             str_is_integer(s)

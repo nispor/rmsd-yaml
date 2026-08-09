@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use serde::{
     Deserialize, Serialize,
-    de::{Deserializer, Visitor},
+    de::{Deserializer, Expected, Visitor},
 };
 
 use crate::{
@@ -20,6 +20,33 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct YamlDeserializer {
     pub(crate) parsed: Value,
+    // Path of the value currently being deserialized, e.g.
+    // `config[0].cwnd`, used to prefix type-mismatch error messages
+    // like serde_yaml (`cwnd: invalid type: integer `-20`, expected u32`).
+    pub(crate) path: String,
+}
+
+impl YamlDeserializer {
+    /// Build a `serde_yaml`-style `invalid type` error message
+    /// (`{path}: invalid type: {actual}, expected {expected}`) for the
+    /// value currently being deserialized, keeping the original error
+    /// kind (e.g. `NumberOverflow`).
+    fn invalid_type_error<'de, V>(&self, kind: ErrorKind, visitor: &V) -> Error
+    where
+        V: Visitor<'de>,
+    {
+        let actual = self.parsed.unexpected();
+        let expected: &dyn Expected = visitor;
+        let msg = if self.path.is_empty() {
+            format!("invalid type: {actual}, expected {expected}")
+        } else {
+            format!(
+                "{}: invalid type: {actual}, expected {expected}",
+                self.path
+            )
+        };
+        Error::new(kind, msg, self.parsed.start, self.parsed.end)
+    }
 }
 
 pub fn from_str<'a, T>(s: &'a str) -> Result<T, Error>
@@ -27,7 +54,10 @@ where
     T: Deserialize<'a>,
 {
     let parsed = Value::from_str(s)?;
-    let mut deserializer = YamlDeserializer { parsed };
+    let mut deserializer = YamlDeserializer {
+        parsed,
+        path: String::new(),
+    };
 
     T::deserialize(&mut deserializer)
 }
@@ -116,63 +146,90 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_bool(self.parsed.as_bool()?)
+        match self.parsed.as_bool() {
+            Ok(v) => visitor.visit_bool(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i8(self.parsed.as_i8()?)
+        match self.parsed.as_i8() {
+            Ok(v) => visitor.visit_i8(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i16(self.parsed.as_i16()?)
+        match self.parsed.as_i16() {
+            Ok(v) => visitor.visit_i16(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i32(self.parsed.as_i32()?)
+        match self.parsed.as_i32() {
+            Ok(v) => visitor.visit_i32(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i64(self.parsed.as_i64()?)
+        match self.parsed.as_i64() {
+            Ok(v) => visitor.visit_i64(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u8(self.parsed.as_u8()?)
+        match self.parsed.as_u8() {
+            Ok(v) => visitor.visit_u8(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u16(self.parsed.as_u16()?)
+        match self.parsed.as_u16() {
+            Ok(v) => visitor.visit_u16(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u32(self.parsed.as_u32()?)
+        match self.parsed.as_u32() {
+            Ok(v) => visitor.visit_u32(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u64(self.parsed.as_u64()?)
+        match self.parsed.as_u64() {
+            Ok(v) => visitor.visit_u64(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -186,7 +243,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_f64(self.parsed.as_f64()?)
+        match self.parsed.as_f64() {
+            Ok(v) => visitor.visit_f64(v),
+            Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
+        }
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -306,11 +366,11 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
             // TODO: We cannot move data output of `&mut self`, so we use
             // to_vec() to clone here. Maybe should use `Option<Value>` for
             // Self::parsed, where we can use `Option::take()` to move data out.
-            let access = SequenceAccess::new(v.to_vec());
+            let access = SequenceAccess::new(v.to_vec(), self.path.clone());
             visitor.visit_seq(access)
         } else if let ValueData::Tag(tag) = &self.parsed.data {
             if let ValueData::Array(v) = &tag.data {
-                let access = SequenceAccess::new(v.to_vec());
+                let access = SequenceAccess::new(v.to_vec(), self.path.clone());
                 visitor.visit_seq(access)
             } else {
                 Err(Error::new(
@@ -364,10 +424,11 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
             // TODO: We cannot move data output of `&mut self`, so we use clone
             // here. Maybe should use `Option<Value>` for Self::parsed,
             // where we can use `Option::take()` to move data out.
-            let access = MappingAccess::new(*v.clone());
+            let access = MappingAccess::new(*v.clone(), self.path.clone());
             visitor.visit_map(access)
         } else if let ValueData::Null = &self.parsed.data {
-            let access = MappingAccess::new(Default::default());
+            let access =
+                MappingAccess::new(Default::default(), self.path.clone());
             visitor.visit_map(access)
         } else {
             Err(Error::new(

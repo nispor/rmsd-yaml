@@ -75,14 +75,21 @@ pub(crate) struct MappingAccess {
     cached_key: Option<Value>,
     // Used to cache value drained from data
     cached_value: Option<Value>,
+    // Path of the mapping itself, e.g. `config[0]`, used to build the
+    // value path (`config[0].cwnd`) for `invalid type` errors.
+    path: String,
+    // Key of the entry whose value is being deserialized.
+    current_key: Option<Value>,
 }
 
 impl MappingAccess {
-    pub(crate) fn new(data: Mapping) -> Self {
+    pub(crate) fn new(data: Mapping, path: String) -> Self {
         Self {
             data,
             cached_key: None,
             cached_value: None,
+            path,
+            current_key: None,
         }
     }
 }
@@ -105,9 +112,13 @@ impl<'de> MapAccess<'de> for MappingAccess {
         } else {
             return Ok(None);
         };
+        self.current_key = Some(key.clone());
 
-        seed.deserialize(&mut YamlDeserializer { parsed: key })
-            .map(Some)
+        seed.deserialize(&mut YamlDeserializer {
+            parsed: key,
+            path: String::new(),
+        })
+        .map(Some)
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
@@ -128,7 +139,22 @@ impl<'de> MapAccess<'de> for MappingAccess {
             ));
         };
 
-        seed.deserialize(&mut YamlDeserializer { parsed: value })
+        let mut path = self.path.clone();
+        if let Some(key) = self.current_key.take()
+            && let Ok(key) = key.as_str()
+        {
+            if path.is_empty() {
+                path = key.to_string();
+            } else {
+                path.push('.');
+                path.push_str(key);
+            }
+        }
+
+        seed.deserialize(&mut YamlDeserializer {
+            parsed: value,
+            path,
+        })
     }
 
     fn size_hint(&self) -> Option<usize> {

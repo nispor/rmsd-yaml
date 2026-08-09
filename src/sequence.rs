@@ -11,15 +11,23 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SequenceAccess {
     data: Vec<Value>,
+    // Path of the sequence itself, e.g. `config`, used to build the
+    // element path (`config[0]`) for `invalid type` errors.
+    path: String,
+    index: usize,
 }
 
 impl SequenceAccess {
-    pub(crate) fn new(data: Vec<Value>) -> Self {
+    pub(crate) fn new(data: Vec<Value>, path: String) -> Self {
         // The Vec::pop() is much quicker than Vec::remove(0), so we
         // reverse it.
         let mut data = data;
         data.reverse();
-        Self { data }
+        Self {
+            data,
+            path,
+            index: 0,
+        }
     }
 }
 
@@ -34,8 +42,16 @@ impl<'de> SeqAccess<'de> for SequenceAccess {
         K: DeserializeSeed<'de>,
     {
         if let Some(value) = self.data.pop() {
-            seed.deserialize(&mut YamlDeserializer { parsed: value })
-                .map(Some)
+            let mut path = self.path.clone();
+            path.push('[');
+            path.push_str(&self.index.to_string());
+            path.push(']');
+            self.index += 1;
+            seed.deserialize(&mut YamlDeserializer {
+                parsed: value,
+                path,
+            })
+            .map(Some)
         } else {
             Ok(None)
         }

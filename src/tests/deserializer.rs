@@ -326,3 +326,35 @@ fn test_quoted_null_like_scalars_are_not_null() {
         assert_eq!(got.a, expected, "input: {input:?}");
     }
 }
+
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+struct CwndRoute {
+    #[serde(rename = "cwnd")]
+    cwnd: Option<u32>,
+    config: Option<Vec<CwndRoute>>,
+}
+
+#[test]
+fn test_invalid_type_error_matches_serde_yaml() {
+    // serde_yaml reports a type mismatch as
+    // `{path}: invalid type: {actual}, expected {expected}` so that
+    // users can locate the offending field, e.g.
+    // `cwnd: invalid type: integer `-20`, expected u32`.
+    let err = from_str::<CwndRoute>("cwnd: -20\n").unwrap_err();
+    assert!(err.kind() == ErrorKind::InvalidNumber);
+    assert!(
+        err.msg()
+            .contains("cwnd: invalid type: integer `-20`, expected u32"),
+        "got: {}",
+        err
+    );
+    // The path accumulates through nested maps and sequences, e.g.
+    // `config[0].cwnd`.
+    let err = from_str::<CwndRoute>("config:\n  - cwnd: abc\n").unwrap_err();
+    assert!(
+        err.msg().contains("config[0].cwnd: invalid type"),
+        "got: {}",
+        err
+    );
+}
