@@ -271,6 +271,34 @@ impl<'a> YamlParser<'a> {
                     // Back to key mode for the next iteration.
                     self.push_state(YamlState::InBlockMapKey);
                     continue;
+                } else if trimmed_key == ":"
+                    || trimmed_key.starts_with(": ")
+                    || trimmed_key.starts_with(":\t")
+                    || trimmed_key.starts_with(":#")
+                {
+                    // An explicit entry with an empty key, e.g.
+                    // `: value` or `: # comment` (YAML 1.2.2 SPEC,
+                    // 8.2.4).
+                    log::trace!(
+                        "handle_block_map explicit empty key: {trimmed_key:?}"
+                    );
+                    self.scanner.advance(cur_indent);
+                    self.scanner.next_char(); // consume ':'
+                    let pos = self.scanner.done_pos;
+                    self.push_event(YamlEvent::Scalar(
+                        None,
+                        None,
+                        String::new(),
+                        YamlScalarStyle::Plain,
+                        pos,
+                        pos,
+                    ));
+                    self.pop_state();
+                    self.push_state(YamlState::InBlockMapValue);
+                    self.parse_explicit_value_after_colon()?;
+                    self.pop_state();
+                    self.push_state(YamlState::InBlockMapKey);
+                    continue;
                 } else if trimmed_key.starts_with('&') {
                     // e.g. `&a a: b` or `&key [a]: v`: the anchor belongs
                     // to the key node, not the map. After stripping the
@@ -709,6 +737,19 @@ impl<'a> YamlParser<'a> {
     /// Parse the value of an explicit mapping entry, with the scanner
     /// positioned right after the `:`.
     fn parse_explicit_value_after_colon(&mut self) -> Result<(), YamlError> {
+        // Skip same-line separation (validating tabs) and an inline
+        // comment, e.g. `: # comment`.
+        self.skip_block_indicator_separation(false)?;
+        if self.scanner.peek_char() == Some('#') {
+            // Consume the inline comment but leave the line break for
+            // the lookahead below.
+            while !matches!(
+                self.scanner.peek_char(),
+                None | Some('\n') | Some('\r')
+            ) {
+                self.scanner.next_char();
+            }
+        }
         // `:` followed directly by a line break: the value is empty
         // unless content follows on the next lines (at a deeper
         // indentation, or a zero-indented block sequence).
@@ -764,22 +805,6 @@ impl<'a> YamlParser<'a> {
                     ));
                 }
             }
-            return Ok(());
-        }
-        // `:` followed by same-line separation: validate a tab in the
-        // separation (e.g. `:\tkey:` is an error, `:\t` with empty
-        // content is fine).
-        self.skip_block_indicator_separation(false)?;
-        if matches!(self.scanner.peek_char(), None | Some('\n') | Some('\r')) {
-            let pos = self.scanner.next_pos;
-            self.push_event(YamlEvent::Scalar(
-                None,
-                None,
-                String::new(),
-                YamlScalarStyle::Plain,
-                pos,
-                pos,
-            ));
             return Ok(());
         }
         self.parse_explicit_value()

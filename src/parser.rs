@@ -484,7 +484,10 @@ impl<'a> YamlParser<'a> {
 
             let trimmed = line.trim_start_matches(' ');
 
-            if trimmed.starts_with("- ") || trimmed == "-" {
+            if trimmed.starts_with("- ")
+                || trimmed.starts_with("-\t")
+                || trimmed == "-"
+            {
                 if self.cur_state().is_block_map_value()
                     && self.scanner.done_pos.line == self.scanner.next_pos.line
                 {
@@ -569,7 +572,10 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed == "?" || trimmed.starts_with("? ") {
+            } else if trimmed == "?"
+                || trimmed.starts_with("? ")
+                || trimmed.starts_with("?\t")
+            {
                 // Explicit mapping keys, e.g. `? key`.
                 self.handle_block_map(
                     max(first_indent_count, indent_count),

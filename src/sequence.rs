@@ -120,7 +120,10 @@ impl<'a> YamlParser<'a> {
             }
 
             if trimmed.starts_with(':')
-                && (trimmed == ":" || trimmed.starts_with(": "))
+                && (trimmed == ":"
+                    || trimmed.starts_with(": ")
+                    || trimmed.starts_with(":\t")
+                    || trimmed.starts_with(":#"))
             {
                 // An explicit mapping value line (`: value`) ends a
                 // block sequence used as a mapping key.
