@@ -153,7 +153,9 @@ fn show_scalar_str(v: &str, style: &YamlScalarStyle) -> String {
     ret.push_str(
         &v.replace('\\', "\\\\")
             .replace('\n', "\\n")
-            .replace('\t', "\\t"),
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+            .replace('\u{08}', "\\b"),
     );
     ret
 }

@@ -1156,7 +1156,7 @@ const NS_ESC_NULL: char = '0';
 // Escaped ASCII bell (x07) character.
 const NS_ESC_BELL: char = '7';
 // Escaped ASCII backspace (x08) character.
-const NS_ESC_BACKSPACE: char = '8';
+const NS_ESC_BACKSPACE: char = 'b';
 // Escaped ASCII horizontal tab (x09) character. This is useful at the start or
 // the end of a line to force a leading or trailing tab to become part of the
 // content.

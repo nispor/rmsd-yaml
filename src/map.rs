@@ -5,10 +5,7 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
-use crate::parser::{
-    find_key_value_separator, is_document_end_marker, tab_content_is_block_node,
-};
-use crate::{
+use crate::parser::{is_document_end_marker, tab_content_is_block_node};use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
 };
@@ -206,11 +203,6 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                // The column where the key content starts (1-based);
-                // continuation lines of a same-line value must be
-                // indented deeper than this (e.g.
-                // `- key: value\n   key2: v`).
-                let key_start_column = self.scanner.next_pos.column;
                 let trimmed_key = line.trim_start_matches(' ');
                 if trimmed_key.starts_with('\t')
                     && tab_content_is_block_node(

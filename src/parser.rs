@@ -530,12 +530,28 @@ impl<'a> YamlParser<'a> {
                     tag,
                 )?;
             } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
-                // Flow style does not care indentation
-                self.handle_scalar(0, 0, anchor, tag)?;
-                // In block context a quoted scalar may only be followed
-                // by a line break, comment or EOF (rejects e.g.
-                // `a: 'b': c`).
-                self.expect_flow_end_separation()?;
+                if quoted_scalar_is_key(trimmed)
+                    && self.scanner.done_pos.line != self.scanner.next_pos.line
+                {
+                    // A quoted scalar used as a block mapping key on a
+                    // new line, e.g. `"key1" : scalar1` as the value of
+                    // `"top1" :`; a quoted scalar followed by `:` on
+                    // the same line as its own key (`a: 'b': c`) is an
+                    // error.
+                    self.handle_block_map(
+                        max(first_indent_count, indent_count),
+                        max(rest_indent_count, indent_count),
+                        anchor,
+                        tag,
+                    )?;
+                } else {
+                    // Flow style does not care indentation
+                    self.handle_scalar(0, 0, anchor, tag)?;
+                    // In block context a quoted scalar may only be
+                    // followed by a line break, comment or EOF
+                    // (rejects e.g. `a: 'b': c`).
+                    self.expect_flow_end_separation()?;
+                }
             } else if trimmed.starts_with('*') {
                 self.scanner.advance(indent_count);
                 let name = self.handle_alias()?;
@@ -550,14 +566,19 @@ impl<'a> YamlParser<'a> {
                         anchor,
                         tag,
                     )?;
-                } else if trimmed.starts_with("[") {
-                    self.handle_flow_seq(anchor, tag)?;
-                    self.expect_flow_end_separation()?;
                 } else {
-                    self.handle_flow_map(anchor, tag)?;
+                    // Flow style does not care about indentation, but
+                    // the scanner may still sit at the line's leading
+                    // spaces (e.g. `  [1, 2]`).
+                    self.scanner.advance(indent_count);
+                    if trimmed.starts_with("[") {
+                        self.handle_flow_seq(anchor, tag)?;
+                    } else {
+                        self.handle_flow_map(anchor, tag)?;
+                    }
                     self.expect_flow_end_separation()?;
                 }
-            } else if trimmed.contains(": ") {
+            } else if find_key_value_separator(trimmed).is_some() {
                 // Guess out the indent: the mapping's entries sit at
                 // the key's own column. For a key that follows content
                 // on the same line (e.g. a block sequence entry
