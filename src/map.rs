@@ -641,6 +641,10 @@ impl<'a> YamlParser<'a> {
         );
         let mut anchor = None;
         let mut tag = None;
+        // The key content must sit on the same line as the `?`
+        // indicator; the anchor helper may consume the trailing line
+        // break, so compare against the `?`'s line captured up front.
+        let key_line = self.scanner.done_pos.line;
         loop {
             match self.scanner.peek_char() {
                 Some(' ') | Some('\t') => {
@@ -656,11 +660,8 @@ impl<'a> YamlParser<'a> {
             }
         }
         // The key content must be on the same line as the `?`
-        // indicator; when the line ended, the key is empty. (The
-        // scanner helpers consume the terminating line break, so the
-        // position comparison is the reliable signal.)
-        let same_line =
-            self.scanner.done_pos.line == self.scanner.next_pos.line;
+        // indicator; when the line ended, the key is empty.
+        let same_line = self.scanner.next_pos.line == key_line;
         if !same_line {
             // The key may still be a block node on the following lines
             // (e.g. a zero-indented block sequence after a lone `?`,
@@ -768,10 +769,25 @@ impl<'a> YamlParser<'a> {
                     tag,
                 )?;
             }
+            (true, Some('&')) => {
+                // An anchored empty key, e.g. `? &d` (YAML 1.2.2
+                // SPEC, 8.2.4).
+                let key_anchor = Some(self.handle_anchor()?);
+                let pos = self.scanner.next_pos;
+                self.push_event(YamlEvent::Scalar(
+                    key_anchor,
+                    tag,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    pos,
+                    pos,
+                ));
+            }
             (true, Some(_)) => {
                 // A plain-scalar key on the `?` line. Unlike an
                 // implicit key it does not need a `:`, it simply ends
-                // at the line break (or a comment).
+                // at the line break (or a comment); continuation lines
+                // fold in (e.g. `? a\n  true`).
                 let start_pos = self.scanner.next_pos;
                 let mut key = String::new();
                 while let Some(c) = self.scanner.peek_char() {
@@ -787,6 +803,60 @@ impl<'a> YamlParser<'a> {
                             self.scanner.next_char();
                             key.push(c);
                         }
+                    }
+                }
+                let floor = self.block_indent.unwrap_or(0) + 1;
+                // The remainder of the first key line after the scalar
+                // is either an inline comment, nothing, or a `: ` value
+                // (e.g. `? : x`); in the latter case it must be left
+                // for the explicit-value handling.
+                let remainder = self.scanner.remains();
+                let remainder_trimmed =
+                    remainder.trim_start_matches([' ', '\t']);
+                let ends_with_comment = remainder_trimmed.starts_with('#');
+                let is_value_remainder = remainder_trimmed.starts_with(':');
+                if !is_value_remainder {
+                    // Skip an inline comment and the line break, then
+                    // fold in any continuation lines.
+                    if ends_with_comment || remainder_trimmed.is_empty() {
+                        while !matches!(
+                            self.scanner.peek_char(),
+                            None | Some('\n') | Some('\r')
+                        ) {
+                            self.scanner.next_char();
+                        }
+                    }
+                    self.scanner.next_char(); // '\n' or '\r'
+                    if self.scanner.peek_char() == Some('\n') {
+                        self.scanner.next_char(); // '\r\n'
+                    }
+                }
+                while let Some(next_line) = self.scanner.peek_line() {
+                    let next_trimmed = next_line.trim_start_matches(' ');
+                    let next_indent = next_line
+                        .chars()
+                        .take_while(|c| *c == ' ')
+                        .count();
+                    let is_value_line = next_trimmed.starts_with(':')
+                        && (next_trimmed == ":"
+                            || next_trimmed.starts_with(": ")
+                            || next_trimmed.starts_with(":\t")
+                            || next_trimmed.starts_with(":#"));
+                    if is_value_line
+                        || next_indent < floor
+                        || next_trimmed.is_empty()
+                        || next_trimmed.starts_with('#')
+                        || is_document_start_marker(next_trimmed)
+                        || is_document_end_marker(next_trimmed)
+                    {
+                        break;
+                    }
+                    self.scanner.next_line();
+                    let content =
+                        next_line.trim_matches([' ', '\t']);
+                    if !content.is_empty() {
+                        key.push(' ');
+                        key.push_str(content);
                     }
                 }
                 let key = key.trim_end_matches([' ', '\t', ':']).to_string();

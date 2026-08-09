@@ -798,6 +798,10 @@ impl<'a> YamlParser<'a> {
                     )?;
                 } else if self.scanner.done_pos.line
                     == self.scanner.next_pos.line
+                    && !matches!(
+                        self.scanner.peek_char(),
+                        None | Some('\n') | Some('\r')
+                    )
                 {
                     // The content follows the node properties on the
                     // same line (e.g. `!<!bar> baz`); it is a same-line
