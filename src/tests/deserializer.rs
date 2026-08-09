@@ -243,3 +243,20 @@ fn test_alias_resolution() {
         ErrorKind::UnknownAlias
     );
 }
+
+#[test]
+fn test_indented_block_map_key() {
+    // A document whose root block mapping is indented must not keep the
+    // leading whitespace in its keys.
+    let value =
+        Value::from_str("        interfaces:\n          - a\n").unwrap();
+    let map = match value.data {
+        crate::ValueData::Map(m) => *m,
+        d => panic!("Expecting a map, but got {d:?}"),
+    };
+    assert_eq!(map.len(), 1);
+    for (k, v) in map.iter() {
+        assert_eq!(k.as_str().unwrap(), "interfaces");
+        assert!(matches!(v.data, crate::ValueData::Array(_)));
+    }
+}
