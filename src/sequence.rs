@@ -357,8 +357,16 @@ impl<'a> YamlParser<'a> {
     /// a single-pair flow mapping.
     fn handle_flow_seq_entry(&mut self) -> Result<(), YamlError> {
         self.scanner.skip_flow_separation();
-        if self.scanner.peek_char() == Some(':') {
-            // Single-pair entry with an empty key, e.g. `[ : value ]`
+        if self.scanner.peek_char() == Some(':')
+            && matches!(
+                self.scanner.remains().chars().nth(1),
+                None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                    | Some('#')
+            )
+        {
+            // Single-pair entry with an empty key, e.g. `[ : value ]`;
+            // a `:` followed directly by content (`[:x]`) is a plain
+            // scalar.
             let start_pos = self.scanner.next_pos;
             self.push_event(YamlEvent::MapStart(
                 None,

@@ -446,18 +446,31 @@ impl<'a> YamlParser<'a> {
                 // TODO: Handle comment after `:`
                 if trimmed_line.ends_with(":") && !line.contains(": ") {
                     self.scanner.next_line();
+                    self.skip_comment_and_empty_lines();
                     if let Some(next_line) = self.scanner.peek_line() {
                         let next_line_indent_count =
                             next_line.chars().take_while(|c| *c == ' ').count();
-                        if next_line_indent_count < desired_indent_count {
+                        let next_trimmed =
+                            next_line.trim_start_matches([' ', '\t']);
+                        let is_seq = next_trimmed == "-"
+                            || next_trimmed.starts_with("- ");
+                        // The value must be indented deeper than the
+                        // key, except for a zero-indented block
+                        // sequence (YAML 1.2.2 SPEC, 8.2.2), e.g.
+                        // `seq:\n&anchor` is an error but `seq:\n- a`
+                        // is a valid zero-indented sequence.
+                        if next_line_indent_count < desired_indent_count
+                            || (next_line_indent_count == desired_indent_count
+                                && !is_seq)
+                        {
                             return Err(YamlError::new(
                                 ErrorKind::Bug,
                                 format!(
-                                    "Got less indented than parent: {}",
-                                    self.scanner.remains()
+                                    "The value of a mapping entry must be \
+                                     indented more than the key: {next_line}"
                                 ),
-                                self.scanner.done_pos,
-                                self.scanner.done_pos,
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
                             ));
                         } else {
                             value_first_indent_count = next_line_indent_count;
