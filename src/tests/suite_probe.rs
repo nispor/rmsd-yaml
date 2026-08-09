@@ -1,10 +1,8 @@
-// Temporary probe: run every supported yaml-test-suite case and report
-// pass/fail without stopping at the first failure.
+// Temporary probe: run every yaml-test-suite case and report pass/fail
+// without stopping at the first failure.
 use std::path::Path;
 
 use crate::YamlParser;
-
-use super::yaml_test_suite::SUPPORTED_TESTS;
 
 #[test]
 fn suite_probe() {
@@ -41,12 +39,6 @@ fn suite_probe() {
             .unwrap()
             .display()
             .to_string();
-        if !SUPPORTED_TESTS.iter().any(|t| {
-            test_path_str.as_str() == *t
-                || test_path_str.starts_with(&format!("{}/", t))
-        }) {
-            continue;
-        }
         let input_yaml = read_file(&test_path.join("in.yaml"));
         let expected_events = read_file(&test_path.join("test.event"));
         let is_error = test_path.join("error").exists();
@@ -79,7 +71,8 @@ fn suite_probe() {
                         events_str.push('\n');
                     }
                     format!(
-                        "EVENTS DIFFER\nexpected:\n{expected_events}\ngot:\n{events_str}"
+                        "EVENTS DIFFER\nexpected:\n{expected_events}\ngot:\\
+                         n{events_str}"
                     )
                 }
             };
