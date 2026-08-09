@@ -132,7 +132,9 @@ impl<'a> YamlParser<'a> {
             self.scanner.remains()
         );
         let saved_block_indent = self.block_indent;
+        let saved_map_key_indent = self.map_key_indent;
         self.block_indent = Some(rest_indent_count);
+        self.map_key_indent = None;
         self.push_event(YamlEvent::MapStart(
             anchor,
             tag,
@@ -206,6 +208,36 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
+                // All keys of a block mapping must sit at the same
+                // column as the first key (YAML 1.2.2 SPEC, 8.2.2);
+                // a key at a different indentation is an error (e.g.
+                // `map:\n  key1: v\n key2: v`).
+                if let Some(key_indent) = self.map_key_indent {
+                    if cur_indent != key_indent {
+                        return Err(YamlError::new(
+                            ErrorKind::LessIndentedWithoutParent,
+                            format!(
+                                "A block mapping key must sit at column \
+                                 {key_indent} like the first key, but got: \
+                                 {line}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                } else {
+                    // The key's own column: for a key that follows
+                    // content on the same line (e.g. a block sequence
+                    // entry) that is the scanner's column, otherwise
+                    // the line's indentation.
+                    self.map_key_indent = if self.scanner.done_pos.line
+                        == self.scanner.next_pos.line
+                    {
+                        Some(self.scanner.next_pos.column.saturating_sub(1))
+                    } else {
+                        Some(cur_indent)
+                    };
+                }
                 let trimmed_key = line.trim_start_matches(' ');
                 if trimmed_key.starts_with('\t')
                     && tab_content_is_block_node(
@@ -605,6 +637,7 @@ impl<'a> YamlParser<'a> {
         self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
         self.pop_state();
         self.block_indent = saved_block_indent;
+        self.map_key_indent = saved_map_key_indent;
         Ok(())
     }
 

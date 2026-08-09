@@ -23,6 +23,9 @@ pub(crate) struct YamlParser<'a> {
     /// as an explicit value on the same line, unlike an implicit one
     /// (`a: b: c` is an error).
     pub(crate) in_explicit_value: bool,
+    /// The 0-based column of the current block mapping's first key;
+    /// subsequent keys must sit at the same column.
+    pub(crate) map_key_indent: Option<usize>,
     /// The indentation of the block sequence entries currently being
     /// parsed, once established by the first line-start entry; `None`
     /// while the first entry is still mid-line (a compact entry). Used
@@ -82,6 +85,7 @@ impl<'a> YamlParser<'a> {
             events: Vec::new(),
             block_indent: None,
             in_explicit_value: false,
+            map_key_indent: None,
             seq_entry_indent: None,
             tag_handles: HashMap::new(),
             saw_directive: false,
