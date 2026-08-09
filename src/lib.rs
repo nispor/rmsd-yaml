@@ -26,16 +26,16 @@
 //!
 //! let back: Config = from_str(&yaml)?;
 //! assert_eq!(back, config);
-//! # Ok::<(), rmsd_yaml::YamlError>(())
+//! # Ok::<(), rmsd_yaml::Error>(())
 //! ```
 //!
 //! Multiple documents, tags, anchors and block scalars are supported:
 //!
 //! ```
-//! use rmsd_yaml::to_value;
+//! use rmsd_yaml::{from_str, Value};
 //!
-//! let value = to_value("- &a\n  text\n- *a\n")?;
-//! # Ok::<(), rmsd_yaml::YamlError>(())
+//! let value: Value = from_str("- &a\n  text\n- *a\n")?;
+//! # Ok::<(), rmsd_yaml::Error>(())
 //! ```
 
 mod anchor;
@@ -61,27 +61,29 @@ mod variant;
 mod tests;
 
 pub use self::{
-    deserializer::{YamlDeserializer, documents, from_str, to_value},
-    error::{ErrorKind, YamlError},
+    deserializer::{
+        YamlDeserializer, documents, from_reader, from_str, to_value,
+    },
+    error::{Error, ErrorKind},
     event::YamlScalarStyle,
-    map::YamlValueMap,
+    map::Mapping,
     position::YamlPosition,
     serializer::{
         YamlSerializeOption, YamlSerializer, to_string, to_string_with_opt,
     },
-    value::{YamlValue, YamlValueData, YamlValueMeta},
+    value::{Value, ValueData, ValueMeta},
 };
 pub(crate) use self::{
     event::{YamlCollectionStyle, YamlEvent, YamlEventIter},
-    map::YamlValueMapAccess,
+    map::MappingAccess,
     parser::YamlParser,
     scalar_ser::{
         escape_double_quoted, to_out_yaml_scalar_plain, to_out_yaml_scalar_sq,
         to_scalar_string,
     },
     scanner::YamlScanner,
-    sequence::YamlValueSeqAccess,
+    sequence::SequenceAccess,
     state::YamlState,
     tag::YamlTag,
-    variant::YamlValueEnumAccess,
+    variant::ValueEnumAccess,
 };

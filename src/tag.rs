@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ErrorKind, YamlError, YamlParser, YamlValueData};
+use crate::{Error, ErrorKind, ValueData, YamlParser};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct YamlTag {
     pub name: String,
-    pub data: YamlValueData,
+    pub data: ValueData,
 }
 
 impl<'a> YamlParser<'a> {
@@ -21,7 +21,7 @@ impl<'a> YamlParser<'a> {
     ///
     /// The returned tag string is `name` wrapped in `<...>`, matching
     /// the event representation used by the yaml-test-suite.
-    pub(crate) fn handle_tag(&mut self) -> Result<Option<String>, YamlError> {
+    pub(crate) fn handle_tag(&mut self) -> Result<Option<String>, Error> {
         // Scan the tag token, stopping at separation characters (a
         // space, line break or a flow indicator like `,`). A verbatim
         // tag `!<...>` may contain flow indicators inside the brackets.
@@ -103,8 +103,8 @@ impl<'a> YamlParser<'a> {
         Ok(Some(format!("<{prefix}{}>", decode_percent(suffix))))
     }
 
-    fn invalid_tag(&self, tag: &str) -> YamlError {
-        YamlError::new(
+    fn invalid_tag(&self, tag: &str) -> Error {
+        Error::new(
             ErrorKind::InvalidTag,
             format!("Invalid tag: {tag}"),
             self.scanner.done_pos,

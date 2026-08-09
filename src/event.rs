@@ -36,7 +36,7 @@ impl YamlEventIter {
 }
 
 /// The style a scalar was written in. Preserved on parsed
-/// [`YamlValue`](crate::YamlValue)s so the dump can reproduce it.
+/// [`Value`](crate::Value)s so the dump can reproduce it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum YamlScalarStyle {
     #[default]

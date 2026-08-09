@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ErrorKind, YamlError, YamlParser};
+use crate::{Error, ErrorKind, YamlParser};
 
 impl<'a> YamlParser<'a> {
     /// Parse a YAML anchor (the name after `&`). The scanner must stay at
@@ -9,9 +9,9 @@ impl<'a> YamlParser<'a> {
     /// YAML 1.2.2 SPEC, 6.9.2. Node Anchors:
     ///     An anchored node need not be referenced by an alias. But an
     ///     alias cannot be anchored.
-    pub(crate) fn handle_anchor(&mut self) -> Result<String, YamlError> {
+    pub(crate) fn handle_anchor(&mut self) -> Result<String, Error> {
         if self.scanner.next_char() != Some('&') {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::Bug,
                 format!(
                     "handle_anchor() got a scanner not started with &: {:?}",
@@ -33,7 +33,7 @@ impl<'a> YamlParser<'a> {
             self.scanner.next_char();
         }
         if name.is_empty() {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidAnchor,
                 "Empty anchor name".to_string(),
                 start_pos,
@@ -46,7 +46,7 @@ impl<'a> YamlParser<'a> {
             .chars()
             .find(|c| matches!(c, ',' | '[' | ']' | '{' | '}'))
         {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidAnchor,
                 format!("Invalid character '{c}' in anchor name"),
                 start_pos,
@@ -56,7 +56,7 @@ impl<'a> YamlParser<'a> {
         let name = name.to_string();
         self.scanner.advance_till_linebreak_or_space();
         if self.scanner.peek_char() == Some('*') {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidAnchor,
                 "Anchor cannot be attached to an alias".to_string(),
                 start_pos,
@@ -72,9 +72,9 @@ impl<'a> YamlParser<'a> {
     /// YAML 1.2.2 SPEC, 6.9.2. Node Anchors:
     ///     An alias node is denoted by an `*` indicator followed by the
     ///     anchor name.
-    pub(crate) fn handle_alias(&mut self) -> Result<String, YamlError> {
+    pub(crate) fn handle_alias(&mut self) -> Result<String, Error> {
         if self.scanner.next_char() != Some('*') {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::Bug,
                 format!(
                     "handle_alias() got a scanner not started with *: {:?}",
@@ -96,7 +96,7 @@ impl<'a> YamlParser<'a> {
             self.scanner.next_char();
         }
         if name.is_empty() {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidAlias,
                 "Empty alias name".to_string(),
                 start_pos,
@@ -109,7 +109,7 @@ impl<'a> YamlParser<'a> {
             .chars()
             .find(|c| matches!(c, ',' | '[' | ']' | '{' | '}'))
         {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidAlias,
                 format!("Invalid character '{c}' in alias name"),
                 start_pos,

@@ -2,7 +2,7 @@
 
 use std::str::CharIndices;
 
-use crate::{ErrorKind, YamlError, YamlPosition};
+use crate::{Error, ErrorKind, YamlPosition};
 
 #[derive(Debug)]
 pub(crate) struct YamlScanner<'a> {
@@ -166,9 +166,7 @@ impl<'a> YamlScanner<'a> {
 
     /// Consume comment or line break or both.
     /// Raise Error if not followed by comment or line break.
-    pub(crate) fn expect_comment_or_line_break(
-        &mut self,
-    ) -> Result<(), YamlError> {
+    pub(crate) fn expect_comment_or_line_break(&mut self) -> Result<(), Error> {
         let mut saw_space = false;
         while let Some(c) = self.next_char() {
             match c {
@@ -193,7 +191,7 @@ impl<'a> YamlScanner<'a> {
                     // YAML 1.2.2 SPEC, 8.1.1: a comment in a block
                     // scalar header must be preceded by separation
                     // spaces.
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::ExpectingCommentOrLineBreak,
                         "A comment after a block scalar indicator must be \
                          preceded by a space"
@@ -203,7 +201,7 @@ impl<'a> YamlScanner<'a> {
                     ));
                 }
                 c => {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::ExpectingCommentOrLineBreak,
                         format!("Got {c}, but expecting comment or line break"),
                         self.done_pos,

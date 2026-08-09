@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
 use pretty_assertions::assert_eq;
 
@@ -17,11 +17,11 @@ const OUT_YAML_FILE_NAME: &str = "out.yaml";
 /// these known-failing cases are skipped.
 ///
 /// The test uses the serde_yaml workflow: parse `in.yaml` into a
-/// [`YamlValue`](crate::YamlValue), dump it back with
-/// `YamlValue::to_string()`, and compare byte-identically with
+/// [`Value`](crate::Value), dump it back with
+/// `Value::to_string()`, and compare byte-identically with
 /// `out.yaml`.
 ///
-/// The skipped cases are the ones a `YamlValue` tree cannot reproduce
+/// The skipped cases are the ones a `Value` tree cannot reproduce
 /// (see `DESIGNS.md`): multi-document streams, and `out.yaml` files
 /// hand-tuned with conventions that deviate from the canonical events
 /// (extra blank lines, `---`/`...` not in the input, re-derived styles,
@@ -234,14 +234,14 @@ fn yaml_test_suit_out_yaml() {
 
         log::trace!("====== {} ======", test_path_str);
 
-        // The serde_yaml workflow: parse `in.yaml` into a `YamlValue`,
+        // The serde_yaml workflow: parse `in.yaml` into a `Value`,
         // then dump it back to YAML and compare with `out.yaml`.
-        // `to_value` is used instead of `from_str::<YamlValue>` because
+        // `Value::from_str` is used instead of `from_str::<Value>` because
         // the latter visits the value through serde, losing the raw
         // text of number-like scalars (e.g. `0x10`, `1e5`, `.inf`).
         let input_yaml = read_file(&test_path.join(INPUT_YAML_FILE_NAME));
         let expected_out = read_file(&test_path.join(OUT_YAML_FILE_NAME));
-        let value = crate::to_value(&input_yaml).unwrap();
+        let value = crate::Value::from_str(&input_yaml).unwrap();
         let got_out = value.to_string().unwrap();
         pretty_assertions::assert_eq!(
             expected_out,

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 
 use crate::{
-    ErrorKind, YamlCollectionStyle, YamlEvent, YamlParser, YamlPosition,
-    YamlScalarStyle, from_str, to_value,
+    ErrorKind, Value, YamlCollectionStyle, YamlEvent, YamlParser, YamlPosition,
+    YamlScalarStyle, from_str,
 };
 
 #[test]
@@ -215,9 +217,9 @@ fn test_deserialize_enum() {
 
 #[test]
 fn test_alias_resolution() {
-    let value = to_value("a: &x 1\nb: *x\n").unwrap();
+    let value = Value::from_str("a: &x 1\nb: *x\n").unwrap();
     let mut map = match value.data {
-        crate::YamlValueData::Map(m) => *m,
+        crate::ValueData::Map(m) => *m,
         d => panic!("Expecting a map, but got {d:?}"),
     };
     let mut got = Vec::new();
@@ -237,7 +239,7 @@ fn test_alias_resolution() {
     );
 
     assert_eq!(
-        to_value("b: *nope").unwrap_err().kind(),
+        Value::from_str("b: *nope").unwrap_err().kind(),
         ErrorKind::UnknownAlias
     );
 }

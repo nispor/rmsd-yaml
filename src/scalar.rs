@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle,
+    Error, ErrorKind, YamlEvent, YamlParser, YamlScalarStyle,
     parser::{
         find_comment_start, find_key_value_separator, is_document_end_marker,
         is_document_start_marker,
@@ -19,7 +19,7 @@ enum ChompingMethod {
 impl<'a> YamlParser<'a> {
     fn get_indent_indicator_and_chomping_method(
         &mut self,
-    ) -> Result<(Option<usize>, ChompingMethod), YamlError> {
+    ) -> Result<(Option<usize>, ChompingMethod), Error> {
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
         if let Some(next_char) = self.scanner.peek_char() {
@@ -35,7 +35,7 @@ impl<'a> YamlParser<'a> {
                     }
                 }
                 '0' => {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidStartOfToken,
                         "Block scalar indentation indicator must not be 0"
                             .to_string(),
@@ -83,7 +83,7 @@ impl<'a> YamlParser<'a> {
         rest_indent_count: usize,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_scalar {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
@@ -139,7 +139,7 @@ impl<'a> YamlParser<'a> {
         anchor: Option<String>,
         tag: Option<String>,
         literal: bool,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_block_scalar {} {:?}",
             if literal { "literal" } else { "folded" },
@@ -206,7 +206,7 @@ impl<'a> YamlParser<'a> {
             // character where an indentation space is expected).
             if spaces < content_indent && line.chars().nth(spaces) == Some('\t')
             {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidStartOfToken,
                     "Found a tab character where an indentation space is \
                      expected in a block scalar"
@@ -299,7 +299,7 @@ impl<'a> YamlParser<'a> {
     fn detect_block_scalar_indent(
         &mut self,
         parent_floor: usize,
-    ) -> Result<(usize, usize), YamlError> {
+    ) -> Result<(usize, usize), Error> {
         let mut max_empty_indent = 0usize;
         let mut leading_empties = 0usize;
         while let Some(line) = self.scanner.peek_line() {
@@ -310,7 +310,7 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
             } else {
                 if max_empty_indent > indent {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidStartOfToken,
                         "Leading empty lines must not contain more spaces \
                          than the first non-empty line of a block scalar"
@@ -333,7 +333,7 @@ impl<'a> YamlParser<'a> {
     ///     it is escaped by two adjacent single quotes (`''`).
     /// A quoted scalar may not span a `---`/`...` document marker at
     /// the start of a line (YAML 1.2.2 SPEC, 6.3).
-    fn check_quoted_scalar_document_marker(&self) -> Result<(), YamlError> {
+    fn check_quoted_scalar_document_marker(&self) -> Result<(), Error> {
         if let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
             // A `---`/`...` marker followed by separation (space or
@@ -347,7 +347,7 @@ impl<'a> YamlParser<'a> {
                 || trimmed.starts_with("...\t");
             if line.chars().take_while(|c| *c == ' ').count() == 0 && is_marker
             {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::UnfinishedQuote,
                     "Quoted scalar cannot span a document marker".to_string(),
                     self.scanner.next_pos,
@@ -362,9 +362,9 @@ impl<'a> YamlParser<'a> {
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         if self.scanner.next_char() != Some('\'') {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::Bug,
                 format!(
                     "handle_single_quoted_flow_scalar() got a scanner not \
@@ -398,7 +398,7 @@ impl<'a> YamlParser<'a> {
             }
         }
         if !closed {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::UnfinishedQuote,
                 format!(
                     "Expecting closing single quote, but got: {:?}",
@@ -414,7 +414,7 @@ impl<'a> YamlParser<'a> {
         {
             // An implicit mapping key must be contained in a single
             // line (YAML 1.2.2 SPEC, 7.4.5).
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidImplicitKey,
                 "Implicit mapping key must be contained in a single line"
                     .to_string(),
@@ -443,7 +443,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         let start_pos = self.scanner.next_pos;
         let mut ret = String::new();
         'scalar: while let Some(c) = self.scanner.peek_char() {
@@ -528,7 +528,7 @@ impl<'a> YamlParser<'a> {
         }
         let value = ret.trim_end_matches(' ').to_string();
         if value == "-" || value.starts_with("- ") {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidPlainScalarStart,
                 format!(
                     "Plain scalar in flow context should not be '-', but got: \
@@ -555,7 +555,7 @@ impl<'a> YamlParser<'a> {
         anchor: Option<String>,
         tag: Option<String>,
         min_indent: usize,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         let mut ret = String::new();
         let mut first_quote_found = false;
         let mut start_pos = self.scanner.next_pos;
@@ -648,7 +648,7 @@ impl<'a> YamlParser<'a> {
                         if indent < min_indent
                             && !next_line.trim_matches([' ', '\t']).is_empty()
                         {
-                            return Err(YamlError::new(
+                            return Err(Error::new(
                                 ErrorKind::LessIndentedWithoutParent,
                                 format!(
                                     "A continuation line of a quoted scalar \
@@ -687,7 +687,7 @@ impl<'a> YamlParser<'a> {
         }
 
         if !closed {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::UnfinishedQuote,
                 "Unfinished double-quoted scalar: missing closing \""
                     .to_string(),
@@ -700,7 +700,7 @@ impl<'a> YamlParser<'a> {
         {
             // An implicit mapping key must be contained in a single
             // line (YAML 1.2.2 SPEC, 7.4.5).
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidImplicitKey,
                 "Implicit mapping key must be contained in a single line"
                     .to_string(),
@@ -725,7 +725,7 @@ impl<'a> YamlParser<'a> {
         rest_indent_count: usize,
         anchor: Option<String>,
         mut tag: Option<String>,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_plain_scalar {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
@@ -820,7 +820,7 @@ impl<'a> YamlParser<'a> {
                 // deep to be a sibling key of the parent mapping, it
                 // cannot belong to the parent either: this is an error
                 // (e.g. `a: 123\n  b: 4`).
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidImplicitKey,
                     format!(
                         "A line that looks like a mapping entry cannot \
@@ -920,7 +920,7 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_line();
                 } else {
                     self.scanner.advance_till_linebreak();
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidImplicitKey,
                         format!(
                             "Implicit key should contains ': ' within single \
@@ -948,7 +948,7 @@ impl<'a> YamlParser<'a> {
                 }
 
                 if self.scanner.done_pos == pre_pos {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::Bug,
                         format!(
                             "handle_plain_scalar (): dead loop, remains {:?}",
@@ -1034,7 +1034,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         line: &str,
         first_line: bool,
-    ) -> Result<(), YamlError> {
+    ) -> Result<(), Error> {
         // YAML SPEC 1.2, 7.3.3. Plain Style:
         //      Plain scalars must not begin with most indicators, as this
         //      would cause ambiguity with other YAML constructs.  However,
@@ -1050,7 +1050,7 @@ impl<'a> YamlParser<'a> {
             match first_char {
                 ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
                 | '>' | '\'' | '"' | '@' | '`' | '%' => {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidPlainScalarStart,
                         format!(
                             "Plain scalar should not start with '{first_char} \
@@ -1066,7 +1066,7 @@ impl<'a> YamlParser<'a> {
                         Some(' ') | Some('\t')
                     ) =>
                 {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidPlainScalarStart,
                         format!(
                             "Plain scalar should not start with '{first_char} \
@@ -1083,7 +1083,7 @@ impl<'a> YamlParser<'a> {
         if let Some(offset) = find_comment_start(line) {
             let pre_pos = self.scanner.done_pos;
             self.scanner.advance_offset(offset);
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::AmbiguityPlainScalar,
                 format!(
                     "Plain style scalar should not contains ' #' as it will \
@@ -1103,7 +1103,7 @@ impl<'a> YamlParser<'a> {
             let pre_pos = self.scanner.done_pos;
             if let Some(offset) = line.find(['[', ']', '{', '}']) {
                 self.scanner.advance_offset(offset);
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::AmbiguityPlainScalar,
                     "Inside flow collections, or when used as implicit keys, \
                      plain scalars must not contain the '[', ']', '{', and \
@@ -1228,11 +1228,11 @@ const NS_ESC_16_BIT: char = 'u';
 const NS_ESC_32_BIT: char = 'U';
 
 impl<'a> YamlParser<'a> {
-    pub(crate) fn read_escaped_char(&mut self) -> Result<char, YamlError> {
+    pub(crate) fn read_escaped_char(&mut self) -> Result<char, Error> {
         let c = if let Some(c) = self.scanner.next_char() {
             c
         } else {
-            return Err(YamlError::new(
+            return Err(Error::new(
                 ErrorKind::InvalidEscapeScalar,
                 "No character after escape \\".to_string(),
                 self.scanner.done_pos,
@@ -1277,7 +1277,7 @@ impl<'a> YamlParser<'a> {
                 if val.chars().count() == expected_count {
                     let val_u32 = u32::from_str_radix(val.as_str(), 16)
                         .map_err(|_| {
-                            YamlError::new(
+                            Error::new(
                                 ErrorKind::InvalidEscapeScalar,
                                 format!(
                                     "Escaped unicode \\x{} is not a valid \
@@ -1288,7 +1288,7 @@ impl<'a> YamlParser<'a> {
                                 self.scanner.done_pos,
                             )
                         })?;
-                    char::from_u32(val_u32).ok_or(YamlError::new(
+                    char::from_u32(val_u32).ok_or(Error::new(
                         ErrorKind::InvalidEscapeScalar,
                         format!(
                             "Escaped unicode: \\x{} is not a valid unicode",
@@ -1298,7 +1298,7 @@ impl<'a> YamlParser<'a> {
                         self.scanner.done_pos,
                     ))?
                 } else {
-                    return Err(YamlError::new(
+                    return Err(Error::new(
                         ErrorKind::InvalidEscapeScalar,
                         format!(
                             "Expecting {expected_count} characters after \
@@ -1310,7 +1310,7 @@ impl<'a> YamlParser<'a> {
                 }
             }
             _ => {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidEscapeScalar,
                     format!("Not supported escape \\{c}"),
                     start_pos,

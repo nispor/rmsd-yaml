@@ -122,13 +122,13 @@ impl std::fmt::Display for ErrorKind {
 }
 
 impl TryFrom<&str> for ErrorKind {
-    type Error = YamlError;
+    type Error = Error;
 
-    fn try_from(value: &str) -> Result<Self, YamlError> {
+    fn try_from(value: &str) -> Result<Self, Error> {
         Ok(match value {
             s if s == Self::Bug.to_string() => Self::Bug,
             _ => {
-                return Err(YamlError::new(
+                return Err(Error::new(
                     ErrorKind::InvalidErrorType,
                     format!("Invalid error type: {value}"),
                     YamlPosition::default(),
@@ -140,14 +140,14 @@ impl TryFrom<&str> for ErrorKind {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct YamlError {
+pub struct Error {
     kind: ErrorKind,
     msg: String,
     start_pos: YamlPosition,
     end_pos: YamlPosition,
 }
 
-impl YamlError {
+impl Error {
     pub fn new(
         kind: ErrorKind,
         msg: String,
@@ -179,7 +179,7 @@ impl YamlError {
     }
 }
 
-impl std::fmt::Display for YamlError {
+impl std::fmt::Display for Error {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -192,7 +192,7 @@ impl std::fmt::Display for YamlError {
     }
 }
 
-impl From<&str> for YamlError {
+impl From<&str> for Error {
     fn from(msg: &str) -> Self {
         if let Some((pos_kind_str, msg_str)) = msg.split_once("error: ")
             && let Some((pos_str, kind_str)) =
@@ -216,23 +216,33 @@ impl From<&str> for YamlError {
     }
 }
 
-impl std::error::Error for YamlError {}
-
-impl serde::ser::Error for YamlError {
-    fn custom<T>(msg: T) -> Self
-    where
-        T: std::fmt::Display,
-    {
-        YamlError::from(msg.to_string().as_str())
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self {
+            kind: ErrorKind::Bug,
+            msg: e.to_string(),
+            ..Default::default()
+        }
     }
 }
 
-impl serde::de::Error for YamlError {
+impl std::error::Error for Error {}
+
+impl serde::ser::Error for Error {
     fn custom<T>(msg: T) -> Self
     where
         T: std::fmt::Display,
     {
-        YamlError::from(msg.to_string().as_str())
+        Error::from(msg.to_string().as_str())
+    }
+}
+
+impl serde::de::Error for Error {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        Error::from(msg.to_string().as_str())
     }
 
     // TOOD: Implement more functions of this trait with position stored in

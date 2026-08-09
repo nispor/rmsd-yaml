@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    YamlSerializeOption, from_str, to_string, to_string_with_opt, to_value,
+    Value, YamlSerializeOption, from_str, to_string, to_string_with_opt,
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -166,6 +168,6 @@ fn test_leading_start_indicator() {
 
 #[test]
 fn test_to_value() {
-    let v = to_value("- 1\n- 2\n").unwrap();
-    assert!(matches!(v.data, crate::YamlValueData::Array(_)));
+    let v = Value::from_str("- 1\n- 2\n").unwrap();
+    assert!(matches!(v.data, crate::ValueData::Array(_)));
 }
