@@ -113,7 +113,7 @@ impl<'a> YamlParser<'a> {
         // Whether the document currently being parsed has started.
         let mut doc_started = false;
         while let Some(line) = self.scanner.peek_line() {
-            let trimmed = line.trim_start_matches(' ');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             if trimmed.is_empty() {
                 self.scanner.advance_till_linebreak();
             } else if trimmed.starts_with('#') {
@@ -362,13 +362,66 @@ impl<'a> YamlParser<'a> {
     /// the next content line. Comments never affect indentation.
     pub(crate) fn skip_comment_and_empty_lines(&mut self) {
         while let Some(line) = self.scanner.peek_line() {
-            let trimmed = line.trim_start_matches(' ');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 self.scanner.advance_till_linebreak();
             } else {
                 break;
             }
         }
+    }
+
+    /// Skip separation (spaces and tabs) after a block indicator
+    /// (`-`, `?`, `:`). When the separation contains a tab, the
+    /// following content must be a flow node: a block collection
+    /// indicator (`- `, `? `, `: `) or a key-looking token (ending
+    /// with `:`) is rejected (yaml-test-suite:
+    /// tabs-in-various-contexts).
+    pub(crate) fn skip_block_indicator_separation(
+        &mut self,
+        mut saw_tab: bool,
+    ) -> Result<(), YamlError> {
+        while let Some(c) = self.scanner.peek_char() {
+            match c {
+                ' ' => {
+                    self.scanner.next_char();
+                }
+                '\t' => {
+                    saw_tab = true;
+                    self.scanner.next_char();
+                }
+                _ => break,
+            }
+        }
+        if !saw_tab {
+            return Ok(());
+        }
+        let rest = self.scanner.remains();
+        let mut chars = rest.chars();
+        if let Some(c) = chars.next() {
+            let second = chars.next();
+            let is_block_indicator = matches!(c, '-' | '?' | ':')
+                && matches!(
+                    second,
+                    None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                );
+            let token: String = rest
+                .chars()
+                .take_while(|c| !matches!(c, ' ' | '\t' | '\n' | '\r'))
+                .collect();
+            if is_block_indicator || token.ends_with(':') {
+                return Err(YamlError::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "Tab(\\t) cannot be used as indentation before \
+                         content starting with: {token}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn invalid_directive(&self, line: &str) -> YamlError {
@@ -398,7 +451,7 @@ impl<'a> YamlParser<'a> {
         );
         // Ignore less indented empty line and comment line
         while let Some(line) = self.scanner.peek_line() {
-            let trimmed = line.trim_start_matches(' ');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             let indent_count = line.chars().take_while(|c| *c == ' ').count();
             if (trimmed.is_empty() && indent_count <= first_indent_count)
                 || trimmed.starts_with('#')

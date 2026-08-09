@@ -75,7 +75,7 @@ impl<'a> YamlParser<'a> {
         // (e.g. `- key: value\n - item1` is an error).
         let mut entry_indent: Option<usize> = None;
         while let Some(line) = self.scanner.peek_line() {
-            if line.is_empty() {
+            if line.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) {
                 self.scanner.next_line();
                 continue;
             }
@@ -145,8 +145,12 @@ impl<'a> YamlParser<'a> {
                         ));
                     }
                 }
-            } else if trimmed.starts_with("- ") {
+            } else if trimmed.starts_with("- ")
+                || trimmed.starts_with("-\t")
+            {
+                let tab_after_dash = trimmed.starts_with("-\t");
                 self.scanner.advance(cur_indent + 2);
+                self.skip_block_indicator_separation(tab_after_dash)?;
                 self.handle_node(0, cur_indent + 2, None, None)?;
             } else if trimmed.is_empty() {
                 self.scanner.next_line();

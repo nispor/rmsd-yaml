@@ -1,10 +1,9 @@
 #[test]
 fn iso() {
     let cases: &[(&str, &str)] = &[
-        ("004s", "- -\n"),
-        ("006s", "? -\n"),
-        ("008s", "? key:\n"),
-        ("010s", "- -1\n"),
+        ("flow_kc", "[key:]\n"),
+        ("flow_dash", "[a, -]\n"),
+        ("flow_colon", "[a, :]\n"),
     ];
     for (name, input) in cases {
         match crate::YamlParser::parse_to_events(input) {

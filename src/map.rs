@@ -143,7 +143,7 @@ impl<'a> YamlParser<'a> {
         let mut is_first_line = true;
         while let Some(line) = self.scanner.peek_line() {
             let pre_pos = self.scanner.done_pos;
-            if line.is_empty() {
+            if line.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) {
                 self.scanner.next_line();
                 continue;
             }
@@ -207,7 +207,10 @@ impl<'a> YamlParser<'a> {
                 let trimmed_key = line.trim_start_matches(' ');
                 let mut value_anchor = None;
                 let mut value_tag = None;
-                if trimmed_key == "?" || trimmed_key.starts_with("? ") {
+                if trimmed_key == "?"
+                    || trimmed_key.starts_with("? ")
+                    || trimmed_key.starts_with("?\t")
+                {
                     log::trace!(
                         "handle_block_map explicit key: {trimmed_key:?}"
                     );
@@ -216,6 +219,9 @@ impl<'a> YamlParser<'a> {
                     //     : value
                     self.scanner.advance(cur_indent);
                     self.scanner.next_char(); // consume '?'
+                    self.skip_block_indicator_separation(
+                        trimmed_key.starts_with("?\t"),
+                    )?;
                     self.scanner.skip_flow_separation();
                     self.handle_explicit_key()?;
                     self.pop_state();
@@ -383,8 +389,14 @@ impl<'a> YamlParser<'a> {
                         ));
                         break;
                     }
-                } else if line.contains(": ") {
+                } else if line.contains(": ")
+                    || line.contains(":\t")
+                {
                     self.scanner.advance_offset(2);
+                    // A tab right after the `:` is part of the value
+                    // separation; validate it like any other block
+                    // indicator separation.
+                    self.skip_block_indicator_separation(false)?;
                     // Node properties of a same-line value, e.g.
                     // `a: &anchor`
                     while let Some(property_line) = self.scanner.peek_line() {
@@ -754,7 +766,10 @@ impl<'a> YamlParser<'a> {
             }
             return Ok(());
         }
-        self.scanner.skip_flow_separation();
+        // `:` followed by same-line separation: validate a tab in the
+        // separation (e.g. `:\tkey:` is an error, `:\t` with empty
+        // content is fine).
+        self.skip_block_indicator_separation(false)?;
         if matches!(self.scanner.peek_char(), None | Some('\n') | Some('\r')) {
             let pos = self.scanner.next_pos;
             self.push_event(YamlEvent::Scalar(
