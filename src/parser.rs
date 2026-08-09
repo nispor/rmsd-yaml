@@ -350,6 +350,29 @@ impl<'a> YamlParser<'a> {
         &self,
         flow_start_line: usize,
     ) -> Result<(), YamlError> {
+        // A line of a flow collection must not start with a tab
+        // followed by content, nor with a document marker (YAML 1.2.2
+        // SPEC, 7.4; tabs-in-various-contexts,
+        // invalid-document-markers-in-flow-style).
+        if let Some(line) =
+            self.scanner.remains().split(['\n', '\r']).nth(1)
+        {
+            let trimmed = line.trim_start_matches([' ', '\t']);
+            if (line.starts_with('\t') && !trimmed.is_empty())
+                || trimmed.starts_with("---")
+                || trimmed.starts_with("...")
+            {
+                return Err(YamlError::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "A flow collection line may not start with a tab \
+                         or a document marker: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+        }
         if let Some(floor) = self.block_indent {
             let pos = self.scanner.next_pos;
             log::trace!(

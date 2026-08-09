@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
 use crate::parser::{
-    find_key_value_separator, is_document_end_marker,
+    find_key_value_separator, flow_collection_is_key, is_document_end_marker,
     is_document_start_marker, tab_content_is_block_node,
 };use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
@@ -758,26 +758,23 @@ impl<'a> YamlParser<'a> {
             (true, Some('\'')) | (true, Some('"')) => {
                 self.handle_scalar(0, 0, anchor, tag)?;
             }
-            (true, Some('[')) => {
-                // A flow collection followed by `:` is a compact block
-                // mapping key, e.g. `? []: x`.
-                self.handle_flow_seq(anchor.clone(), tag.clone())?;
-                let saved = self.scanner.done_pos;
-                while self.scanner.peek_char() == Some(' ') {
-                    self.scanner.next_char();
-                }
-                if self.scanner.peek_char() == Some(':')
-                    && matches!(
-                        self.scanner.remains().chars().nth(1),
-                        None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
-                            | Some('#')
-                    )
-                {
+            (true, Some('[')) | (true, Some('{')) => {
+                // A flow collection as the explicit key; when followed
+                // by `:`, it is a compact block mapping key, e.g.
+                // `? []: x`.
+                let remainder = self.scanner.remains();
+                let first_line = remainder
+                    .split(['\n', '\r'])
+                    .next()
+                    .unwrap_or_default();
+                if flow_collection_is_key(first_line) {
                     let key_column =
                         self.scanner.next_pos.column.saturating_sub(1);
                     self.handle_block_map(0, key_column, anchor, tag)?;
+                } else if self.scanner.peek_char() == Some('[') {
+                    self.handle_flow_seq(anchor, tag)?;
                 } else {
-                    self.scanner.done_pos = saved;
+                    self.handle_flow_map(anchor, tag)?;
                 }
             }
             (true, Some('{')) => {
