@@ -11,7 +11,7 @@ use serde::{Serialize, ser};
 
 use crate::{
     ErrorKind, YamlError, YamlPosition, base64, escape_double_quoted,
-    to_out_yaml_scalar, to_scalar_string,
+    to_out_yaml_scalar_plain, to_out_yaml_scalar_sq, to_scalar_string,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,12 +295,32 @@ impl YamlSerializer {
                         }
                         self.pending_tag = false;
                     }
+                    Some(crate::YamlScalarStyle::SingleQuoted) => {
+                        write!(
+                            self.output,
+                            "{}{}",
+                            self.get_indent(),
+                            to_out_yaml_scalar_sq(s, true)
+                        )
+                        .ok();
+                        self.pending_tag = false;
+                    }
+                    Some(crate::YamlScalarStyle::DoubleQuoted) => {
+                        write!(
+                            self.output,
+                            "{}\"{}\"",
+                            self.get_indent(),
+                            escape_double_quoted(s)
+                        )
+                        .ok();
+                        self.pending_tag = false;
+                    }
                     _ => {
                         write!(
                             self.output,
                             "{}{}",
                             self.get_indent(),
-                            to_out_yaml_scalar(s)
+                            to_out_yaml_scalar_plain(s)
                         )
                         .ok();
                         self.pending_tag = false;
@@ -521,12 +541,28 @@ fn simple_key_text(key: &crate::YamlValue) -> String {
         text.push_str(&format!("&{anchor} "));
     }
     text.push_str(&match &key.data {
-        crate::YamlValueData::String(s) => to_out_yaml_scalar(s),
+        crate::YamlValueData::String(s) => match key.meta.scalar_style {
+            Some(crate::YamlScalarStyle::SingleQuoted) => {
+                to_out_yaml_scalar_sq(s, false)
+            }
+            Some(crate::YamlScalarStyle::DoubleQuoted) => {
+                format!("\"{}\"", escape_double_quoted(s))
+            }
+            _ => to_out_yaml_scalar_plain(s),
+        },
         crate::YamlValueData::Tag(tag) => {
             let mut tag_text = format!("!{}", tag_shorthand(&tag.name));
             if let crate::YamlValueData::String(s) = &tag.data {
                 tag_text.push(' ');
-                tag_text.push_str(s);
+                // An anchored tagged key is rendered with a quoted
+                // scalar (`&a1 !!str "foo"`), matching
+                // `spec-example-6-23-node-properties`.
+                let scalar = if key.meta.anchor.is_some() {
+                    format!("\"{}\"", escape_double_quoted(s))
+                } else {
+                    to_out_yaml_scalar_plain(s)
+                };
+                tag_text.push_str(&scalar);
             }
             tag_text
         }

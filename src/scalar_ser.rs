@@ -182,6 +182,44 @@ pub(crate) fn to_out_yaml_scalar(input: &str) -> String {
     format!("\"{}\"", escape_double_quoted(input))
 }
 
+/// Render a plain (or style-less) scalar for the `to_yaml` dump: a
+/// single-line value keeps the plain/single/double choice of
+/// [`to_out_yaml_scalar`]; a multiline value becomes a single-quoted
+/// multiline scalar (the `out.yaml` convention, e.g.
+/// `spec-example-7-12-plain-lines`).
+pub(crate) fn to_out_yaml_scalar_plain(input: &str) -> String {
+    if input.contains('\n') {
+        to_out_yaml_scalar_sq(input, true)
+    } else {
+        to_out_yaml_scalar(input)
+    }
+}
+
+/// Render a single-quoted scalar, keeping the style. Continuation
+/// lines of a multiline value are indented by two spaces (unless
+/// `indent_continuation` is false, used for keys).
+pub(crate) fn to_out_yaml_scalar_sq(
+    input: &str,
+    indent_continuation: bool,
+) -> String {
+    if !input.contains('\n') {
+        return format!("'{}'", input.replace('\'', "''"));
+    }
+    let mut out = String::from("'");
+    let lines: Vec<&str> = input.split('\n').collect();
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 && indent_continuation && !line.is_empty() {
+            out.push_str("  ");
+        }
+        out.push_str(&line.replace('\'', "''"));
+        if i + 1 < lines.len() {
+            out.push('\n');
+        }
+    }
+    out.push('\'');
+    out
+}
+
 /// Whether the string can be rendered as a plain (unquoted) scalar
 /// (YAML 1.2.2 SPEC, 7.3.3 Plain Style), matching `out.yaml`.
 fn plain_safe(input: &str) -> bool {

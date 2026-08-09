@@ -36,7 +36,6 @@ const SUPPORTED_OUT_YAML_TEST: &[&str] = &[
     "block-mapping-with-multiline-scalars",
     "block-mappings-in-block-sequence",
     "block-sequence-in-block-mapping",
-    "colon-at-the-beginning-of-adjacent-flow-scalar",
     "comment-and-document-end-marker",
     "document-end-marker",
     "empty-implicit-key-in-single-pair-flow-sequences",

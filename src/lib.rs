@@ -75,7 +75,10 @@ pub(crate) use self::{
     event::{YamlCollectionStyle, YamlEvent, YamlEventIter},
     map::YamlValueMapAccess,
     parser::YamlParser,
-    scalar_ser::{escape_double_quoted, to_out_yaml_scalar, to_scalar_string},
+    scalar_ser::{
+        escape_double_quoted, to_out_yaml_scalar_plain, to_out_yaml_scalar_sq,
+        to_scalar_string,
+    },
     scanner::YamlScanner,
     sequence::YamlValueSeqAccess,
     state::YamlState,
