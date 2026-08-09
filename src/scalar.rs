@@ -13,24 +13,29 @@ enum ChompingMethod {
 impl<'a> YamlParser<'a> {
     fn get_indent_indicator_and_chomping_method(
         &mut self,
-    ) -> (Option<usize>, ChompingMethod) {
+    ) -> Result<(Option<usize>, ChompingMethod), YamlError> {
         let mut indentation_indicator: Option<usize> = None;
         let mut chomping_method = ChompingMethod::default();
         if let Some(next_char) = self.scanner.peek_char() {
             match next_char {
                 '1'..'9' => {
                     self.scanner.next_char();
-                    indentation_indicator = Some(
-                        next_char
-                            .to_digit(10)
-                            .map(|d| d as usize)
-                            .unwrap_or_default(),
-                    );
+                    indentation_indicator =
+                        Some(next_char.to_digit(10).unwrap() as usize);
                     if self.scanner.advance_if_starts_with("+") {
                         chomping_method = ChompingMethod::Keep;
                     } else if self.scanner.advance_if_starts_with("-") {
                         chomping_method = ChompingMethod::Strip;
                     }
+                }
+                '0' => {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidStartOfToken,
+                        "Block scalar indentation indicator must not be 0"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
                 }
                 '+' => {
                     self.scanner.next_char();
@@ -62,23 +67,7 @@ impl<'a> YamlParser<'a> {
             }
         }
 
-        (indentation_indicator, chomping_method)
-    }
-
-    /// YAML 1.2.2 SPEC, 8.1.1.1. Block Indentation Indicator:
-    ///     If a block scalar has an explicit indentation indicator, then
-    ///     the content indentation level of the scalar is equal to the
-    ///     indentation level of the parent node plus the integer value of
-    ///     the indentation indicator character.
-    fn block_scalar_base_indent(&self, rest_indent_count: usize) -> usize {
-        if self.cur_state().is_block_seq() {
-            // The block scalar is a sequence entry, whose
-            // `rest_indent_count` includes the `- ` entry prefix. The
-            // parent node is the sequence itself.
-            rest_indent_count.saturating_sub(2)
-        } else {
-            rest_indent_count
-        }
+        Ok((indentation_indicator, chomping_method))
     }
 
     /// Advance the scanner till scalar ends.
@@ -103,21 +92,12 @@ impl<'a> YamlParser<'a> {
                 '|' => {
                     self.scanner.advance_till_non_space();
                     self.scanner.next_char();
-                    self.handle_literal_block_scalar(
-                        first_indent_count,
-                        rest_indent_count,
-                        anchor,
-                        tag,
-                    )?;
+                    self.handle_block_scalar(anchor, tag, true)?;
                 }
                 '>' => {
                     self.scanner.advance_till_non_space();
-                    self.handle_folded_block_scalar(
-                        first_indent_count,
-                        rest_indent_count,
-                        anchor,
-                        tag,
-                    )?;
+                    self.scanner.next_char();
+                    self.handle_block_scalar(anchor, tag, false)?;
                 }
                 '\'' => {
                     self.scanner.advance_till_non_space();
@@ -140,190 +120,196 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
-    /// Consume till literal block scalar ends by:
-    /// 1. End of file
-    /// 2. `...`
-    /// 3. Less indention
-    pub(crate) fn handle_literal_block_scalar(
+    /// Consume a block scalar (`|` literal or `>` folded) whose style
+    /// indicator has already been consumed by the caller.
+    ///
+    /// YAML 1.2.2 SPEC, 8.1. Block Scalar Styles.
+    pub(crate) fn handle_block_scalar(
         &mut self,
-        first_indent_count: usize,
-        rest_indent_count: usize,
         anchor: Option<String>,
         tag: Option<String>,
+        literal: bool,
     ) -> Result<(), YamlError> {
         log::trace!(
-            "handle_literal_block_scalar {first_indent_count} \
-             {rest_indent_count} {:?}",
+            "handle_block_scalar {} {:?}",
+            if literal { "literal" } else { "folded" },
             self.scanner.remains()
         );
-        let mut ret = String::new();
-
         let (indentation_indicator, chomping_method) =
-            self.get_indent_indicator_and_chomping_method();
+            self.get_indent_indicator_and_chomping_method()?;
 
-        // After `|` and its optional indicators, we should get a line
-        // break or comments or both.
+        // After the style indicator and its optional indicators, we should
+        // get a line break or comments or both.
         self.scanner.expect_comment_or_line_break()?;
 
-        let leading_space_count = self.scanner.count_block_identation();
-        let desired_indent = if let Some(d) = indentation_indicator {
-            d + self.block_scalar_base_indent(rest_indent_count)
-        } else {
-            leading_space_count
-        };
         let mut start_pos = self.scanner.next_pos;
-        start_pos.column += desired_indent;
-        while let Some(line) = self.scanner.peek_line() {
-            let pre_pos = self.scanner.done_pos;
-            let leading_space = line.chars().take_while(|c| c == &' ').count();
-            if leading_space < desired_indent {
-                if line.trim_start_matches(' ').is_empty() {
-                    self.scanner.next_line();
-                    ret.push('\n');
-                    continue;
+        // The content indentation must be more indented than the parent
+        // block collection (when there is one).
+        let parent_floor = self.block_indent.map_or(0, |b| b + 1);
+
+        let (content_indent, mut trailing_breaks) =
+            if let Some(d) = indentation_indicator {
+                (d + self.block_indent.unwrap_or(0), 0)
+            } else {
+                self.detect_block_scalar_indent(parent_floor)?
+            };
+        // The scalar content starts at the content indentation level.
+        // (The literal style reports the content column; the folded
+        // style keeps the header column for backward compatibility.)
+        if literal {
+            start_pos.column += content_indent;
+        }
+
+        let mut content = String::new();
+        // A line break pending after the previous content line.
+        let mut leading_break = false;
+        // Whether the previous content line started with a space or tab
+        // (a more-indented line), which prevents line folding.
+        let mut leading_blank = false;
+
+        loop {
+            // Consume empty lines. A line is empty when it only contains
+            // spaces and has at most `content_indent` of them; a line with
+            // more spaces is itself a content line (YAML 1.2.2, 8.1.1.1).
+            while let Some(line) = self.scanner.peek_line() {
+                let spaces = line.chars().take_while(|c| *c == ' ').count();
+                if line.chars().all(|c| c == ' ') && spaces <= content_indent {
+                    self.scanner.advance_till_linebreak();
+                    trailing_breaks += 1;
                 } else {
                     break;
                 }
-            } else if self.cur_state().is_block_map_value()
-                && line.contains(": ")
-            {
-                break;
-            } else if let Some(line) = self.scanner.next_line() {
-                // Remove indent then append
-                ret.push_str(&line[desired_indent..]);
-                ret.push('\n');
-            } else {
-                // No line left
-                break;
             }
 
-            if self.scanner.done_pos == pre_pos {
+            let Some(line) = self.scanner.peek_line() else {
+                break;
+            };
+            let spaces = line.chars().take_while(|c| *c == ' ').count();
+
+            // A tab inside the indentation region is an error (a tab
+            // character where an indentation space is expected).
+            if spaces < content_indent && line.chars().nth(spaces) == Some('\t')
+            {
                 return Err(YamlError::new(
-                    ErrorKind::Bug,
-                    format!(
-                        "handle_literal_block_scalar(): dead loop, remains \
-                         {:?}",
-                        self.scanner.remains(),
-                    ),
-                    pre_pos,
-                    pre_pos,
+                    ErrorKind::InvalidStartOfToken,
+                    "Found a tab character where an indentation space is \
+                     expected in a block scalar"
+                        .to_string(),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
                 ));
             }
-        }
-
-        match chomping_method {
-            ChompingMethod::Strip => {
-                // the final line break and any trailing empty lines are
-                // excluded from the scalar’s content.
-                ret = ret.trim_end_matches(['\n', '\r']).to_string();
-            }
-            ChompingMethod::Clip => {
-                // the final line break character is preserved in the scalar’s
-                // content. However, any trailing empty lines are excluded from
-                // the scalar’s content.
-                ret = ret.trim_end_matches(['\n', '\r']).to_string();
-                ret.push('\n');
-            }
-            ChompingMethod::Keep => (),
-        }
-
-        let end_pos = self.scanner.done_pos;
-
-        self.push_event(YamlEvent::Scalar(
-            anchor,
-            tag,
-            ret,
-            YamlScalarStyle::Literal,
-            start_pos,
-            end_pos,
-        ));
-        Ok(())
-    }
-
-    /// Consume folded block scalar(YAML 1.2.2: 8.1.3. Folded Style) till ends
-    /// by:
-    /// 1. End of file
-    /// 2. `...`
-    /// 3. Less indention
-    ///
-    /// YAML 1.2.2: 8.1.3. Folded Style
-    ///    The folded style is denoted by the “>” indicator. It is similar to
-    ///    the literal style; however, folded scalars are subject to line
-    ///    folding.
-    pub(crate) fn handle_folded_block_scalar(
-        &mut self,
-        first_indent_count: usize,
-        rest_indent_count: usize,
-        anchor: Option<String>,
-        tag: Option<String>,
-    ) -> Result<(), YamlError> {
-        log::trace!(
-            "handle_literal_block_scalar {first_indent_count} \
-             {rest_indent_count} {:?}",
-            self.scanner.remains()
-        );
-        let _ret = String::new();
-        if self.scanner.next_char() != Some('>') {
-            return Err(YamlError::new(
-                ErrorKind::Bug,
-                format!(
-                    "handle_folded_block_scalar() got a scanner not started \
-                     with >: {:?}",
-                    self.scanner.remains()
-                ),
-                self.scanner.done_pos,
-                self.scanner.done_pos,
-            ));
-        }
-        let (indentation_indicator, chomping_method) =
-            self.get_indent_indicator_and_chomping_method();
-
-        // After `|` and its optional indicators, we should get a line
-        // break or comments or both.
-        self.scanner.expect_comment_or_line_break()?;
-
-        let start_pos = self.scanner.next_pos;
-
-        let leading_space_count = self.scanner.count_block_identation();
-        let desired_indent = if let Some(d) = indentation_indicator {
-            d + self.block_scalar_base_indent(rest_indent_count)
-        } else {
-            leading_space_count
-        };
-        let mut lines: Vec<&str> = Vec::new();
-        let _indent = self.scanner.done_pos.column;
-        while let Some(line) = self.scanner.peek_line() {
-            let cur_indent = line.chars().take_while(|c| *c == ' ').count();
-            if cur_indent < desired_indent {
-                if is_empty_line(line) {
-                    self.scanner.next_line();
-                    lines.push("");
-                    continue;
-                } else {
-                    break;
-                }
-            }
-            self.scanner.advance(desired_indent);
-            if let Some(line) = self.scanner.next_line() {
-                lines.push(line);
-            } else {
+            if spaces < content_indent {
+                // A non-empty line less indented than the content: the
+                // block scalar ends here (comment or next token).
                 break;
             }
-        }
-        let end_pos = self.scanner.done_pos;
 
+            let rest: String = line.chars().skip(content_indent).collect();
+            self.scanner.advance_till_linebreak();
+
+            let current_blank = rest
+                .chars()
+                .next()
+                .map(|c| c == ' ' || c == '\t')
+                .unwrap_or(true);
+
+            // YAML 1.2.2 SPEC, 8.1.3. Folded Style:
+            //     Line breaks and empty lines separating folded and
+            //     more-indented lines are not folded. A line break is
+            //     folded into a single space only when both neighbouring
+            //     lines are regular (non-blank) lines with no empty lines
+            //     in between.
+            if !literal && leading_break && !leading_blank && !current_blank {
+                if trailing_breaks == 0 {
+                    content.push(' ');
+                }
+            } else if leading_break {
+                content.push('\n');
+            }
+            for _ in 0..trailing_breaks {
+                content.push('\n');
+            }
+            trailing_breaks = 0;
+            content.push_str(&rest);
+            leading_break = true;
+            leading_blank = current_blank;
+        }
+
+        // YAML 1.2.2 SPEC, 8.1.1.2. Block Chomping Indicator.
+        match chomping_method {
+            ChompingMethod::Strip => (),
+            ChompingMethod::Clip | ChompingMethod::Keep => {
+                if leading_break {
+                    content.push('\n');
+                }
+            }
+        }
+        if chomping_method == ChompingMethod::Keep {
+            for _ in 0..trailing_breaks {
+                content.push('\n');
+            }
+        }
+
+        let end_pos = self.scanner.done_pos;
         self.push_event(YamlEvent::Scalar(
             anchor,
             tag,
-            block_scalar_folding(lines, chomping_method),
-            YamlScalarStyle::Folded,
+            content,
+            if literal {
+                YamlScalarStyle::Literal
+            } else {
+                YamlScalarStyle::Folded
+            },
             start_pos,
             end_pos,
         ));
         Ok(())
     }
 
-    /// Parse a single-quoted flow scalar. The scanner must stay at the
+    /// Determine the content indentation level of a block scalar that has
+    /// no explicit indentation indicator. The leading empty lines are
+    /// consumed here and reported back so they can later be joined into
+    /// the content (or chomped).
+    ///
+    /// YAML 1.2.2 SPEC, 8.1.1.1. Block Indentation Indicator:
+    ///     If no indentation indicator is given, then the content
+    ///     indentation level is equal to the number of leading spaces on
+    ///     the first non-empty line of the contents. If there is no
+    ///     non-empty line then the content indentation level is equal to
+    ///     the number of spaces on the longest line.
+    ///     It is an error for any of the leading empty lines to contain
+    ///     more spaces than the first non-empty line.
+    fn detect_block_scalar_indent(
+        &mut self,
+        parent_floor: usize,
+    ) -> Result<(usize, usize), YamlError> {
+        let mut max_empty_indent = 0usize;
+        let mut leading_empties = 0usize;
+        while let Some(line) = self.scanner.peek_line() {
+            let indent = line.chars().take_while(|c| *c == ' ').count();
+            if line.chars().all(|c| c == ' ') {
+                max_empty_indent = max_empty_indent.max(indent);
+                leading_empties += 1;
+                self.scanner.advance_till_linebreak();
+            } else {
+                if max_empty_indent > indent {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidStartOfToken,
+                        "Leading empty lines must not contain more spaces \
+                         than the first non-empty line of a block scalar"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
+                return Ok((indent.max(parent_floor), leading_empties));
+            }
+        }
+        Ok((max_empty_indent.max(parent_floor), leading_empties))
+    }
+
+    /// Parse a single-quoted flow scalar.    /// Parse a single-quoted flow scalar. The scanner must stay at the
     /// opening `'`.
     ///
     /// YAML 1.2.2 SPEC, 7.4.2. Single-Quoted Styles:
@@ -834,66 +820,6 @@ fn flow_folding(mut string_to_fold: String) -> String {
     let ret = line_folding(string_to_fold.split('\n').collect());
     // Remove leading and trialing `"` we manually added.
     ret[1..ret.len() - 1].to_string()
-}
-
-fn block_scalar_folding(
-    lines: Vec<&str>,
-    chomping_method: ChompingMethod,
-) -> String {
-    let mut ret = String::new();
-    let mut iter = lines.into_iter().peekable();
-
-    while let Some(line) = iter.next() {
-        let _trimmed = line.trim_matches(|c| matches!(c, ' ' | '\t'));
-        let next_line_is_empty = if let Some(next_line) = iter.peek() {
-            let trimmed_next_line =
-                next_line.trim_matches(|c| matches!(c, ' ' | '\t'));
-            Some(trimmed_next_line.is_empty())
-        } else {
-            None
-        };
-        // Lines starting with white space characters (more-indented lines) are
-        // not folded.
-        if line.starts_with(" ") || line.starts_with("\t") {
-            ret.push_str(line);
-            ret.push('\n');
-        } else if is_empty_line(line) {
-            ret.push('\n');
-        } else {
-            ret.push_str(line);
-            // * Line breaks and empty lines separating folded and more-indented
-            //   lines are also not folded.
-            match next_line_is_empty {
-                Some(false) => ret.push(' '),
-                Some(true) => ret.push('\n'),
-                _ => (),
-            }
-        }
-    }
-
-    // * The final line break and trailing empty lines if any, are subject to
-    //   chomping and are never folded.
-    match chomping_method {
-        ChompingMethod::Strip => {
-            // the final line break and any trailing empty lines are
-            // excluded from the scalar’s content.
-            ret = ret.trim_end_matches(['\n', '\r']).to_string();
-        }
-        ChompingMethod::Clip => {
-            // the final line break character is preserved in the scalar’s
-            // content. However, any trailing empty lines are excluded from
-            // the scalar’s content.
-            ret = ret.trim_end_matches(['\n', '\r']).to_string();
-            ret.push('\n');
-        }
-        ChompingMethod::Keep => (),
-    }
-
-    ret
-}
-
-fn is_empty_line(line: &str) -> bool {
-    line.chars().all(|c| matches!(c, ' ' | '\t'))
 }
 
 // Escaped ASCII null (x00) character.

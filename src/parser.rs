@@ -12,6 +12,11 @@ pub(crate) struct YamlParser<'a> {
     pub(crate) scanner: YamlScanner<'a>,
     states: Vec<YamlState>,
     events: Vec<YamlEvent>,
+    /// Indentation level of the innermost block collection, or `None`
+    /// when the current node is not inside a block collection (e.g. a
+    /// top-level document node). Block scalar content indentation is
+    /// relative to it (YAML 1.2.2 SPEC, 8.1.1.1).
+    pub(crate) block_indent: Option<usize>,
 }
 
 impl<'a> YamlParser<'a> {
@@ -53,6 +58,7 @@ impl<'a> YamlParser<'a> {
             scanner: YamlScanner::new(input),
             states: Vec::new(),
             events: Vec::new(),
+            block_indent: None,
         };
         while !parser.scanner.is_empty() {
             let cur_pos = parser.scanner.done_pos;
@@ -87,6 +93,9 @@ impl<'a> YamlParser<'a> {
         while let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
             if trimmed.is_empty() {
+                self.scanner.advance_till_linebreak();
+            } else if trimmed.starts_with('#') {
+                // Comment lines are ignored at stream level.
                 self.scanner.advance_till_linebreak();
             } else if trimmed == "---" {
                 let indent_count =
@@ -184,7 +193,7 @@ impl<'a> YamlParser<'a> {
             let trimmed = line.trim_start_matches(' ');
             let indent_count = line.chars().take_while(|c| *c == ' ').count();
             if (trimmed.is_empty() && indent_count <= first_indent_count)
-                || trimmed.starts_with("# ")
+                || trimmed.starts_with('#')
             {
                 self.scanner.advance_till_linebreak();
                 continue;
@@ -221,18 +230,16 @@ impl<'a> YamlParser<'a> {
                     // YAML 1.2.2 SPEC, 8.2.1. Block Sequences:
                     //     A block sequence entry is not allowed on the
                     //     same line as a mapping key.
-                    return Err(
-                        YamlError::new(
-                            ErrorKind::InvalidSequnceStartIndicator,
-                            format!(
-                                "Block sequence entry is not allowed on the \
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidSequnceStartIndicator,
+                        format!(
+                            "Block sequence entry is not allowed on the \
                                  same                              line as a \
                                  mapping key: {line}"
-                            ),
-                            self.scanner.next_pos,
-                            self.scanner.next_pos,
                         ),
-                    );
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
                 }
                 let expected_indent_count =
                     rest_indent_count + indent_count - first_indent_count;
@@ -370,12 +377,47 @@ impl<'a> YamlParser<'a> {
                         ));
                     }
                 }
-                self.handle_node(
-                    first_indent_count,
-                    rest_indent_count,
-                    anchor,
-                    tag,
-                )?;
+                // The node properties may be followed by the content on
+                // the same line or on a following line. When the
+                // properties ended at a line break, the content may sit
+                // at a different indentation than the properties (e.g.
+                // `!foo\n>1`), so re-derive the indentation from the
+                // content line. The content line must be more indented
+                // than the enclosing block collection, otherwise the
+                // properties decorate an empty node and the next line
+                // belongs to the parent (e.g. `- &a\n- b`).
+                let content_more_indented = self
+                    .block_indent
+                    .map(|indent| {
+                        self.scanner
+                            .peek_line()
+                            .map(|l| {
+                                l.chars().take_while(|c| *c == ' ').count()
+                                    > indent
+                            })
+                            .unwrap_or(true)
+                    })
+                    .unwrap_or(true);
+                if content_more_indented
+                    && self.scanner.done_pos.line != self.scanner.next_pos.line
+                    && let Some(content_line) = self.scanner.peek_line()
+                {
+                    let content_indent =
+                        content_line.chars().take_while(|c| *c == ' ').count();
+                    self.handle_node(
+                        content_indent,
+                        content_indent,
+                        anchor,
+                        tag,
+                    )?;
+                } else {
+                    self.handle_node(
+                        first_indent_count,
+                        rest_indent_count,
+                        anchor,
+                        tag,
+                    )?;
+                }
             } else if trimmed == "..." {
                 // Document end marker: this node ends here, and the
                 // stream handler will emit `DocumentEnd`.

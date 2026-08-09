@@ -128,6 +128,8 @@ impl<'a> YamlParser<'a> {
             "handle_block_map {first_indent_count} {rest_indent_count} {:?}",
             self.scanner.remains()
         );
+        let saved_block_indent = self.block_indent;
+        self.block_indent = Some(rest_indent_count);
         self.push_event(YamlEvent::MapStart(
             anchor,
             tag,
@@ -153,6 +155,21 @@ impl<'a> YamlParser<'a> {
             };
 
             if cur_indent < desired_indent_count {
+                break;
+            }
+
+            let trimmed_line = line.trim_start_matches(' ');
+            if trimmed_line.starts_with('#')
+                && self.scanner.done_pos.line != self.scanner.next_pos.line
+            {
+                // Comment lines do not belong to the mapping. The
+                // line-start check excludes trailing content on a line
+                // that is still being processed, e.g. `key: "v"# bad`.
+                self.scanner.advance_till_linebreak();
+                continue;
+            }
+            if trimmed_line == "..." {
+                // Document end marker: leave it for the stream handler.
                 break;
             }
 
@@ -345,6 +362,7 @@ impl<'a> YamlParser<'a> {
 
         self.push_event(YamlEvent::MapEnd(self.scanner.done_pos));
         self.pop_state();
+        self.block_indent = saved_block_indent;
         Ok(())
     }
 

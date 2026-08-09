@@ -212,3 +212,29 @@ fn test_block_folding_scalar_more_indented() {
         ]
     )
 }
+
+#[test]
+fn crlf_block_scalar() {
+    let ev =
+        YamlParser::parse_to_events("a: |\r\n  line1\r\n  line2\r\n").unwrap();
+    let scalars: Vec<String> = ev
+        .iter()
+        .filter_map(|e| match e {
+            YamlEvent::Scalar(_, _, v, ..) => Some(v.clone()),
+            _ => None,
+        })
+        .collect();
+    let scalar = &scalars[1];
+    assert_eq!(scalar, "line1\nline2\n", "got {scalar:?}");
+    let ev2 =
+        YamlParser::parse_to_events("a: >\r\n  line1\r\n  line2\r\n").unwrap();
+    let s2v: Vec<String> = ev2
+        .iter()
+        .filter_map(|e| match e {
+            YamlEvent::Scalar(_, _, v, ..) => Some(v.clone()),
+            _ => None,
+        })
+        .collect();
+    let s2 = &s2v[1];
+    assert_eq!(s2, "line1 line2\n", "got {s2:?}");
+}

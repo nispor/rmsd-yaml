@@ -59,6 +59,8 @@ impl<'a> YamlParser<'a> {
             indent_count,
             self.scanner.remains()
         );
+        let saved_block_indent = self.block_indent;
+        self.block_indent = Some(indent_count);
         self.push_event(YamlEvent::SequenceStart(
             anchor,
             tag,
@@ -81,6 +83,20 @@ impl<'a> YamlParser<'a> {
                 break;
             }
             let trimmed = line.trim_start_matches(' ');
+
+            if trimmed.starts_with('#')
+                && self.scanner.done_pos.line != self.scanner.next_pos.line
+            {
+                // Comment lines do not belong to the sequence. The
+                // line-start check excludes trailing content on a line
+                // that is still being processed.
+                self.scanner.advance_till_linebreak();
+                continue;
+            }
+            if trimmed == "..." {
+                // Document end marker: leave it for the stream handler.
+                break;
+            }
 
             if trimmed == "-" {
                 self.scanner.next_line();
@@ -122,6 +138,7 @@ impl<'a> YamlParser<'a> {
 
         self.push_event(YamlEvent::SequenceEnd(self.scanner.done_pos));
         self.pop_state();
+        self.block_indent = saved_block_indent;
         Ok(())
     }
 

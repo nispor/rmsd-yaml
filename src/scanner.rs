@@ -55,30 +55,6 @@ impl<'a> YamlScanner<'a> {
             .unwrap_or_default()
     }
 
-    /// Count leading spaces of the first non-empty line
-    /// YAML SPEC 1.2, 8.1.1.1. Block Indentation Indicator
-    ///     If no indentation indicator is given, then the content indentation
-    ///     level is equal to the number of leading spaces on the first
-    ///     non-empty line of the contents. If there is no non-empty line then
-    ///     the content indentation level is equal to the number of spaces on
-    ///     the longest line.
-    pub(crate) fn count_block_identation(&self) -> usize {
-        let mut max_indent = 0usize;
-        // The rust str::lines() will not take standalone `\r` as new line, but
-        // YAML spec says `\r` is new line. So we use split here.
-        for line in self.remains().split(['\n', '\r']) {
-            if line.chars().all(|c| c == ' ') {
-                let cur_indent = line.chars().count();
-                if max_indent < cur_indent {
-                    max_indent = cur_indent;
-                }
-            } else {
-                return line.chars().take_while(|c| c == &' ').count();
-            }
-        }
-        max_indent
-    }
-
     pub(crate) fn peek_line(&self) -> Option<&'a str> {
         if self.remains().is_empty() {
             None
@@ -118,7 +94,11 @@ impl<'a> YamlScanner<'a> {
 
     pub(crate) fn advance_till_linebreak(&mut self) {
         self.advance(self.peek_till_linebreak().chars().count());
-        self.next_char();
+        let c = self.next_char();
+        // A `\r\n` pair is a single line break: also consume the `\n`.
+        if c == Some('\r') && self.peek_char() == Some('\n') {
+            self.next_char();
+        }
     }
 
     pub(crate) fn advance_till_linebreak_or_space(&mut self) {
@@ -189,16 +169,38 @@ impl<'a> YamlScanner<'a> {
     pub(crate) fn expect_comment_or_line_break(
         &mut self,
     ) -> Result<(), YamlError> {
+        let mut saw_space = false;
         while let Some(c) = self.next_char() {
             match c {
                 '\r' | '\n' => {
+                    // A `\r\n` pair is a single line break.
+                    if c == '\r' && self.peek_char() == Some('\n') {
+                        self.next_char();
+                    }
+                    break;
+                }
+                ' ' => {
+                    saw_space = true;
+                    continue;
+                }
+                '#' if saw_space => {
+                    // The comment consumes the rest of the line,
+                    // including the line break.
+                    self.advance_till_linebreak();
                     break;
                 }
                 '#' => {
-                    self.advance_till_linebreak();
-                }
-                ' ' => {
-                    continue;
+                    // YAML 1.2.2 SPEC, 8.1.1: a comment in a block
+                    // scalar header must be preceded by separation
+                    // spaces.
+                    return Err(YamlError::new(
+                        ErrorKind::ExpectingCommentOrLineBreak,
+                        "A comment after a block scalar indicator must be \
+                         preceded by a space"
+                            .to_string(),
+                        self.done_pos,
+                        self.done_pos,
+                    ));
                 }
                 c => {
                     return Err(YamlError::new(

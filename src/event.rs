@@ -150,6 +150,10 @@ fn show_scalar_str(v: &str, style: &YamlScalarStyle) -> String {
         YamlScalarStyle::Literal => String::from("|"),
         YamlScalarStyle::Folded => String::from(">"),
     };
-    ret.push_str(&v.replace("\n", "\\n"));
+    ret.push_str(
+        &v.replace('\\', "\\\\")
+            .replace('\n', "\\n")
+            .replace('\t', "\\t"),
+    );
     ret
 }

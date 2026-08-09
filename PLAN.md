@@ -9,11 +9,14 @@ RMSD-YAML is a pure Rust, minimised YAML library targeting serde compatibility a
 * Core parser/scanner infrastructure exists (YAML spec 1.2.2)
 * Compose phase converts events to YamlValue tree
 * Deserializer/Serializer implement serde traits
-* 175 of 402 yaml-test-suite cases enabled and passing
+* 196 of 402 yaml-test-suite cases enabled and passing
 * Anchors and aliases are parsed and resolved in block and flow
   contexts; flow sequences/mappings (incl. nested and single-pair
   forms) are supported
-* Missing: explicit `?` block keys, tag/directive handling
+* Block scalars (`|`/`>`) support chomping, explicit indentation
+  indicators, leading/trailing empty lines and line folding
+* Missing: explicit `?` block keys, tag/directive handling, tag
+  shorthands for secondary handles
 
 ## Milestones
 
@@ -121,17 +124,39 @@ Remaining anchor/alias cases need explicit `?` block-key support:
 `aliases-in-explicit-block-mapping`, `anchors-on-empty-scalars`,
 `key-with-anchor-after-missing-explicit-mapping-value`.
 
-### M4 - Block Scalars & Chomping
+### M4 - Block Scalars & Chomping (DONE)
 
 **Goal:** Full literal/folded block scalar support with chomping control.
+Reached: 196/402 cases pass.
 
 Tasks:
-- [ ] Implement block scalar indicators (`|`, `>`, `|-`, `->`, etc.)
-- [ ] Handle indentation-based content extraction
-- [ ] Support zero-indented block scalars
-- [ ] Handle more-indented lines in folded mode
-- [ ] Enable `"literal-scalar"`, `"folded-scalar"`, `"block-scalar-*"` tests (10+ tests)
-- [ ] Fix scalar escaping (`scalar_ser.rs` TODOs for non-printable chars)
+- [x] Implement block scalar indicators (`|`, `>`, `|-`, `->`, etc.)
+- [x] Handle indentation-based content extraction (content indent
+      relative to the enclosing block collection; explicit indentation
+      indicator `1`-`9`, `0` rejected)
+- [x] Support zero-indented block scalars (top-level nodes may have
+      content at indent 0)
+- [x] Handle more-indented lines in folded mode (kept verbatim, never
+      folded)
+- [x] Enable `"literal-scalar"`, `"folded-scalar"`, `"block-scalar-*"`
+      tests (24+ tests)
+- [x] Fix scalar escaping (`scalar_ser.rs` now double-quotes strings
+      needing escapes and escapes non-printable characters)
+
+Extra work done to make the enabled cases pass:
+- [x] Rewrite both block scalar handlers into one spec-compliant
+      implementation (leading empty lines are content once a content
+      line exists, trailing empty lines follow chomping, folding turns
+      line breaks into spaces only between two regular lines)
+- [x] Reject leading empty lines more indented than the first
+      non-empty line and a tab inside the indentation region
+- [x] `expect_comment_or_line_break` stops after a comment and
+      requires a space before the `#` (block scalar header comments)
+- [x] Comment lines are skipped at stream, mapping and sequence level;
+      `...` ends block maps/sequences without being consumed
+- [x] Node properties on their own line re-derive the content
+      indentation (e.g. `!foo` before `>1`)
+- [x] Event DSL escapes `\`, `\t` in addition to `\n`
 
 ### M5 - Serializer Improvements
 
@@ -188,12 +213,10 @@ Tasks:
 ## Disabled Test Cases Reference
 
 Current enabled tests: see `supported_tests` in
-`src/tests/yaml_test_suite.rs` (100 top-level names, 109 counted
+`src/tests/yaml_test_suite.rs` (183 top-level names, 196 counted
 cases). That list is the source of truth.
 
 Disabled categories (priority order):
-1. Anchors/Aliases (~10 tests left) - M3
-2. Flow collections (~10 tests) - M3
-3. Block scalars/chomping (~8 tests left) - M4
-4. Tags/directives (~6 tests left) - M6
-5. Edge cases (~40+ tests) - M7
+1. Tags/directives (~10 tests left) - M6
+2. Explicit `?` block keys (~5 tests) - M6/M7
+3. Edge cases (~40+ tests) - M7
