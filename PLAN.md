@@ -9,8 +9,8 @@ RMSD-YAML is a pure Rust, minimised YAML library targeting serde compatibility a
 * Core parser/scanner infrastructure exists (YAML spec 1.2.2)
 * Compose phase converts events to YamlValue tree
 * Deserializer/Serializer implement serde traits
-* 196 of 402 yaml-test-suite cases enabled and passing
-* 54 cargo unit tests pass (serializer, deserializer, scalar, base64)
+* 216 of 402 yaml-test-suite cases enabled and passing
+* 66 cargo unit tests pass (serializer, deserializer, scalar, base64, tag)
 * Anchors and aliases are parsed and resolved in block and flow
   contexts; flow sequences/mappings (incl. nested and single-pair
   forms) are supported
@@ -193,16 +193,39 @@ Tasks:
   seqs/maps/enums/structs/options, binary tags, long-line folding,
   leading `---`, indentation validation
 
-### M6 - Tags & Directives
+### M6 - Tags & Directives ✅ DONE
 
 **Goal:** Full YAML directive and tag handling.
 
 Tasks:
-- [ ] Implement `tag.rs` logic for primary/secondary/hex/verbatim handles
-- [ ] Handle global tags (`!!str`, `<!tag:...>`)
-- [ ] Implement explicit vs implicit tag resolution
-- [ ] Add `%TAG` directive parsing and validation
-- [ ] Enable `"global-tags"`, `"tag-shorthands"`, `"directive"` tests (8+ tests)
+- [x] `%YAML` directive parsing with version validation (duplicate /
+  extra words rejected; any version accepted, comments allowed)
+- [x] `%TAG handle prefix` parsing and validation; duplicate handles
+  rejected; declarations scoped to the following document and reset at
+  document boundaries; reserved directives (`%FOO`) ignored
+- [x] Directives must be followed by a document (error otherwise)
+- [x] Tag shorthand resolution in `tag.rs`: `!!suffix` / `!suffix` /
+  `!name!suffix` handles with `%TAG` overrides, `!<verbatim>` tags,
+  non-specific `!`, and `%XX` URI-decoding of suffixes
+- [x] Tag suffix validation (flow indicators rejected); named handles
+  without a `%TAG` declaration error
+- [x] `...` document end marker now accepts a trailing comment, and
+  terminates block scalars / plain scalars / maps / sequences
+- [x] Plain scalars terminate at `---` document start markers
+- [x] Empty documents emit an empty scalar node
+- [x] Implicit document ends emitted before a following `---`, and
+  after the last document (multi-document streams)
+- [x] Map-key validation scoped to the key portion (fixes flow
+  collections as map values: `a: {x: 1}`); `: `-ending keys trimmed
+- [x] Node properties on the same line as a value (`!<!bar> baz`)
+  handled; `!tag foo :` tags the first key (suite convention)
+- [x] Inline-comment plain scalars end at the comment; `%` allowed on
+  plain-scalar continuation lines; flow scalars end at comment lines
+- [x] Flow collection entries on a new line must be more indented than
+  the enclosing block collection (rejects wrong-indented-flow-sequence)
+- [x] `!tag` on a map with `foo :` keys (verbatim-tags) supported
+- [x] Enabled 22 yaml-test-suite tests: 196 -> 216 cases passing
+  (205 top-level names); new `src/tests/tag.rs` unit tests
 
 ### M7 - Edge Cases & Compliance
 

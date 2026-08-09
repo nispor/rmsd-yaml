@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{YamlParser, YamlValueData};
+use crate::{ErrorKind, YamlError, YamlParser, YamlValueData};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct YamlTag {
@@ -9,26 +9,110 @@ pub struct YamlTag {
 }
 
 impl<'a> YamlParser<'a> {
-    // TODO:
-    //   * It is possible to override this default behavior by providing an
-    //     explicit “TAG” directive associating a different prefix for this
-    //     handle. e.g. `%TAG !! tag:example.com,2000:app/`
-    pub(crate) fn handle_tag(&mut self) -> Option<String> {
-        let tag_name = self.scanner.peek_till_linebreak_or_space();
+    /// Parse a tag shorthand and resolve it against the `%TAG`
+    /// directives of the current document (YAML 1.2.2 SPEC, 6.18
+    /// Tag Shorthands):
+    ///
+    /// * `!<verbatim>` is taken as-is;
+    /// * `!!suffix` uses the `!!` handle (default prefix
+    ///   `tag:yaml.org,2002:`);
+    /// * `!suffix` uses the `!` handle (default local prefix `!`);
+    /// * `!name!suffix` uses the `!name!` handle, which must be
+    ///   declared by a `%TAG` directive.
+    ///
+    /// The returned tag string is `name` wrapped in `<...>`, matching
+    /// the event representation used by the yaml-test-suite.
+    pub(crate) fn handle_tag(&mut self) -> Result<Option<String>, YamlError> {
+        let tag_name = self.scanner.peek_till_linebreak_or_space().to_string();
+        self.scanner.advance_till_linebreak_or_space();
 
-        if let Some(tag) = tag_name.strip_prefix("!!") {
-            let ret = format!("<tag:yaml.org,2002:{tag}>");
-            self.scanner.advance_till_linebreak_or_space();
-            return Some(ret);
-        } else if let Some(tag) = tag_name.strip_prefix("!") {
-            // YAML 1.2.2 SPEC, 6.18. Tag Shorthands:
-            //      A lone `!` or `!<name>` is a local tag.
-            let ret = format!("<!{tag}>");
-            self.scanner.advance_till_linebreak_or_space();
-            return Some(ret);
-        } else if !tag_name.is_empty() {
+        let Some(rest) = tag_name.strip_prefix('!') else {
             log::trace!("Unknown tag {tag_name}");
+            return Ok(None);
+        };
+
+        // Verbatim tag `!<...>`.
+        if let Some(inner) = rest.strip_prefix('<') {
+            let Some(inner) = inner.strip_suffix('>') else {
+                return Err(self.invalid_tag(&tag_name));
+            };
+            if inner.is_empty() || inner.contains([' ', '\t']) {
+                return Err(self.invalid_tag(&tag_name));
+            }
+            return Ok(Some(format!("<{inner}>")));
         }
-        None
+
+        // Split into handle and suffix. The handle is everything up to
+        // and including the second `!` (for `!!suffix` and `!name!suffix`).
+        let (handle, suffix) = if let Some(idx) = rest.find('!') {
+            let mut handle = String::with_capacity(idx + 2);
+            handle.push('!');
+            handle.push_str(&rest[..idx]);
+            handle.push('!');
+            (handle, &rest[idx + 1..])
+        } else {
+            ("!".to_string(), rest)
+        };
+
+        if suffix.is_empty() && handle != "!" {
+            // A lone `!` is the valid non-specific tag; an empty
+            // `!!` or `!name!` shorthand is not.
+            return Err(self.invalid_tag(&tag_name));
+        }
+        if !suffix.is_empty() && !is_valid_tag_suffix(suffix) {
+            return Err(self.invalid_tag(&tag_name));
+        }
+
+        let prefix = match self.tag_handles.get(&handle) {
+            Some(prefix) => prefix.clone(),
+            None => match handle.as_str() {
+                "!!" => "tag:yaml.org,2002:".to_string(),
+                "!" => "!".to_string(),
+                _ => {
+                    // A named handle requires a `%TAG` directive.
+                    return Err(self.invalid_tag(&tag_name));
+                }
+            },
+        };
+
+        Ok(Some(format!("<{prefix}{}>", decode_percent(suffix))))
     }
+
+    fn invalid_tag(&self, tag: &str) -> YamlError {
+        YamlError::new(
+            ErrorKind::InvalidTag,
+            format!("Invalid tag: {tag}"),
+            self.scanner.done_pos,
+            self.scanner.done_pos,
+        )
+    }
+}
+
+/// Characters allowed in a tag suffix (c-tag-char excludes the flow
+/// indicators and separation spaces).
+fn is_valid_tag_suffix(s: &str) -> bool {
+    !s.contains([' ', '\t', ',', '[', ']', '{', '}'])
+}
+
+/// Decode `%XX` URI escapes in a tag suffix (e.g. `%21` -> `!`).
+fn decode_percent(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if hex.len() == 2
+                && hex.chars().all(|h| h.is_ascii_hexdigit())
+                && let Ok(byte) = u8::from_str_radix(&hex, 16)
+            {
+                out.push(byte as char);
+                continue;
+            }
+            out.push('%');
+            out.push_str(&hex);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }

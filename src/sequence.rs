@@ -2,6 +2,7 @@
 
 use serde::de::{DeserializeSeed, SeqAccess};
 
+use crate::parser::is_document_end_marker;
 use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlScalarStyle, YamlState, YamlValue,
@@ -93,7 +94,7 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 continue;
             }
-            if trimmed == "..." {
+            if is_document_end_marker(trimmed) {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
@@ -160,11 +161,14 @@ impl<'a> YamlParser<'a> {
             start_pos,
         ));
         self.push_state(YamlState::InFlowSequnce);
+        let flow_start_line = self.scanner.done_pos.line;
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some(']') {
             self.scanner.next_char();
         } else {
             loop {
+                self.scanner.skip_flow_separation();
+                self.check_flow_entry_indentation(flow_start_line)?;
                 self.handle_flow_seq_entry()?;
                 self.scanner.skip_flow_separation();
                 match self.scanner.peek_char() {

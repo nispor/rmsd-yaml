@@ -5,5 +5,6 @@ mod map;
 mod scalar;
 mod sequence;
 mod serializer;
+mod tag;
 mod testlib;
 mod yaml_test_suite;

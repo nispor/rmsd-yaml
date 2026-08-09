@@ -67,6 +67,12 @@ pub enum ErrorKind {
     /// Directive is only allowed before document start marker `---` or
     /// after document end marker `...`.
     MissingDocumentEndMarkerBeforeDirective,
+    /// Malformed `%YAML` or `%TAG` directive (duplicate, extra words,
+    /// bad version, duplicate tag handle, ...).
+    InvalidDirective,
+    /// Invalid tag: unknown tag handle, empty verbatim tag, or illegal
+    /// character in a tag.
+    InvalidTag,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -108,6 +114,8 @@ impl std::fmt::Display for ErrorKind {
                 Self::BytesUnsupported => "bytes_unsupported",
                 Self::MissingDocumentEndMarkerBeforeDirective =>
                     "missing_document_end_marker_before_directive",
+                Self::InvalidDirective => "invalid_directive",
+                Self::InvalidTag => "invalid_tag",
             }
         )
     }

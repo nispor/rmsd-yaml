@@ -2,6 +2,8 @@
 
 use std::cmp::max;
 
+use std::collections::HashMap;
+
 use crate::{
     ErrorKind, YamlError, YamlEvent, YamlPosition, YamlScalarStyle,
     YamlScanner, YamlState,
@@ -17,6 +19,16 @@ pub(crate) struct YamlParser<'a> {
     /// top-level document node). Block scalar content indentation is
     /// relative to it (YAML 1.2.2 SPEC, 8.1.1.1).
     pub(crate) block_indent: Option<usize>,
+    /// Tag handle (`!`, `!!`, `!name!`) to prefix mapping declared by
+    /// `%TAG` directives, scoped to the current document.
+    pub(crate) tag_handles: HashMap<String, String>,
+    /// Whether a `%YAML`/`%TAG`/reserved directive was seen since the
+    /// last document boundary; used to reject directives that are not
+    /// followed by a document.
+    saw_directive: bool,
+    /// Whether a `%YAML` directive was seen since the last document
+    /// boundary; a second `%YAML` for the same document is an error.
+    yaml_directive_seen: bool,
 }
 
 impl<'a> YamlParser<'a> {
@@ -59,6 +71,9 @@ impl<'a> YamlParser<'a> {
             states: Vec::new(),
             events: Vec::new(),
             block_indent: None,
+            tag_handles: HashMap::new(),
+            saw_directive: false,
+            yaml_directive_seen: false,
         };
         while !parser.scanner.is_empty() {
             let cur_pos = parser.scanner.done_pos;
@@ -90,6 +105,11 @@ impl<'a> YamlParser<'a> {
         // Whether the previous document was terminated by `...` (or no
         // document has been parsed yet).
         let mut doc_terminated = true;
+        // Whether at least one document has been seen in this stream
+        // (never reset; used for the empty-stream check).
+        let mut had_any_document = false;
+        // Whether the document currently being parsed has started.
+        let mut doc_started = false;
         while let Some(line) = self.scanner.peek_line() {
             let trimmed = line.trim_start_matches(' ');
             if trimmed.is_empty() {
@@ -97,9 +117,24 @@ impl<'a> YamlParser<'a> {
             } else if trimmed.starts_with('#') {
                 // Comment lines are ignored at stream level.
                 self.scanner.advance_till_linebreak();
+            } else if doc_terminated
+                && trimmed.starts_with('%')
+                && self.handle_directive(trimmed)?
+            {
+                // `%YAML`, `%TAG` or a reserved directive.
             } else if trimmed == "---" {
                 let indent_count =
                     line.chars().take_while(|c| *c == ' ').count();
+                if doc_started {
+                    // A new document invalidates the previous one's
+                    // `%TAG` declarations and implicitly ends the
+                    // previous document.
+                    self.tag_handles.clear();
+                    self.push_event(YamlEvent::DocumentEnd(
+                        false,
+                        self.scanner.done_pos,
+                    ));
+                }
                 self.push_event(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
@@ -107,7 +142,18 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 self.handle_node(indent_count, indent_count, None, None)?;
                 doc_terminated = false;
+                doc_started = true;
+                had_any_document = true;
+                self.saw_directive = false;
+                self.yaml_directive_seen = false;
             } else if let Some(offset) = line.find("--- ") {
+                if doc_started {
+                    self.tag_handles.clear();
+                    self.push_event(YamlEvent::DocumentEnd(
+                        false,
+                        self.scanner.done_pos,
+                    ));
+                }
                 self.push_event(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
@@ -115,7 +161,21 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_offset(offset + 4);
                 self.handle_node(0, 0, None, None)?;
                 doc_terminated = false;
-            } else if trimmed == "..." {
+                doc_started = true;
+                had_any_document = true;
+                self.saw_directive = false;
+                self.yaml_directive_seen = false;
+            } else if is_document_end_marker(trimmed) {
+                if self.saw_directive && !doc_started {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidDirective,
+                        "Directives must be followed by a document, but the \
+                         stream ends with a document end marker"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 if self
                     .events
                     .iter()
@@ -128,6 +188,10 @@ impl<'a> YamlParser<'a> {
                 }
                 self.scanner.advance_till_linebreak_or_space();
                 doc_terminated = true;
+                doc_started = false;
+                self.tag_handles.clear();
+                self.saw_directive = false;
+                self.yaml_directive_seen = false;
             } else {
                 if !doc_terminated {
                     return Err(YamlError::new(
@@ -146,23 +210,33 @@ impl<'a> YamlParser<'a> {
                 ));
                 self.handle_node(0, 0, None, None)?;
                 doc_terminated = false;
+                doc_started = true;
+                had_any_document = true;
+                self.saw_directive = false;
+                self.yaml_directive_seen = false;
             }
         }
 
-        let has_doc_start = self
-            .events
-            .iter()
-            .any(|e| matches!(e, YamlEvent::DocumentStart(_, _)));
-        let has_doc_end = self
-            .events
-            .iter()
-            .any(|e| matches!(e, YamlEvent::DocumentEnd(_, _)));
-        if !has_doc_start && !has_doc_end {
+        if self.saw_directive && !doc_started {
+            return Err(YamlError::new(
+                ErrorKind::InvalidDirective,
+                "Directives must be followed by a document, but the stream \
+                 ended without one"
+                    .to_string(),
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+        }
+
+        if !had_any_document {
             // Empty content
             self.push_event(YamlEvent::DocumentStart(false, YamlPosition::EOF));
-        }
-        // No explicit document end `...`
-        if !has_doc_end {
+            self.push_event(YamlEvent::DocumentEnd(
+                false,
+                self.scanner.done_pos,
+            ));
+        } else if !doc_terminated {
+            // The last document did not end with an explicit `...`.
             self.push_event(YamlEvent::DocumentEnd(
                 false,
                 self.scanner.done_pos,
@@ -170,6 +244,122 @@ impl<'a> YamlParser<'a> {
         }
         self.push_event(YamlEvent::StreamEnd);
         Ok(())
+    }
+
+    /// Parse a `%YAML`, `%TAG` or reserved directive line. Returns
+    /// `Ok(true)` when the line was a directive and has been consumed.
+    fn handle_directive(&mut self, trimmed: &str) -> Result<bool, YamlError> {
+        if let Some(rest) = trimmed.strip_prefix("%YAML") {
+            if !rest.starts_with([' ', '\t']) {
+                // Not `%YAML `; treat as a reserved directive.
+                self.saw_directive = true;
+                self.scanner.advance_till_linebreak();
+                return Ok(true);
+            }
+            if self.yaml_directive_seen {
+                return Err(self.invalid_directive(trimmed));
+            }
+            let rest = rest.trim_start_matches([' ', '\t']);
+            let version =
+                rest.split([' ', '\t']).next().unwrap_or_default().trim();
+            let after = rest[version.len().min(rest.len())..].trim_start();
+            if version.is_empty() || !is_valid_yaml_version(version) {
+                return Err(self.invalid_directive(trimmed));
+            }
+            if !after.is_empty() && !after.starts_with('#') {
+                return Err(self.invalid_directive(trimmed));
+            }
+            self.saw_directive = true;
+            self.yaml_directive_seen = true;
+            self.scanner.advance_till_linebreak();
+            return Ok(true);
+        }
+        if let Some(rest) = trimmed.strip_prefix("%TAG") {
+            if !rest.starts_with([' ', '\t']) {
+                self.saw_directive = true;
+                self.scanner.advance_till_linebreak();
+                return Ok(true);
+            }
+            let rest = rest.trim_start_matches([' ', '\t']);
+            let mut parts = rest.split_whitespace();
+            let handle = parts.next().unwrap_or_default();
+            let prefix = parts.next().unwrap_or_default();
+            if parts.next().is_some()
+                || !is_valid_tag_handle(handle)
+                || prefix.is_empty()
+            {
+                return Err(self.invalid_directive(trimmed));
+            }
+            if self.tag_handles.contains_key(handle) {
+                return Err(self.invalid_directive(trimmed));
+            }
+            self.tag_handles
+                .insert(handle.to_string(), prefix.to_string());
+            self.saw_directive = true;
+            self.scanner.advance_till_linebreak();
+            return Ok(true);
+        }
+        if trimmed.starts_with('%') {
+            // Reserved directive: ignored with a warning (YAML 1.2.2
+            // SPEC, 6.11).
+            self.saw_directive = true;
+            self.scanner.advance_till_linebreak();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// In a block collection, a flow collection entry that starts on a
+    /// new line must be more indented than the enclosing block
+    /// collection (YAML 1.2.2 SPEC, 7.4.1 Flow Sequences / 7.4.2 Flow
+    /// Mappings).
+    pub(crate) fn check_flow_entry_indentation(
+        &self,
+        flow_start_line: usize,
+    ) -> Result<(), YamlError> {
+        if let Some(floor) = self.block_indent {
+            let pos = self.scanner.next_pos;
+            log::trace!(
+                "check_flow_entry_indentation: floor={floor} line={} start={} col={}",
+                pos.line,
+                flow_start_line,
+                pos.column
+            );
+            if pos.line > flow_start_line && pos.column <= floor + 1 {
+                return Err(YamlError::new(
+                    ErrorKind::LessIndentedWithoutParent,
+                    format!(
+                        "Flow collection entry is not indented enough                          (column {} must be > {floor})",
+                        pos.column
+                    ),
+                    pos,
+                    pos,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Consume comment and empty lines so that `peek_line()` returns
+    /// the next content line. Comments never affect indentation.
+    pub(crate) fn skip_comment_and_empty_lines(&mut self) {
+        while let Some(line) = self.scanner.peek_line() {
+            let trimmed = line.trim_start_matches(' ');
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                self.scanner.advance_till_linebreak();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn invalid_directive(&self, line: &str) -> YamlError {
+        YamlError::new(
+            ErrorKind::InvalidDirective,
+            format!("Invalid directive: {line}"),
+            self.scanner.next_pos,
+            self.scanner.next_pos,
+        )
     }
 
     /// Handle a container or scalar
@@ -247,6 +437,10 @@ impl<'a> YamlParser<'a> {
             } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
                 // Flow style does not care indentation
                 self.handle_scalar(0, 0, anchor, tag)?;
+                // In block context a quoted scalar may only be followed
+                // by a line break, comment or EOF (rejects e.g.
+                // `a: 'b': c`).
+                self.expect_flow_end_separation()?;
             } else if trimmed.starts_with('*') {
                 self.scanner.advance(indent_count);
                 let name = self.handle_alias()?;
@@ -276,6 +470,9 @@ impl<'a> YamlParser<'a> {
             } else if trimmed.starts_with('!') || trimmed.starts_with('&') {
                 self.scanner.advance(indent_count);
                 // YAML 1.2.2 SPEC, 6.9. Node Properties:
+                //      Node properties may appear in any order, but each
+                //      at most once.
+
                 //      Node properties may appear in any order, but each
                 //      at most once.
                 let mut property_found = false;
@@ -330,7 +527,7 @@ impl<'a> YamlParser<'a> {
                         if tag.is_none() {
                             self.scanner.advance(property_indent);
                             // Tag decorating its container
-                            tag = self.handle_tag();
+                            tag = self.handle_tag()?;
                             property_found = true;
                         } else {
                             return Err(YamlError::new(
@@ -386,6 +583,7 @@ impl<'a> YamlParser<'a> {
                 // than the enclosing block collection, otherwise the
                 // properties decorate an empty node and the next line
                 // belongs to the parent (e.g. `- &a\n- b`).
+                self.skip_comment_and_empty_lines();
                 let content_more_indented = self
                     .block_indent
                     .map(|indent| {
@@ -410,6 +608,18 @@ impl<'a> YamlParser<'a> {
                         anchor,
                         tag,
                     )?;
+                } else if self.scanner.done_pos.line
+                    == self.scanner.next_pos.line
+                {
+                    // The content follows the node properties on the
+                    // same line (e.g. `!<!bar> baz`); it is a same-line
+                    // value starting at the current column.
+                    self.handle_node(
+                        0,
+                        self.scanner.done_pos.column,
+                        anchor,
+                        tag,
+                    )?;
                 } else {
                     self.handle_node(
                         first_indent_count,
@@ -418,9 +628,18 @@ impl<'a> YamlParser<'a> {
                         tag,
                     )?;
                 }
-            } else if trimmed == "..." {
-                // Document end marker: this node ends here, and the
-                // stream handler will emit `DocumentEnd`.
+            } else if is_document_end_marker(trimmed) {
+                // Document end marker with an empty document: emit an
+                // empty scalar node (the stream handler emits the
+                // `DocumentEnd`).
+                self.push_event(YamlEvent::Scalar(
+                    None,
+                    None,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    self.scanner.done_pos,
+                    self.scanner.done_pos,
+                ));
                 return Ok(());
             } else if trimmed.starts_with('%') {
                 return Err(YamlError::new(
@@ -449,9 +668,9 @@ impl<'a> YamlParser<'a> {
                     tag,
                 )?;
             }
-        } else if anchor.is_some() || tag.is_some() {
-            // Node properties without content: empty scalar node
-            // (e.g. standalone `!` or `&anchor` at EOF).
+        } else {
+            // No content: an empty scalar node (e.g. an empty document
+            // or standalone node properties at EOF).
             self.push_event(YamlEvent::Scalar(
                 anchor,
                 tag,
@@ -500,7 +719,7 @@ impl<'a> YamlParser<'a> {
                     self.scanner.skip_flow_separation();
                 }
                 Some('!') if tag.is_none() => {
-                    tag = self.handle_tag();
+                    tag = self.handle_tag()?;
                     self.scanner.skip_flow_separation();
                 }
                 _ => break,
@@ -541,6 +760,43 @@ impl<'a> YamlParser<'a> {
     }
 }
 
+/// Whether a trimmed line is a document end marker `...`, optionally
+/// followed by a comment (YAML 1.2.2 SPEC, 9.3.2.3).
+pub(crate) fn is_document_end_marker(trimmed: &str) -> bool {
+    if trimmed == "..." {
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("...") {
+        return rest.starts_with([' ', '\t'])
+            && rest.trim_start_matches([' ', '\t']).starts_with('#');
+    }
+    false
+}
+
+/// Whether `s` looks like a YAML version `major.minor` with digit
+/// components (any version is accepted, like libyaml).
+fn is_valid_yaml_version(s: &str) -> bool {
+    let Some((major, minor)) = s.split_once('.') else {
+        return false;
+    };
+    !major.is_empty()
+        && !minor.is_empty()
+        && major.chars().all(|c| c.is_ascii_digit())
+        && minor.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether `s` is a valid tag handle: `!`, `!!`, or `!name!`.
+fn is_valid_tag_handle(s: &str) -> bool {
+    if s == "!" || s == "!!" {
+        return true;
+    }
+    if let Some(name) = s.strip_prefix('!').and_then(|r| r.strip_suffix('!')) {
+        return !name.is_empty()
+            && !name.contains([' ', '\t', ',', '[', ']', '{', '}']);
+    }
+    false
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
@@ -554,6 +810,14 @@ mod test {
             vec![
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(true, YamlPosition::new(3, 1)),
+                YamlEvent::Scalar(
+                    None,
+                    None,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    YamlPosition::new(3, 3),
+                    YamlPosition::new(3, 3)
+                ),
                 YamlEvent::DocumentEnd(false, YamlPosition::new(3, 3)),
                 YamlEvent::StreamEnd,
             ]
@@ -589,6 +853,14 @@ mod test {
             vec![
                 YamlEvent::StreamStart,
                 YamlEvent::DocumentStart(true, YamlPosition::new(3, 1)),
+                YamlEvent::Scalar(
+                    None,
+                    None,
+                    String::new(),
+                    YamlScalarStyle::Plain,
+                    YamlPosition::new(3, 19),
+                    YamlPosition::new(3, 19)
+                ),
                 YamlEvent::DocumentEnd(true, YamlPosition::new(4, 1)),
                 YamlEvent::StreamEnd,
             ]

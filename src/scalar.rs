@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::parser::is_document_end_marker;
 use crate::{ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -185,6 +186,12 @@ impl<'a> YamlParser<'a> {
                 break;
             };
             let spaces = line.chars().take_while(|c| *c == ' ').count();
+
+            // The document end marker `...` terminates the block scalar
+            // even when it is as indented as the content.
+            if is_document_end_marker(line.trim_start_matches(' ')) {
+                break;
+            }
 
             // A tab inside the indentation region is an error (a tab
             // character where an indentation space is expected).
@@ -383,7 +390,7 @@ impl<'a> YamlParser<'a> {
     ) -> Result<(), YamlError> {
         let start_pos = self.scanner.next_pos;
         let mut ret = String::new();
-        while let Some(c) = self.scanner.peek_char() {
+        'scalar: while let Some(c) = self.scanner.peek_char() {
             match c {
                 ',' | ']' | '}' => break,
                 ':' => {
@@ -424,7 +431,10 @@ impl<'a> YamlParser<'a> {
                                 self.scanner.next_char();
                             }
                             '#' => {
-                                self.scanner.advance_till_linebreak();
+                                // A comment on its own line ends the
+                                // flow scalar; the surrounding flow
+                                // collection consumes the comment.
+                                break 'scalar;
                             }
                             _ => break,
                         }
@@ -596,13 +606,22 @@ impl<'a> YamlParser<'a> {
             if cur_indent_count < expected_indent_count {
                 break;
             }
+            let first_line = is_first_line;
             if is_first_line {
                 start_pos.column += cur_indent_count;
                 is_first_line = false;
             }
 
-            // document end indicator
-            if line == "..." {
+            // document end indicator (optionally followed by a comment)
+            if is_document_end_marker(line.trim_start_matches(' ')) {
+                break;
+            }
+
+            // A `---` document start marker terminates the scalar too.
+            if line.trim_start_matches(' ').starts_with("---")
+                && (line.trim_start_matches(' ').len() == 3
+                    || line.trim_start_matches(' ').chars().nth(3) == Some(' '))
+            {
                 break;
             }
 
@@ -616,7 +635,7 @@ impl<'a> YamlParser<'a> {
             }
 
             if trimmed.starts_with("!") {
-                tag = self.handle_tag();
+                tag = self.handle_tag()?;
             }
             let Some(mut line) = self.scanner.peek_line() else {
                 continue;
@@ -624,14 +643,35 @@ impl<'a> YamlParser<'a> {
             // YAML 1.2.2 SPEC, 7.1. Comment Lines:
             //      Comments are a presentation detail and must not be
             //      used to convey content information.
+            let mut scalar_ends_after_comment = false;
             if !self.cur_state().is_block_map_key()
                 && let Some(comment_offset) = line.find(" #")
             {
                 line = &line[..comment_offset];
+                // A plain scalar followed by an inline comment ends at
+                // the comment: the following line cannot continue it.
+                scalar_ends_after_comment = true;
             }
             let trimmed = line.trim_start_matches(' ');
 
-            self.validate_plain_scalar(line)?;
+            // When parsing an implicit mapping key, only the key
+            // portion matters for validation: the value after `: `
+            // may legitimately contain flow indicators (e.g.
+            // `a: {x: 1}`).
+            let validation_line = if self.cur_state().is_block_map_key() {
+                if let Some(offset) = line.find(": ") {
+                    &line[..offset]
+                } else if let Some(offset) =
+                    line.strip_suffix(':').map(|_| line.len() - 1)
+                {
+                    &line[..offset]
+                } else {
+                    line
+                }
+            } else {
+                line
+            };
+            self.validate_plain_scalar(validation_line, first_line)?;
 
             if self.cur_state().is_block_map_key() {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
@@ -667,6 +707,7 @@ impl<'a> YamlParser<'a> {
                             anchor,
                             tag,
                             line[expected_indent_count..line.len() - 1]
+                                .trim_end()
                                 .to_string(),
                             YamlScalarStyle::Plain,
                             start_pos,
@@ -699,6 +740,12 @@ impl<'a> YamlParser<'a> {
                 string_to_fold
                     .push(line.trim_matches(|c: char| matches!(c, '\t' | ' ')));
 
+                if scalar_ends_after_comment {
+                    // The inline comment terminated the scalar; the
+                    // next line belongs to the surrounding context.
+                    break;
+                }
+
                 if self.scanner.done_pos == pre_pos {
                     return Err(YamlError::new(
                         ErrorKind::Bug,
@@ -729,7 +776,11 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
-    fn validate_plain_scalar(&mut self, line: &str) -> Result<(), YamlError> {
+    fn validate_plain_scalar(
+        &mut self,
+        line: &str,
+        first_line: bool,
+    ) -> Result<(), YamlError> {
         // YAML SPEC 1.2, 7.3.3. Plain Style:
         //      Plain scalars must not begin with most indicators, as this
         //      would cause ambiguity with other YAML constructs.  However,
@@ -739,7 +790,21 @@ impl<'a> YamlParser<'a> {
         if let Some(first_char) = line.trim_start_matches(' ').chars().next() {
             match first_char {
                 ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
-                | '>' | '\'' | '"' | '%' | '@' | '`' => {
+                | '>' | '\'' | '"' | '@' | '`' => {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidPlainScalarStart,
+                        format!(
+                            "Plain scalar should not start with '{first_char} \
+                             '"
+                        ),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
+                // The `%` reserved indicator is only rejected on the
+                // first line; continuation lines may start with it
+                // (e.g. a line that looks like a directive).
+                '%' if first_line => {
                     return Err(YamlError::new(
                         ErrorKind::InvalidPlainScalarStart,
                         format!(

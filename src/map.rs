@@ -5,6 +5,7 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
+use crate::parser::is_document_end_marker;
 use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
@@ -168,7 +169,7 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 continue;
             }
-            if trimmed_line == "..." {
+            if is_document_end_marker(trimmed_line) {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
@@ -304,7 +305,7 @@ impl<'a> YamlParser<'a> {
                             && value_tag.is_none()
                         {
                             self.scanner.advance(property_indent);
-                            value_tag = self.handle_tag();
+                            value_tag = self.handle_tag()?;
                         } else {
                             break;
                         }
@@ -328,17 +329,23 @@ impl<'a> YamlParser<'a> {
                         continue;
                     }
                     if self.scanner.done_pos.line != self.scanner.next_pos.line
-                        && let Some(content_line) = self.scanner.peek_line()
                     {
                         // The node properties decorate a node whose
                         // content sits on the following lines (e.g.
                         // `a: !B\n  - 1`); re-derive the content
                         // indentation from the first content line.
-                        value_first_indent_count = content_line
-                            .chars()
-                            .take_while(|c| *c == ' ')
-                            .count();
-                        value_rest_indent_count = value_first_indent_count;
+                        self.skip_comment_and_empty_lines();
+                        if let Some(content_line) = self.scanner.peek_line() {
+                            value_first_indent_count = content_line
+                                .chars()
+                                .take_while(|c| *c == ' ')
+                                .count();
+                            value_rest_indent_count = value_first_indent_count;
+                        } else {
+                            value_first_indent_count = 0;
+                            value_rest_indent_count =
+                                self.scanner.done_pos.column;
+                        }
                     } else {
                         value_first_indent_count = 0;
                         value_rest_indent_count = self.scanner.done_pos.column;
@@ -458,12 +465,15 @@ impl<'a> YamlParser<'a> {
             start_pos,
         ));
         self.push_state(YamlState::InFlowMapKey);
+        let flow_start_line = self.scanner.done_pos.line;
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some('}') {
             self.scanner.next_char();
         } else {
             loop {
                 // Key
+                self.scanner.skip_flow_separation();
+                self.check_flow_entry_indentation(flow_start_line)?;
                 match self.scanner.peek_char() {
                     Some(':') => {
                         // Empty key, e.g. `{: value}`
