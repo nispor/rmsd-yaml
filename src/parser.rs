@@ -397,29 +397,16 @@ impl<'a> YamlParser<'a> {
             return Ok(());
         }
         let rest = self.scanner.remains();
-        let mut chars = rest.chars();
-        if let Some(c) = chars.next() {
-            let second = chars.next();
-            let is_block_indicator = matches!(c, '-' | '?' | ':')
-                && matches!(
-                    second,
-                    None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
-                );
-            let token: String = rest
-                .chars()
-                .take_while(|c| !matches!(c, ' ' | '\t' | '\n' | '\r'))
-                .collect();
-            if is_block_indicator || token.ends_with(':') {
-                return Err(YamlError::new(
-                    ErrorKind::InvalidStartOfToken,
-                    format!(
-                        "Tab(\\t) cannot be used as indentation before \
-                         content starting with: {token}"
-                    ),
-                    self.scanner.next_pos,
-                    self.scanner.next_pos,
-                ));
-            }
+        if tab_content_is_block_node(rest) {
+            return Err(YamlError::new(
+                ErrorKind::InvalidStartOfToken,
+                format!(
+                    "Tab(\\t) cannot be used as indentation before block \
+                     node content"
+                ),
+                self.scanner.next_pos,
+                self.scanner.next_pos,
+            ));
         }
         Ok(())
     }
@@ -790,13 +777,31 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_pos,
                 ));
             } else if line.trim_start_matches(' ').starts_with('\t') {
-                return Err(YamlError::new(
-                    ErrorKind::InvalidStartOfToken,
-                    "Tab(\\t) cannot be used as start of any YAML node"
-                        .to_string(),
-                    self.scanner.next_pos,
-                    self.scanner.next_pos,
-                ));
+                // A tab used as indentation is not allowed, except when
+                // the node is a flow collection (self-delimiting) or a
+                // plain scalar: only block-node-looking content (block
+                // indicators or key-looking tokens) is rejected.
+                let after_tabs = line.trim_start_matches([' ', '\t']);
+                if tab_content_is_block_node(after_tabs) {
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidStartOfToken,
+                        "Tab(\\t) cannot be used as start of any YAML node"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
+                let leading = line
+                    .chars()
+                    .take_while(|c| matches!(c, ' ' | '\t'))
+                    .count();
+                self.scanner.advance(leading);
+                self.handle_node(
+                    first_indent_count,
+                    rest_indent_count,
+                    anchor,
+                    tag,
+                )?;
             } else {
                 self.handle_scalar(
                     first_indent_count,
@@ -978,6 +983,53 @@ pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
         }
     }
     false
+}
+
+/// Find the `:` that separates an implicit mapping key from its value
+/// (`: ` or `:\t`); `None` when the line has no key/value separator.
+/// A trailing `:` (key with no value) is handled separately by the
+/// callers.
+pub(crate) fn find_key_value_separator(line: &str) -> Option<usize> {
+    line.find(": ").or_else(|| line.find(":\t"))
+}
+
+/// Find the start of an inline comment: a `#` preceded by a space or
+/// a tab (YAML 1.2.2 SPEC, 7.1).
+pub(crate) fn find_comment_start(line: &str) -> Option<usize> {
+    let mut prev = '\0';
+    for (i, c) in line.char_indices() {
+        if c == '#' && matches!(prev, ' ' | '\t') {
+            return Some(i);
+        }
+        prev = c;
+    }
+    None
+}
+
+/// Whether content that follows a tab separation looks like a block
+/// node and is therefore invalid: a block collection indicator
+/// (`- `, `? `, `: `) or a key-looking token ending with `:`
+/// (yaml-test-suite: tabs-in-various-contexts,
+/// tabs-that-look-like-indentation).
+pub(crate) fn tab_content_is_block_node(content: &str) -> bool {
+    let mut chars = content.chars();
+    let Some(c) = chars.next() else {
+        return false;
+    };
+    let second = chars.next();
+    if matches!(c, '-' | '?' | ':')
+        && matches!(
+            second,
+            None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+        )
+    {
+        return true;
+    }
+    let token: String = content
+        .chars()
+        .take_while(|c| !matches!(c, ' ' | '\t' | '\n' | '\r'))
+        .collect();
+    token.ends_with(':')
 }
 
 /// Whether a trimmed line is a document end marker `...`, optionally

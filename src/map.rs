@@ -5,7 +5,9 @@ use std::hash::{DefaultHasher, Hasher};
 use indexmap::IndexMap;
 use serde::de::{DeserializeSeed, MapAccess};
 
-use crate::parser::is_document_end_marker;
+use crate::parser::{
+    find_key_value_separator, is_document_end_marker, tab_content_is_block_node,
+};
 use crate::{
     ErrorKind, YamlCollectionStyle, YamlDeserializer, YamlError, YamlEvent,
     YamlParser, YamlPosition, YamlScalarStyle, YamlState, YamlValue,
@@ -205,6 +207,22 @@ impl<'a> YamlParser<'a> {
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
                 let trimmed_key = line.trim_start_matches(' ');
+                if trimmed_key.starts_with('\t')
+                    && tab_content_is_block_node(
+                        trimmed_key.trim_start_matches('\t'),
+                    )
+                {
+                    // A tab in the key indentation followed by
+                    // block-node-looking content is invalid.
+                    return Err(YamlError::new(
+                        ErrorKind::InvalidStartOfToken,
+                        "Tab(\\t) cannot be used as indentation in a mapping \
+                         key"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 let mut value_anchor = None;
                 let mut value_tag = None;
                 if trimmed_key == "?"

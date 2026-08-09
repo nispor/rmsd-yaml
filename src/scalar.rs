@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::parser::is_document_end_marker;
+use crate::parser::{
+    find_comment_start, find_key_value_separator, is_document_end_marker,
+};
 use crate::{ErrorKind, YamlError, YamlEvent, YamlParser, YamlScalarStyle};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -792,7 +794,7 @@ impl<'a> YamlParser<'a> {
             //      used to convey content information.
             let mut scalar_ends_after_comment = false;
             if !self.cur_state().is_block_map_key()
-                && let Some(comment_offset) = line.find(" #")
+                && let Some(comment_offset) = find_comment_start(line)
             {
                 line = &line[..comment_offset];
                 // A plain scalar followed by an inline comment ends at
@@ -806,12 +808,10 @@ impl<'a> YamlParser<'a> {
             // may legitimately contain flow indicators (e.g.
             // `a: {x: 1}`).
             let validation_line = if self.cur_state().is_block_map_key() {
-                if let Some(offset) = line.find(": ") {
+                if let Some(offset) = find_key_value_separator(line) {
                     &line[..offset]
-                } else if let Some(offset) =
-                    line.strip_suffix(':').map(|_| line.len() - 1)
-                {
-                    &line[..offset]
+                } else if line.ends_with(':') {
+                    &line[..line.len() - 1]
                 } else {
                     line
                 }
@@ -824,7 +824,7 @@ impl<'a> YamlParser<'a> {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
                 //      Plain scalars are further restricted to a single line
                 //      when contained inside an implicit key.
-                if let Some(offset) = line.find(": ") {
+                if let Some(offset) = find_key_value_separator(line) {
                     self.scanner.advance_offset(offset);
                     self.push_event(YamlEvent::Scalar(
                         anchor,
@@ -1012,7 +1012,10 @@ impl<'a> YamlParser<'a> {
                     ));
                 }
                 ':' | '?' | '-'
-                    if Some(' ') == self.scanner.remains().chars().nth(1) =>
+                    if matches!(
+                        self.scanner.remains().chars().nth(1),
+                        Some(' ') | Some('\t')
+                    ) =>
                 {
                     return Err(YamlError::new(
                         ErrorKind::InvalidPlainScalarStart,
@@ -1028,7 +1031,7 @@ impl<'a> YamlParser<'a> {
             }
         }
 
-        if let Some(offset) = line.find(" #") {
+        if let Some(offset) = find_comment_start(line) {
             let pre_pos = self.scanner.done_pos;
             self.scanner.advance_offset(offset);
             return Err(YamlError::new(
