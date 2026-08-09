@@ -105,6 +105,15 @@ impl YamlSerializer {
         " ".repeat(self.get_indent_count())
     }
 
+    /// Whether the output currently ends with a `- ` or `? ` node
+    /// prefix (written by this serializer) that the first collection
+    /// item should follow inline. An explicit `--- ` document marker is
+    /// *not* such a prefix: collections move to the next line after it.
+    fn at_node_prefix(&self) -> bool {
+        (self.output.ends_with("- ") && !self.output.ends_with("--- "))
+            || self.output.ends_with("? ")
+    }
+
     /// Write a `!Tag` before a value. When the value is a scalar, a
     /// space follows (`!Tag value`); when it is a collection, the
     /// collection moves to the next line (`!Tag\n- ...`).
@@ -354,8 +363,7 @@ impl YamlSerializer {
                     // `: `) the first item stays on the same line.
                 } else if !self.output.ends_with("\n")
                     && !self.output.is_empty()
-                    && !self.output.ends_with("- ")
-                    && !self.output.ends_with("? ")
+                    && !self.at_node_prefix()
                 {
                     // Drop the space after a `&anchor ` written before
                     // the collection (`seq: &anchor\n- a`).
@@ -408,8 +416,7 @@ impl YamlSerializer {
                     }
                 } else if !self.output.ends_with("\n")
                     && !self.output.is_empty()
-                    && !self.output.ends_with("- ")
-                    && !self.output.ends_with("? ")
+                    && !self.at_node_prefix()
                 {
                     // Drop the space after a `&anchor ` written before
                     // the collection (`top1: &node1\n  key: ...`).
@@ -662,8 +669,11 @@ impl crate::YamlValue {
             ));
         }
         let mut serializer = YamlSerializer {
-            output: if option.leading_start_indicator {
-                "---\n".to_string()
+            output: if option.leading_start_indicator || self.meta.doc_explicit
+            {
+                // An explicit document marker puts the root node's
+                // properties (anchor/tag) or scalar inline after `---`.
+                "--- ".to_string()
             } else {
                 String::new()
             },
@@ -672,17 +682,19 @@ impl crate::YamlValue {
         };
         serializer.serialize_yaml_value(self)?;
         let mut output = std::mem::take(&mut serializer.output);
+        if output == "--- " {
+            // An explicit `---` with an empty document.
+            output = "---".to_string();
+        }
         if output.is_empty() {
-            // An empty document renders as nothing, or as `---` when
-            // the document was explicit.
-            if self.meta.doc_explicit {
-                return Ok("---\n".to_string());
-            }
             return Ok(String::new());
         }
         if serializer.open_ended || self.meta.doc_end_explicit {
             // A keep-chomped block scalar ending in blank lines, or an
             // explicit `...` document-end marker, closes the document.
+            if !output.ends_with('\n') {
+                output.push('\n');
+            }
             output.push_str("...\n");
         }
         if output.ends_with("\n\n") {
@@ -690,9 +702,6 @@ impl crate::YamlValue {
         }
         if !output.ends_with('\n') {
             output.push('\n');
-        }
-        if self.meta.doc_explicit {
-            output.insert_str(0, "---\n");
         }
         Ok(output)
     }
