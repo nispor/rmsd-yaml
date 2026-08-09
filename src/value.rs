@@ -423,6 +423,9 @@ impl std::fmt::Display for YamlValueData {
 }
 
 fn str_is_integer(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
     if s.starts_with("0x") | s.starts_with("0X") {
         s[2..].chars().all(|c| c.is_ascii_hexdigit())
     } else if s.starts_with("0o") | s.starts_with("0O") {
@@ -450,4 +453,195 @@ fn str_is_float(s: &str) -> bool {
             | ".NaN"
             | ".NAN"
     ) || s.parse::<f64>().is_ok()
+}
+
+/// Deserialize a parsed [`YamlValue`] from the `YamlDeserializer` used
+/// by [`from_str`](crate::from_str). The parse result is already a
+/// `YamlValue`; this visits it back into a fresh value tree.
+///
+/// Note: `YamlValueData::Tag` nodes are rebuilt from the variant name
+/// derived by [`YamlValueEnumAccess`](crate::variant::YamlValueEnumAccess),
+/// which loses the original tag URI (e.g. `<tag:yaml.org,2002:int>`
+/// becomes `!int`). For a lossless parse use
+/// [`to_value`](crate::to_value) instead.
+impl<'de> serde::Deserialize<'de> for YamlValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(YamlValueVisitor)
+    }
+}
+
+struct YamlValueVisitor;
+
+impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
+    type Value = YamlValue;
+
+    fn expecting(
+        &self,
+        formatter: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        formatter.write_str("a YAML value")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(YamlValue {
+            data: YamlValueData::Null,
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(YamlValue {
+            data: YamlValueData::Null,
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+        Ok(YamlValue {
+            data: YamlValueData::String(v.to_string()),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(YamlValue {
+            data: YamlValueData::String(v.to_string()),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(YamlValue {
+            data: YamlValueData::String(v),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&v.to_string())
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&v.to_string())
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&v.to_string())
+    }
+
+    fn visit_char<E>(self, v: char) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&v.to_string())
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut array = Vec::new();
+        while let Some(item) = seq.next_element::<YamlValue>()? {
+            array.push(item);
+        }
+        Ok(YamlValue {
+            data: YamlValueData::Array(array),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut data = YamlValueMap::new();
+        while let Some((key, value)) =
+            map.next_entry::<YamlValue, YamlValue>()?
+        {
+            data.insert(key, value);
+        }
+        Ok(YamlValue {
+            data: YamlValueData::Map(Box::new(data)),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+
+    fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::EnumAccess<'de>,
+    {
+        use serde::de::VariantAccess;
+        let (name, variant) = data.variant_seed(YamlVariantName)?;
+        let inner = variant.newtype_variant_seed(YamlValueVisitor)?;
+        Ok(YamlValue {
+            data: YamlValueData::Tag(Box::new(YamlTag {
+                name: format!("!{name}"),
+                data: inner.data,
+            })),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        })
+    }
+}
+
+struct YamlVariantName;
+
+impl<'de> serde::de::DeserializeSeed<'de> for YamlValueVisitor {
+    type Value = YamlValue;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<YamlValue, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for YamlVariantName {
+    type Value = String;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<String, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NameVisitor;
+        impl serde::de::Visitor<'_> for NameVisitor {
+            type Value = String;
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                formatter.write_str("an enum variant name")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<String, E> {
+                Ok(v.to_string())
+            }
+        }
+        deserializer.deserialize_str(NameVisitor)
+    }
 }

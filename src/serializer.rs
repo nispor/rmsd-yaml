@@ -9,7 +9,10 @@ use std::fmt::Write;
 
 use serde::{Serialize, ser};
 
-use crate::{ErrorKind, YamlError, YamlPosition, base64, to_scalar_string};
+use crate::{
+    ErrorKind, YamlError, YamlPosition, base64, to_out_yaml_scalar,
+    to_scalar_string,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -124,6 +127,317 @@ impl YamlSerializer {
             self.output.push('\n');
         }
         self.current_indent_level += 1;
+    }
+
+    /// Serialize a parsed [`YamlValue`] back to YAML. This is the
+    /// `to_yaml` workflow:
+    ///
+    /// ```ignore
+    /// let value: YamlValue = to_value(input)?;
+    /// let yaml = value.to_string()?;
+    /// ```
+    ///
+    /// The layout follows the yaml-test-suite `out.yaml` conventions:
+    /// block collections, an indentless block sequence as a mapping
+    /// value, an explicit `? ` key for non-simple keys, and the
+    /// `out.yaml` scalar quoting (see `to_out_yaml_scalar`). The
+    /// dynamic tags carried by `YamlValueData::Tag` (which the serde
+    /// data model cannot express) are written as shorthands.
+    pub(crate) fn serialize_yaml_value(
+        &mut self,
+        value: &crate::YamlValue,
+    ) -> Result<(), YamlError> {
+        self.serialize_yaml_value_ctx(value, ValueCtx::Root)
+    }
+
+    /// Serialize the data of a [`YamlValueData::Tag`] (or nested tag),
+    /// keeping the current layout context.
+    fn serialize_yaml_value_data(
+        &mut self,
+        data: &crate::YamlValueData,
+        ctx: ValueCtx,
+    ) -> Result<(), YamlError> {
+        let value = crate::YamlValue {
+            data: data.clone(),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+        };
+        self.serialize_yaml_value_ctx(&value, ctx)
+    }
+
+    fn serialize_yaml_value_ctx(
+        &mut self,
+        value: &crate::YamlValue,
+        ctx: ValueCtx,
+    ) -> Result<(), YamlError> {
+        use crate::YamlValueData;
+        match &value.data {
+            YamlValueData::Null => {
+                // An empty document (no content) renders as nothing.
+                self.pending_tag = false;
+                Ok(())
+            }
+            YamlValueData::String(s) => {
+                write!(
+                    self.output,
+                    "{}{}",
+                    self.get_indent(),
+                    to_out_yaml_scalar(s)
+                )
+                .ok();
+                self.pending_tag = false;
+                Ok(())
+            }
+            YamlValueData::Array(items) => {
+                if items.is_empty() {
+                    write!(self.output, "{}[]", self.get_indent()).ok();
+                    self.pending_tag = false;
+                    return Ok(());
+                }
+                let indentless = matches!(ctx, ValueCtx::MapValue);
+                if self.pending_tag {
+                    self.output.pop();
+                    self.output.push('\n');
+                    self.pending_tag = false;
+                } else if self.output.ends_with(": ") {
+                    if indentless {
+                        // `key:` stays (the space is dropped), items on
+                        // the following lines at the key's own indent.
+                        self.output.pop();
+                        self.output.push('\n');
+                    }
+                    // In a sequence-item context (e.g. after an explicit
+                    // `: `) the first item stays on the same line.
+                } else if !self.output.ends_with("\n")
+                    && !self.output.is_empty()
+                    && !self.output.ends_with("- ")
+                    && !self.output.ends_with("? ")
+                {
+                    self.output.push('\n');
+                }
+                if !indentless {
+                    self.current_indent_level += 1;
+                }
+                for item in items {
+                    let before = self.output.len();
+                    write!(self.output, "{}- ", self.get_indent()).ok();
+                    self.serialize_yaml_value_ctx(item, ValueCtx::SeqItem)?;
+                    if self.output.len() == before + 2 {
+                        // Empty item: `- ` alone renders as `-`.
+                        self.output.pop();
+                    }
+                    if !self.output.ends_with('\n') {
+                        self.output.push('\n');
+                    }
+                }
+                if !indentless {
+                    self.current_indent_level -= 1;
+                }
+                Ok(())
+            }
+            YamlValueData::Map(map) => {
+                if map.len() == 0 {
+                    write!(self.output, "{}{{}}", self.get_indent()).ok();
+                    self.pending_tag = false;
+                    return Ok(());
+                }
+                // A mapping value is always indented (only a sequence
+                // value is written indentless).
+                if self.pending_tag {
+                    self.output.pop();
+                    self.output.push('\n');
+                    self.pending_tag = false;
+                } else if self.output.ends_with(": ") {
+                    if matches!(ctx, ValueCtx::SeqItem) {
+                        // After an explicit `: ` the first key stays on
+                        // the same line (`: hr: 65`).
+                    } else {
+                        // `key:` stays (the space is dropped), the
+                        // sub-keys are written indented.
+                        self.output.pop();
+                        self.output.push('\n');
+                    }
+                } else if !self.output.ends_with("\n")
+                    && !self.output.is_empty()
+                    && !self.output.ends_with("- ")
+                    && !self.output.ends_with("? ")
+                {
+                    self.output.push('\n');
+                }
+                self.current_indent_level += 1;
+                for (key, item) in map.iter() {
+                    if is_simple_key(key) {
+                        write!(
+                            self.output,
+                            "{}{}: ",
+                            self.get_indent(),
+                            simple_key_text(key)
+                        )
+                        .ok();
+                        let before = self.output.len();
+                        self.serialize_yaml_value_ctx(
+                            item,
+                            ValueCtx::MapValue,
+                        )?;
+                        if self.output.len() == before {
+                            // Empty value: `key: ` renders as `key:`.
+                            self.output.pop();
+                        }
+                        if !self.output.ends_with('\n') {
+                            self.output.push('\n');
+                        }
+                    } else {
+                        // Explicit `? key` form, value on its own `: `;
+                        // a collection value starts inline on that line.
+                        write!(self.output, "{}? ", self.get_indent()).ok();
+                        self.serialize_yaml_value_ctx(key, ValueCtx::SeqItem)?;
+                        if !self.output.ends_with('\n') {
+                            self.output.push('\n');
+                        }
+                        write!(self.output, "{}: ", self.get_indent()).ok();
+                        let before = self.output.len();
+                        self.serialize_yaml_value_ctx(item, ValueCtx::SeqItem)?;
+                        if self.output.len() == before {
+                            self.output.pop();
+                        }
+                        if !self.output.ends_with('\n') {
+                            self.output.push('\n');
+                        }
+                    }
+                }
+                self.current_indent_level -= 1;
+                Ok(())
+            }
+            YamlValueData::Tag(tag) => {
+                self.write_tag(&tag_shorthand(&tag.name));
+                let empty =
+                    matches!(
+                        &tag.data,
+                        crate::YamlValueData::String(s) if s.is_empty()
+                    ) || matches!(&tag.data, crate::YamlValueData::Null);
+                self.serialize_yaml_value_data(&tag.data, ctx)?;
+                if empty && self.output.ends_with(' ') {
+                    self.output.pop();
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Where the current value is being written, which decides the layout
+/// of nested collections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueCtx {
+    Root,
+    SeqItem,
+    MapValue,
+}
+
+/// Whether a mapping key can be written in the simple `key: value`
+/// form (a single-line scalar, a tag on a single-line scalar, or an
+/// empty collection).
+fn is_simple_key(key: &crate::YamlValue) -> bool {
+    match &key.data {
+        crate::YamlValueData::String(s) => !s.contains('\n'),
+        crate::YamlValueData::Tag(tag) => {
+            matches!(&tag.data, crate::YamlValueData::String(s) if !s.contains('\n'))
+        }
+        crate::YamlValueData::Array(items) => items.is_empty(),
+        crate::YamlValueData::Map(map) => map.len() == 0,
+        _ => false,
+    }
+}
+
+/// The text of a simple key: the scalar itself, a tag on a scalar
+/// (e.g. `!!str a`, and `!!str ` for a tagged empty scalar, so the
+/// following `:` is separated by a space), or an empty collection.
+fn simple_key_text(key: &crate::YamlValue) -> String {
+    match &key.data {
+        crate::YamlValueData::String(s) => to_out_yaml_scalar(s),
+        crate::YamlValueData::Tag(tag) => {
+            let mut text = format!("!{}", tag_shorthand(&tag.name));
+            if let crate::YamlValueData::String(s) = &tag.data {
+                if s.is_empty() {
+                    text.push(' ');
+                } else {
+                    text.push(' ');
+                    text.push_str(s);
+                }
+            }
+            text
+        }
+        crate::YamlValueData::Array(_) => "[]".to_string(),
+        crate::YamlValueData::Map(_) => "{}".to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Convert a stored tag URI (e.g. `<tag:yaml.org,2002:int>`, `<!foo>`)
+/// back to its YAML shorthand form (`!!int`, `!foo`), keeping unmatched
+/// prefixes verbatim (`!<tag:...>`). The leading `!` is omitted: the
+/// caller (e.g. `write_tag`) prepends it.
+fn tag_shorthand(name: &str) -> String {
+    let inner = name
+        .strip_prefix('<')
+        .and_then(|s| s.strip_suffix('>'))
+        .unwrap_or(name);
+    if let Some(suffix) = inner.strip_prefix("tag:yaml.org,2002:") {
+        return format!("!{suffix}");
+    }
+    if let Some(rest) = inner.strip_prefix('!') {
+        return rest.to_string();
+    }
+    format!("<{inner}>")
+}
+
+/// Dump a parsed [`YamlValue`] back to YAML (the `to_yaml` workflow),
+/// using the default [`YamlSerializeOption`].
+impl crate::YamlValue {
+    pub fn to_string(&self) -> Result<String, YamlError> {
+        self.to_string_with_opt(YamlSerializeOption::default())
+    }
+
+    /// Dump a parsed [`YamlValue`] back to YAML, honoring `option`.
+    ///
+    /// `indent_count` controls the block indentation (minimum 2) and
+    /// `leading_start_indicator` prepends a `---` document header.
+    /// `max_width` is accepted for compatibility with
+    /// [`to_string_with_opt`] but has no effect here: the yaml-test-suite
+    /// `out.yaml` files never fold long lines, so the value dump never
+    /// wraps (only the serde serializer path folds).
+    pub fn to_string_with_opt(
+        &self,
+        option: YamlSerializeOption,
+    ) -> Result<String, YamlError> {
+        if option.indent_count < 2 {
+            return Err(YamlError::new(
+                ErrorKind::IndentTooSmall,
+                "Minimum supported indent count is 2".to_string(),
+                YamlPosition::EOF,
+                YamlPosition::EOF,
+            ));
+        }
+        let mut serializer = YamlSerializer {
+            output: if option.leading_start_indicator {
+                "---\n".to_string()
+            } else {
+                String::new()
+            },
+            option,
+            ..Default::default()
+        };
+        serializer.serialize_yaml_value(self)?;
+        if serializer.output.is_empty() {
+            return Ok(String::new());
+        }
+        if serializer.output.ends_with("\n\n") {
+            serializer.output.pop();
+        }
+        if !serializer.output.ends_with('\n') {
+            serializer.output.push('\n');
+        }
+        Ok(serializer.output)
     }
 }
 

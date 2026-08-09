@@ -74,7 +74,7 @@ pub(crate) use self::{
     event::{YamlCollectionStyle, YamlEvent, YamlEventIter, YamlScalarStyle},
     map::YamlValueMapAccess,
     parser::YamlParser,
-    scalar_ser::to_scalar_string,
+    scalar_ser::{to_out_yaml_scalar, to_scalar_string},
     scanner::YamlScanner,
     sequence::YamlValueSeqAccess,
     state::YamlState,

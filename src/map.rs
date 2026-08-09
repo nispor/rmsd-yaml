@@ -50,6 +50,10 @@ impl YamlValueMap {
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&YamlValue, &YamlValue)> {
+        self.0.iter()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

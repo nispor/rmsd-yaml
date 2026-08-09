@@ -125,7 +125,9 @@ fn looks_like_non_string(input: &str) -> bool {
 }
 
 /// Escape a string for the double-quoted style. The escapes follow
-/// YAML 1.2.2 SPEC, 7.3.4.2 (NS_ESC_* productions).
+/// YAML 1.2.2 SPEC, 7.3.4.2 (NS_ESC_* productions). Non-ASCII
+/// characters are escaped as `\uXXXX` (the generator that produced
+/// the `out.yaml` test files did not allow unicode).
 fn escape_double_quoted(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for c in input.chars() {
@@ -141,15 +143,122 @@ fn escape_double_quoted(input: &str) -> String {
             '\u{0b}' => out.push_str("\\v"),
             '\u{0c}' => out.push_str("\\f"),
             '\u{1b}' => out.push_str("\\e"),
+            '\u{85}' => out.push_str("\\x85"),
             '\u{2028}' => out.push_str("\\u2028"),
             '\u{2029}' => out.push_str("\\u2029"),
             c if (c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32)) => {
                 out.push_str(&format!("\\x{:02X}", c as u32));
             }
+            c if (c as u32) > 0xFF => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
             c => out.push(c),
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Scalar rendering for the `to_yaml` workflow (parsed `YamlValue` dump).
+//
+// The conventions follow the yaml-test-suite `out.yaml` files: plain
+// scalars are preferred (including number/bool/null-looking text),
+// then single-quoted, then double-quoted. Empty scalars stay empty.
+// Non-ASCII is escaped (the generator that produced `out.yaml` did not
+// allow unicode in scalar values).
+// ---------------------------------------------------------------------------
+
+/// Render a scalar value for the `to_yaml` dump.
+pub(crate) fn to_out_yaml_scalar(input: &str) -> String {
+    if input.is_empty() {
+        return String::new();
+    }
+    if plain_safe(input) {
+        return input.to_string();
+    }
+    if single_quote_safe(input) {
+        return format!("'{}'", input.replace('\'', "''"));
+    }
+    format!("\"{}\"", escape_double_quoted(input))
+}
+
+/// Whether the string can be rendered as a plain (unquoted) scalar
+/// (YAML 1.2.2 SPEC, 7.3.3 Plain Style), matching `out.yaml`.
+fn plain_safe(input: &str) -> bool {
+    if input.is_empty() || input.starts_with("---") || input.starts_with("...")
+    {
+        return false;
+    }
+    let mut chars = input.char_indices().peekable();
+    let (_, first) = chars.next().unwrap();
+    if matches!(
+        first,
+        ',' | '['
+            | ']'
+            | '{'
+            | '}'
+            | '&'
+            | '*'
+            | '!'
+            | '|'
+            | '>'
+            | '\''
+            | '"'
+            | '%'
+            | '@'
+            | '`'
+    ) {
+        return false;
+    }
+    if matches!(first, '-' | '?' | ':') {
+        // Only a block indicator when followed by blank or end.
+        if input.len() == first.len_utf8()
+            || is_blank(input.as_bytes()[first.len_utf8()] as char)
+        {
+            return false;
+        }
+    }
+    if first == ' ' || first == '\t' {
+        return false;
+    }
+    for (i, c) in input.char_indices() {
+        if c.is_control() || is_yaml_line_break(c) || c == '\t' {
+            return false;
+        }
+        if !c.is_ascii() {
+            return false;
+        }
+        if c == ':' {
+            let next = input[i + 1..].chars().next();
+            if next.is_none_or(|n| n == ' ' || is_yaml_line_break(n)) {
+                return false;
+            }
+        }
+        if c == '#' && i > 0 {
+            let prev = input[..i].chars().next_back().unwrap();
+            if prev == ' ' || prev == '\t' {
+                return false;
+            }
+        }
+    }
+    let last = input.chars().next_back().unwrap();
+    if last == ' ' || last == '\t' {
+        return false;
+    }
+    true
+}
+
+/// Whether the string can be rendered as a single-quoted scalar.
+fn single_quote_safe(input: &str) -> bool {
+    input.chars().all(|c| {
+        c.is_ascii()
+            && !c.is_control()
+            && !matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}')
+    })
+}
+
+fn is_blank(c: char) -> bool {
+    c == ' ' || c == '\t'
 }
 
 #[cfg(test)]
