@@ -260,3 +260,44 @@ fn test_indented_block_map_key() {
         assert!(matches!(v.data, crate::ValueData::Array(_)));
     }
 }
+
+#[test]
+fn test_seq_entry_map_keys_after_nested_seq_value() {
+    // A block mapping used as a block sequence entry whose value is a
+    // nested block sequence: the following keys of the entry map sit at
+    // the key's own column, which is one deeper than the sequence
+    // indentation (`- bridge:` starts the key at column 4 while the
+    // sequence itself is at column 2). Sibling keys like `mac-address`
+    // and `name` must not be confused with a continuation of the value
+    // scalar, and must not keep leading whitespace.
+    let value = Value::from_str(
+        "interfaces:\n  - bridge:\n      port:\n        - name: eth0\n    \
+         mac-address: 00:00:5E:00:00:01\n    name: br1\n",
+    )
+    .unwrap();
+    let map = match value.data {
+        crate::ValueData::Map(m) => *m,
+        d => panic!("Expecting a map, but got {d:?}"),
+    };
+    let interfaces = map.get(&Value::from("interfaces")).unwrap();
+    let seq = match &interfaces.data {
+        crate::ValueData::Array(seq) => seq,
+        d => panic!("Expecting an array, but got {d:?}"),
+    };
+    assert_eq!(seq.len(), 1);
+    let entry = match &seq[0].data {
+        crate::ValueData::Map(m) => m,
+        d => panic!("Expecting a map, but got {d:?}"),
+    };
+    assert_eq!(entry.len(), 3);
+    for key in ["bridge", "mac-address", "name"] {
+        assert!(
+            entry.contains_key(&Value::from(key)),
+            "missing key {key:?}: {entry:?}"
+        );
+    }
+    assert_eq!(
+        entry.get(&Value::from("mac-address")).unwrap().as_str(),
+        Ok("00:00:5E:00:00:01")
+    );
+}
