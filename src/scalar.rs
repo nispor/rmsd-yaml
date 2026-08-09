@@ -549,6 +549,11 @@ impl<'a> YamlParser<'a> {
         // line becomes a line feed. Escaped line feeds (e.g. `\n`) are
         // content and must never be folded, so they are pushed verbatim.
         let mut pending_breaks = 0usize;
+        // Length of `ret` after the last escape sequence: trailing
+        // whitespace exclusion at a line break only applies to raw
+        // whitespace of the source line, never to escaped content
+        // (yaml-test-suite: trailing-tabs-in-double-quoted).
+        let mut escaped_content_len = 0usize;
 
         let mut closed = false;
         while let Some(c) = self.scanner.next_char() {
@@ -602,6 +607,13 @@ impl<'a> YamlParser<'a> {
                     }
                     pending_breaks = 0;
                     ret.push(esc);
+                    // An escaped tab is content even at the end of a
+                    // line; escaped spaces behave like raw spaces and
+                    // are excluded when folding (yaml-test-suite:
+                    // trailing-tabs-in-double-quoted).
+                    if esc == '\t' {
+                        escaped_content_len = ret.len();
+                    }
                 }
                 '\r' | '\n' => {
                     if c == '\r' && self.scanner.peek_char() == Some('\n') {
@@ -609,9 +621,11 @@ impl<'a> YamlParser<'a> {
                     }
                     self.check_quoted_scalar_document_marker()?;
                     // Separation spaces at the end of the current line
-                    // are a presentation detail.
+                    // are a presentation detail; escaped content (e.g. a
+                    // `\t` escape) is never trailing whitespace.
                     let trimmed_len = ret.trim_end_matches([' ', '\t']).len();
-                    ret.truncate(trimmed_len);
+                    let keep = trimmed_len.max(escaped_content_len);
+                    ret.truncate(keep);
                     pending_breaks += 1;
                 }
                 ' ' | '\t' if pending_breaks > 0 => {
