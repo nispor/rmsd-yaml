@@ -157,7 +157,13 @@ impl<'a> YamlParser<'a> {
                 let tab_after_dash = trimmed.starts_with("-\t");
                 self.scanner.advance(cur_indent + 2);
                 self.skip_block_indicator_separation(tab_after_dash)?;
-                self.handle_node(0, cur_indent + 2, None, None)?;
+                // Continuation lines of the entry content only need to
+                // be indented more than the sequence's own
+                // indentation, not as much as the content column
+                // (yaml-test-suite: legal-tab-after-indentation,
+                // sequence-entry-that-looks-like-two-with-wrong-indentation).
+                let entry_floor = self.block_indent.unwrap_or(cur_indent) + 1;
+                self.handle_node(0, entry_floor, None, None)?;
             } else if trimmed.is_empty() {
                 self.scanner.next_line();
                 continue;
