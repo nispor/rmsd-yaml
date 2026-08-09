@@ -376,6 +376,11 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
                     self.parsed.end,
                 ))
             }
+        } else if self.parsed.is_null() {
+            // `a:` and `a: null` deserialize into an empty sequence,
+            // matching serde_yaml.
+            let access = SequenceAccess::new(vec![], self.path.clone());
+            visitor.visit_seq(access)
         } else {
             Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
@@ -419,7 +424,9 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
             // where we can use `Option::take()` to move data out.
             let access = MappingAccess::new(*v.clone(), self.path.clone());
             visitor.visit_map(access)
-        } else if let ValueData::Null = &self.parsed.data {
+        } else if self.parsed.is_null() {
+            // `a:` and `a: null` deserialize into an empty map/struct,
+            // matching serde_yaml.
             let access =
                 MappingAccess::new(Default::default(), self.path.clone());
             visitor.visit_map(access)

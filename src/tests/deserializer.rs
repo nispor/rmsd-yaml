@@ -358,3 +358,31 @@ fn test_invalid_type_error_matches_serde_yaml() {
         err
     );
 }
+
+#[test]
+fn test_deserialize_empty_value_as_empty_map_and_seq() {
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Inner {
+        #[serde(default)]
+        items: Vec<i32>,
+    }
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        a: Inner,
+    }
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct T {
+        x: Vec<i32>,
+    }
+    // `a:` and `x:` with empty values deserialize into empty
+    // collections, matching serde_yaml.
+    let s: S = from_str("a:\nb: 1\n").unwrap();
+    assert_eq!(
+        s,
+        S {
+            a: Inner { items: vec![] }
+        }
+    );
+    let t: T = from_str("x:\n").unwrap();
+    assert_eq!(t, T { x: vec![] });
+}
