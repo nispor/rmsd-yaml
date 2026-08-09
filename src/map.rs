@@ -410,9 +410,40 @@ impl<'a> YamlParser<'a> {
                 } else if trimmed_key.starts_with('!') {
                     // A tagged key, e.g. `!!str : value` (empty tagged
                     // scalar) or `!foo key : value`.
+                    // The key content (or the `:` separator) must sit
+                    // on the tag's own line; a tag alone (`!!map` with
+                    // the content on the next line) is an error.
+                    let tag_token =
+                        trimmed_key.split([' ', '\t']).next().unwrap_or("");
+                    let after_tag = trimmed_key[tag_token.len()..]
+                        .trim_start_matches([' ', '\t'])
+                        .split('#')
+                        .next()
+                        .unwrap_or("")
+                        .trim_end();
+                    if after_tag.is_empty() {
+                        return Err(YamlError::new(
+                            ErrorKind::InvalidImplicitKey,
+                            format!(
+                                "A tagged mapping key must have content or \
+                                 a ':' on the same line, but got: \
+                                 {trimmed_key:?}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
                     self.scanner.advance(cur_indent);
                     let key_tag = self.handle_tag()?;
-                    self.scanner.skip_flow_separation();
+                    // The key content (or the `:` separator) must sit
+                    // on the tag's own line; a line break right after
+                    // the tag is an error (e.g. `!!map\n  a: b`).
+                    while matches!(
+                        self.scanner.peek_char(),
+                        Some(' ') | Some('\t')
+                    ) {
+                        self.scanner.next_char();
+                    }
                     if self.scanner.peek_char() == Some('&') {
                         // A tagged and anchored key, e.g.
                         // `!!str &a "foo": value`.
