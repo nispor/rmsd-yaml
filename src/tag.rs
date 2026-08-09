@@ -2,7 +2,7 @@
 
 use crate::{ErrorKind, YamlError, YamlParser, YamlValueData};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct YamlTag {
     pub name: String,
     pub data: YamlValueData,

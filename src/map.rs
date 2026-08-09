@@ -51,7 +51,9 @@ impl YamlValueMap {
         self.0.len()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&YamlValue, &YamlValue)> {
+    pub(crate) fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&YamlValue, &YamlValue)> {
         self.0.iter()
     }
 }
@@ -1222,17 +1224,15 @@ impl<'a> YamlParser<'a> {
                         // A comment directly after the comma (without a
                         // separation space) is an error.
                         if self.scanner.peek_char() == Some('#') {
-                            return Err(
-                                YamlError::new(
-                                    ErrorKind::AmbiguityPlainScalar,
-                                    "Comment must be preceded by a space \
+                            return Err(YamlError::new(
+                                ErrorKind::AmbiguityPlainScalar,
+                                "Comment must be preceded by a space \
                                      after                                  \
                                      ',' in a flow mapping"
-                                        .to_string(),
-                                    self.scanner.next_pos,
-                                    self.scanner.next_pos,
-                                ),
-                            );
+                                    .to_string(),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
                         }
                         self.scanner.skip_flow_separation();
                         // A trailing comma before '}' is tolerated in

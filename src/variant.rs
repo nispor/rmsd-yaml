@@ -46,6 +46,7 @@ impl<'de> VariantAccess<'de> for YamlValueEnumAccess {
                 start: self.value.start,
                 end: self.value.end,
                 data: tag.data,
+                ..Default::default()
             };
             seed.deserialize(&mut YamlDeserializer { parsed: value })
         } else {
@@ -104,6 +105,7 @@ impl<'de> EnumAccess<'de> for YamlValueEnumAccess {
                         data: tag.data.clone(),
                         start: self.value.start,
                         end: self.value.end,
+                        ..Default::default()
                     },
                 },
             ))

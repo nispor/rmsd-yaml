@@ -68,7 +68,7 @@ pub use self::{
     serializer::{
         YamlSerializeOption, YamlSerializer, to_string, to_string_with_opt,
     },
-    value::{YamlValue, YamlValueData},
+    value::{YamlValue, YamlValueData, YamlValueMeta},
 };
 pub(crate) use self::{
     event::{YamlCollectionStyle, YamlEvent, YamlEventIter, YamlScalarStyle},

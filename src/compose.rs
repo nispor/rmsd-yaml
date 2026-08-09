@@ -71,7 +71,7 @@ fn compose_value(
             }
             YamlEvent::SequenceStart(anchor, tag, _style, pos) => {
                 let array = compose_sequence(events_iter, anchors, pos)?;
-                let ret = if let Some(tag) = tag {
+                let mut ret = if let Some(tag) = tag {
                     YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
@@ -79,12 +79,14 @@ fn compose_value(
                         })),
                         start: array.start,
                         end: array.end,
+                        ..Default::default()
                     }
                 } else {
                     array
                 };
-                if let Some(anchor) = anchor {
-                    anchors.insert(anchor, ret.clone());
+                ret.meta.anchor = anchor;
+                if let Some(anchor) = &ret.meta.anchor {
+                    anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
             }
@@ -103,7 +105,7 @@ fn compose_value(
             }
             YamlEvent::MapStart(anchor, tag, _style, pos) => {
                 let map = compose_map(events_iter, anchors, pos)?;
-                let ret = if let Some(tag) = tag {
+                let mut ret = if let Some(tag) = tag {
                     YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
@@ -111,12 +113,14 @@ fn compose_value(
                         })),
                         start: map.start,
                         end: map.end,
+                        ..Default::default()
                     }
                 } else {
                     map
                 };
-                if let Some(anchor) = anchor {
-                    anchors.insert(anchor, ret.clone());
+                ret.meta.anchor = anchor;
+                if let Some(anchor) = &ret.meta.anchor {
+                    anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
             }
@@ -133,8 +137,8 @@ fn compose_value(
                     pos,
                 ));
             }
-            YamlEvent::Scalar(anchor, tag, val, _style, start, end) => {
-                let ret = if let Some(tag) = tag {
+            YamlEvent::Scalar(anchor, tag, val, style, start, end) => {
+                let mut ret = if let Some(tag) = tag {
                     YamlValue {
                         data: YamlValueData::Tag(Box::new(YamlTag {
                             name: tag,
@@ -142,22 +146,28 @@ fn compose_value(
                         })),
                         start,
                         end,
+                        ..Default::default()
                     }
                 } else {
                     YamlValue {
                         data: YamlValueData::String(val),
                         start,
                         end,
+                        ..Default::default()
                     }
                 };
-                if let Some(anchor) = anchor {
-                    anchors.insert(anchor, ret.clone());
+                ret.meta.scalar_style = Some(style);
+                ret.meta.anchor = anchor;
+                if let Some(anchor) = &ret.meta.anchor {
+                    anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
             }
             YamlEvent::Alias(name, pos) => {
                 if let Some(value) = anchors.get(&name) {
-                    return Ok(value.clone());
+                    let mut ret = value.clone();
+                    ret.meta.alias = Some(name);
+                    return Ok(ret);
                 } else {
                     return Err(YamlError::new(
                         ErrorKind::UnknownAlias,
@@ -200,6 +210,7 @@ fn compose_sequence(
         data: YamlValueData::Array(ret),
         start: start_pos,
         end: end_pos,
+        ..Default::default()
     })
 }
 
@@ -233,6 +244,7 @@ fn compose_map(
         data: YamlValueData::Map(Box::new(ret)),
         start: start_pos,
         end: end_pos,
+        ..Default::default()
     })
 }
 
@@ -265,7 +277,8 @@ mod test {
             YamlValue {
                 data: YamlValueData::String("abc".to_string()),
                 start: YamlPosition::new(1, 1),
-                end: YamlPosition::new(1, 3)
+                end: YamlPosition::new(1, 3),
+                ..Default::default()
             }
         );
     }
@@ -310,15 +323,18 @@ mod test {
                         data: YamlValueData::String("abc".into()),
                         start: YamlPosition::new(1, 3),
                         end: YamlPosition::new(1, 5),
+                        ..Default::default()
                     },
                     YamlValue {
                         data: YamlValueData::String("def".into()),
                         start: YamlPosition::new(2, 3),
                         end: YamlPosition::new(2, 5),
+                        ..Default::default()
                     }
                 ]),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(2, 5),
+                ..Default::default()
             }
         );
     }
@@ -361,11 +377,13 @@ mod test {
                 data: YamlValueData::String("abc".into()),
                 start: YamlPosition::new(1, 3),
                 end: YamlPosition::new(1, 5),
+                ..Default::default()
             },
             YamlValue {
                 data: YamlValueData::String("def".into()),
                 start: YamlPosition::new(2, 3),
                 end: YamlPosition::new(2, 5),
+                ..Default::default()
             },
         );
 
@@ -375,6 +393,7 @@ mod test {
                 data: YamlValueData::Map(Box::new(map)),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(2, 5),
+                ..Default::default()
             }
         );
     }
@@ -447,11 +466,13 @@ mod test {
                 data: YamlValueData::String("abc".into()),
                 start: YamlPosition::new(1, 3),
                 end: YamlPosition::new(1, 5),
+                ..Default::default()
             },
             YamlValue {
                 data: YamlValueData::String("def".into()),
                 start: YamlPosition::new(1, 8),
                 end: YamlPosition::new(1, 10),
+                ..Default::default()
             },
         );
         let mut map2 = YamlValueMap::new();
@@ -460,11 +481,13 @@ mod test {
                 data: YamlValueData::String("hig".into()),
                 start: YamlPosition::new(2, 3),
                 end: YamlPosition::new(2, 5),
+                ..Default::default()
             },
             YamlValue {
                 data: YamlValueData::String("klm".into()),
                 start: YamlPosition::new(2, 8),
                 end: YamlPosition::new(2, 10),
+                ..Default::default()
             },
         );
 
@@ -476,15 +499,18 @@ mod test {
                         data: YamlValueData::Map(Box::new(map1)),
                         start: YamlPosition::new(1, 1),
                         end: YamlPosition::new(1, 10),
+                        ..Default::default()
                     },
                     YamlValue {
                         data: YamlValueData::Map(Box::new(map2)),
                         start: YamlPosition::new(2, 1),
                         end: YamlPosition::new(2, 10),
+                        ..Default::default()
                     },
                 ]),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(2, 10),
+                ..Default::default()
             }
         );
     }
@@ -550,6 +576,7 @@ mod test {
                 data: YamlValueData::String("abc".into()),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(1, 3),
+                ..Default::default()
             },
             YamlValue {
                 data: YamlValueData::Array(vec![
@@ -557,20 +584,24 @@ mod test {
                         data: YamlValueData::String("def".into()),
                         start: YamlPosition::new(2, 3),
                         end: YamlPosition::new(2, 5),
+                        ..Default::default()
                     },
                     YamlValue {
                         data: YamlValueData::String("hig".into()),
                         start: YamlPosition::new(3, 3),
                         end: YamlPosition::new(3, 5),
+                        ..Default::default()
                     },
                     YamlValue {
                         data: YamlValueData::String("klm".into()),
                         start: YamlPosition::new(4, 3),
                         end: YamlPosition::new(4, 5),
+                        ..Default::default()
                     },
                 ]),
                 start: YamlPosition::new(2, 1),
                 end: YamlPosition::new(4, 5),
+                ..Default::default()
             },
         );
         assert_eq!(
@@ -579,6 +610,7 @@ mod test {
                 data: YamlValueData::Map(Box::new(map)),
                 start: YamlPosition::new(1, 1),
                 end: YamlPosition::new(4, 5),
+                ..Default::default()
             }
         );
     }

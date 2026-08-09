@@ -147,6 +147,7 @@ impl YamlSerializer {
             data: data.clone(),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         };
         self.serialize_yaml_value_ctx(&value, ctx)
     }

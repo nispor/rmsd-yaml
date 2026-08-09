@@ -3,14 +3,54 @@
 use std::str::FromStr;
 
 use crate::{
-    ErrorKind, YamlError, YamlParser, YamlPosition, YamlTag, YamlValueMap,
+    ErrorKind, YamlError, YamlParser, YamlPosition, YamlScalarStyle, YamlTag,
+    YamlValueMap,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct YamlValue {
     pub data: YamlValueData,
     pub start: YamlPosition,
     pub end: YamlPosition,
+    /// Round-trip metadata from the parsed events (scalar style,
+    /// anchor, alias). Preserved by [`YamlValue::to_string`] so a
+    /// parsed document can be dumped byte-identically, but
+    /// deliberately *not* part of [`PartialEq`]/[`Hash`]: two values
+    /// with the same data are equal regardless of their style.
+    pub meta: YamlValueMeta,
+}
+
+/// Round-trip metadata attached to a parsed [`YamlValue`].
+#[derive(Debug, Clone, Default)]
+pub struct YamlValueMeta {
+    /// The scalar style of a `String` node (or of the scalar wrapped
+    /// in a `Tag`). `None` for values built in code.
+    pub scalar_style: Option<YamlScalarStyle>,
+    /// The anchor declared on this node (`&name`).
+    pub anchor: Option<String>,
+    /// The alias this node was produced from (`*name`). The `data` is
+    /// the resolved value; the dump renders `*name` instead.
+    pub alias: Option<String>,
+}
+
+// `meta` is excluded from equality/hash so the value semantics of
+// `YamlValue` (and of map keys) are unchanged by the round-trip info.
+impl PartialEq for YamlValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+            && self.start == other.start
+            && self.end == other.end
+    }
+}
+
+impl Eq for YamlValue {}
+
+impl std::hash::Hash for YamlValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+        self.start.hash(state);
+        self.end.hash(state);
+    }
 }
 
 impl std::fmt::Display for YamlValue {
@@ -490,6 +530,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::Null,
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -498,6 +539,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::Null,
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -506,6 +548,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::String(v.to_string()),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -517,6 +560,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::String(v.to_string()),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -528,6 +572,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::String(v),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -571,6 +616,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::Array(array),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -588,6 +634,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             data: YamlValueData::Map(Box::new(data)),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 
@@ -605,6 +652,7 @@ impl<'de> serde::de::Visitor<'de> for YamlValueVisitor {
             })),
             start: YamlPosition::EOF,
             end: YamlPosition::EOF,
+            ..Default::default()
         })
     }
 }
