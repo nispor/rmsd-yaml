@@ -162,6 +162,15 @@ impl Error {
         }
     }
 
+    /// Prefix the message with `path: ` like serde_yaml (e.g.
+    /// `cwnd: invalid type: ...`) unless the path is already present.
+    pub(crate) fn with_path(mut self, path: &str) -> Self {
+        if !path.is_empty() && !self.msg.starts_with(path) {
+            self.msg = format!("{path}: {}", self.msg);
+        }
+        self
+    }
+
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }

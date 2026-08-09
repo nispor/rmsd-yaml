@@ -49,8 +49,9 @@ impl<'de> SeqAccess<'de> for SequenceAccess {
             self.index += 1;
             seed.deserialize(&mut YamlDeserializer {
                 parsed: value,
-                path,
+                path: path.clone(),
             })
+            .map_err(|e| e.with_path(&path))
             .map(Some)
         } else {
             Ok(None)
