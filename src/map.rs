@@ -759,7 +759,26 @@ impl<'a> YamlParser<'a> {
                 self.handle_scalar(0, 0, anchor, tag)?;
             }
             (true, Some('[')) => {
-                self.handle_flow_seq(anchor, tag)?;
+                // A flow collection followed by `:` is a compact block
+                // mapping key, e.g. `? []: x`.
+                self.handle_flow_seq(anchor.clone(), tag.clone())?;
+                let saved = self.scanner.done_pos;
+                while self.scanner.peek_char() == Some(' ') {
+                    self.scanner.next_char();
+                }
+                if self.scanner.peek_char() == Some(':')
+                    && matches!(
+                        self.scanner.remains().chars().nth(1),
+                        None | Some(' ') | Some('\t') | Some('\n') | Some('\r')
+                            | Some('#')
+                    )
+                {
+                    let key_column =
+                        self.scanner.next_pos.column.saturating_sub(1);
+                    self.handle_block_map(0, key_column, anchor, tag)?;
+                } else {
+                    self.scanner.done_pos = saved;
+                }
             }
             (true, Some('{')) => {
                 self.handle_flow_map(anchor, tag)?;
@@ -983,22 +1002,33 @@ impl<'a> YamlParser<'a> {
 
     /// Parse the value node of an explicit mapping entry after its `:`.
     fn parse_explicit_value(&mut self) -> Result<(), YamlError> {
-        match self.scanner.peek_char() {
-            Some('-') => {
-                // A block sequence value on the `:` line, e.g.
-                // `: - one` (YAML 1.2.2 SPEC, 8.2.1): the entries keep
-                // the indentation of the dash itself.
-                self.handle_block_seq(
-                    self.scanner.done_pos.column,
-                    None,
-                    None,
-                )?;
+        let saved = self.in_explicit_value;
+        self.in_explicit_value = true;
+        let result = (|| {
+            match self.scanner.peek_char() {
+                Some('-') => {
+                    // A block sequence value on the `:` line, e.g.
+                    // `: - one` (YAML 1.2.2 SPEC, 8.2.1): the entries
+                    // keep the indentation of the dash itself.
+                    self.handle_block_seq(
+                        self.scanner.done_pos.column,
+                        None,
+                        None,
+                    )?;
+                }
+                _ => {
+                    self.handle_node(
+                        0,
+                        self.scanner.done_pos.column,
+                        None,
+                        None,
+                    )?;
+                }
             }
-            _ => {
-                self.handle_node(0, self.scanner.done_pos.column, None, None)?;
-            }
-        }
-        Ok(())
+            Ok(())
+        })();
+        self.in_explicit_value = saved;
+        result
     }
 
     /// Place the scanner at the `:` following a non-scalar mapping key

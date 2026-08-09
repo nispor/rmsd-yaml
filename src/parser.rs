@@ -18,6 +18,11 @@ pub(crate) struct YamlParser<'a> {
     /// top-level document node). Block scalar content indentation is
     /// relative to it (YAML 1.2.2 SPEC, 8.1.1.1).
     pub(crate) block_indent: Option<usize>,
+    /// Whether the node currently being parsed is the explicit value of
+    /// a mapping entry (`: value`); a compact block mapping is allowed
+    /// as an explicit value on the same line, unlike an implicit one
+    /// (`a: b: c` is an error).
+    pub(crate) in_explicit_value: bool,
     /// The indentation of the block sequence entries currently being
     /// parsed, once established by the first line-start entry; `None`
     /// while the first entry is still mid-line (a compact entry). Used
@@ -76,6 +81,7 @@ impl<'a> YamlParser<'a> {
             states: Vec::new(),
             events: Vec::new(),
             block_indent: None,
+            in_explicit_value: false,
             seq_entry_indent: None,
             tag_handles: HashMap::new(),
             saw_directive: false,
@@ -616,6 +622,7 @@ impl<'a> YamlParser<'a> {
             } else if find_key_value_separator(trimmed).is_some() {
                 if self.cur_state().is_block_map_value()
                     && self.scanner.done_pos.line == self.scanner.next_pos.line
+                    && !self.in_explicit_value
                 {
                     // A block mapping may not be a value on the same
                     // line as its own key (YAML 1.2.2 SPEC, 8.2.2),
