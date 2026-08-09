@@ -684,6 +684,28 @@ impl<'a> YamlParser<'a> {
             let cur_indent_count =
                 line.chars().take_while(|c| *c == ' ').count();
 
+            // A whitespace-only line only continues the scalar when a
+            // real continuation line follows (then it folds into the
+            // content); otherwise it terminates the scalar (e.g.
+            // `bar: 2\n    \ntext: x` keeps `2` and `text` is the next
+            // key). This must be checked before the indentation floor,
+            // since empty lines fold regardless of their indentation.
+            if !is_first_line
+                && line
+                    .chars()
+                    .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n'))
+            {
+                if self.plain_scalar_continues_after_blank_lines(
+                    rest_indent_count,
+                ) {
+                    self.scanner.next_line();
+                    string_to_fold.push("");
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
             let expected_indent_count = if is_first_line {
                 first_indent_count
             } else {
@@ -718,10 +740,34 @@ impl<'a> YamlParser<'a> {
             }
 
             if !self.cur_state().is_block_map_key() && line.contains(": ") {
-                break;
+                if line.trim_start_matches(' ').starts_with(':') {
+                    // An explicit mapping value line (`: value` on its
+                    // own line) terminates the plain scalar and belongs
+                    // to the surrounding mapping.
+                    break;
+                }
+                // The line is indented enough to continue the plain
+                // scalar, but `: ` is not allowed inside a plain scalar
+                // (ns-plain-char excludes `:`). Since the line is too
+                // deep to be a sibling key of the parent mapping, it
+                // cannot belong to the parent either: this is an error
+                // (e.g. `a: 123\n  b: 4`).
+                return Err(YamlError::new(
+                    ErrorKind::InvalidImplicitKey,
+                    format!(
+                        "A line that looks like a mapping entry cannot \
+                         continue a plain scalar: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             }
 
-            if trimmed.starts_with("!") {
+            if first_line && trimmed.starts_with("!") {
+                // Node properties may only decorate the node itself, so a
+                // tag can only appear on the first line (e.g. a tagged
+                // implicit key `&a !t s: v`); a continuation line starting
+                // with `!` is plain scalar content.
                 tag = self.handle_tag()?;
             }
             let Some(mut line) = self.scanner.peek_line() else {
@@ -769,7 +815,9 @@ impl<'a> YamlParser<'a> {
                     self.push_event(YamlEvent::Scalar(
                         anchor,
                         tag,
-                        line[expected_indent_count..offset].to_string(),
+                        line[expected_indent_count..offset]
+                            .trim_end()
+                            .to_string(),
                         YamlScalarStyle::Plain,
                         start_pos,
                         self.scanner.done_pos,
@@ -863,6 +911,62 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
+    /// Decide whether a plain scalar continues past the current
+    /// whitespace-only line: scan the remaining input for the next line
+    /// that is not whitespace-only. The scalar only continues when that
+    /// line is a valid continuation (indented at least
+    /// `rest_indent_count` and not a terminator such as a mapping key,
+    /// a comment, a document marker or a sequence entry).
+    fn plain_scalar_continues_after_blank_lines(
+        &self,
+        rest_indent_count: usize,
+    ) -> bool {
+        let mut rest = self.scanner.remains();
+        loop {
+            let line = rest
+                .split_once(['\n', '\r'])
+                .map(|(s, _)| s)
+                .unwrap_or(rest);
+            let trimmed = line.trim_start_matches([' ', '\t']);
+            if !trimmed.is_empty() {
+                if trimmed.starts_with('#') {
+                    // A comment line ends the plain scalar.
+                    return false;
+                }
+                let indent = line.chars().take_while(|c| *c == ' ').count();
+                if indent < rest_indent_count {
+                    return false;
+                }
+                if is_document_end_marker(trimmed) {
+                    return false;
+                }
+                if trimmed == "---" || trimmed.starts_with("--- ") {
+                    return false;
+                }
+                if self.cur_state().is_block_seq()
+                    && trimmed.starts_with("- ")
+                {
+                    return false;
+                }
+                if !self.cur_state().is_block_map_key()
+                    && line.contains(": ")
+                {
+                    return false;
+                }
+                return true;
+            }
+            match rest.find(['\n', '\r']) {
+                Some(i) => {
+                    rest = &rest[i + 1..];
+                    if rest.starts_with('\n') {
+                        rest = &rest[1..];
+                    }
+                }
+                None => return false,
+            }
+        }
+    }
+
     fn validate_plain_scalar(
         &mut self,
         line: &str,
@@ -874,24 +978,15 @@ impl<'a> YamlParser<'a> {
         //      the “:”, “?” and “-” indicators may be used as the first
         //      character if followed by a non-space “safe” character, as
         //      this causes no ambiguity.
-        if let Some(first_char) = line.trim_start_matches(' ').chars().next() {
+        //      The restrictions apply to the first line only:
+        //      continuation lines may start with any character.
+        if first_line
+            && let Some(first_char) =
+                line.trim_start_matches(' ').chars().next()
+        {
             match first_char {
                 ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
-                | '>' | '\'' | '"' | '@' | '`' => {
-                    return Err(YamlError::new(
-                        ErrorKind::InvalidPlainScalarStart,
-                        format!(
-                            "Plain scalar should not start with '{first_char} \
-                             '"
-                        ),
-                        self.scanner.next_pos,
-                        self.scanner.next_pos,
-                    ));
-                }
-                // The `%` reserved indicator is only rejected on the
-                // first line; continuation lines may start with it
-                // (e.g. a line that looks like a directive).
-                '%' if first_line => {
+                | '>' | '\'' | '"' | '@' | '`' | '%' => {
                     return Err(YamlError::new(
                         ErrorKind::InvalidPlainScalarStart,
                         format!(
@@ -934,10 +1029,11 @@ impl<'a> YamlParser<'a> {
         }
 
         // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
-        //      In addition, inside flow collections, or when used as
-        //      implicit keys, plain scalars must not contain the “[”, “]”,
-        //      “{”, “}” and “,” characters.
-        if self.cur_state().is_flow() || self.cur_state().is_block_map_key() {
+        //      In addition, inside flow collections, plain scalars must
+        //      not contain the “[”, “]”, “{”, “}” and “,” characters.
+        //      (Block mapping keys may contain flow indicators, e.g.
+        //      `a[0]: 1`.)
+        if self.cur_state().is_flow() {
             let pre_pos = self.scanner.done_pos;
             if let Some(offset) = line.find(['[', ']', '{', '}']) {
                 self.scanner.advance_offset(offset);

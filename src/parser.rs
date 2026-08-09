@@ -449,8 +449,23 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
-                let expected_indent_count =
-                    rest_indent_count + indent_count - first_indent_count;
+                // When the entry starts at the beginning of a line, the
+                // sequence keeps that exact indentation (e.g. a mapping
+                // value after an inline comment `hr: # c\n  - a`). When
+                // the dash follows a parent entry on the same line (e.g.
+                // `- - a`), the indentation is derived from the parent.
+                let at_line_start = self.scanner.done_pos.column == 0
+                    || self.scanner.done_pos.line
+                        != self.scanner.next_pos.line
+                    || matches!(
+                        self.scanner.peek_char(),
+                        None | Some('\n') | Some('\r')
+                    );
+                let expected_indent_count = if at_line_start {
+                    indent_count
+                } else {
+                    rest_indent_count + indent_count - first_indent_count
+                };
                 self.handle_block_seq(expected_indent_count, anchor, tag)?;
             } else if !self.cur_state().is_block_map_value()
                 && (trimmed.starts_with('\'') || trimmed.starts_with('"'))
@@ -628,8 +643,17 @@ impl<'a> YamlParser<'a> {
                         self.scanner
                             .peek_line()
                             .map(|l| {
-                                l.chars().take_while(|c| *c == ' ').count()
-                                    > indent
+                                let l_indent =
+                                    l.chars().take_while(|c| *c == ' ').count();
+                                l_indent > indent
+                                    // A zero-indented block sequence is a
+                                    // valid mapping value (e.g.
+                                    // `seq:\n &a\n- 1`), so the properties
+                                    // decorate the sequence.
+                                    || (self.cur_state().is_block_map_value()
+                                        && l_indent == indent
+                                        && l.trim_start_matches(' ')
+                                            .starts_with("- "))
                             })
                             .unwrap_or(true)
                     })

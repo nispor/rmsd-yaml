@@ -22,7 +22,17 @@ impl<'a> YamlParser<'a> {
             ));
         }
         let start_pos = self.scanner.done_pos;
-        let name = self.scanner.peek_till_linebreak_or_space();
+        // The anchor/alias name ends at whitespace, a line break or a
+        // flow indicator (`*b,` in `[a, *b, c]`).
+        let mut name = String::new();
+        while let Some(c) = self.scanner.peek_char() {
+            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}')
+            {
+                break;
+            }
+            name.push(c);
+            self.scanner.next_char();
+        }
         if name.is_empty() {
             return Err(YamlError::new(
                 ErrorKind::InvalidAnchor,
@@ -76,7 +86,17 @@ impl<'a> YamlParser<'a> {
             ));
         }
         let start_pos = self.scanner.done_pos;
-        let name = self.scanner.peek_till_linebreak_or_space();
+        // The anchor/alias name ends at whitespace, a line break or a
+        // flow indicator (`*b,` in `[a, *b, c]`).
+        let mut name = String::new();
+        while let Some(c) = self.scanner.peek_char() {
+            if c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}')
+            {
+                break;
+            }
+            name.push(c);
+            self.scanner.next_char();
+        }
         if name.is_empty() {
             return Err(YamlError::new(
                 ErrorKind::InvalidAlias,
@@ -98,8 +118,6 @@ impl<'a> YamlParser<'a> {
                 self.scanner.next_pos,
             ));
         }
-        let name = name.to_string();
-        self.scanner.advance_till_linebreak_or_space();
         Ok(name)
     }
 }

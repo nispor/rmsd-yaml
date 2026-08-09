@@ -169,6 +169,15 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 continue;
             }
+            if trimmed_line.starts_with('#')
+                && self.scanner.done_pos.line == self.scanner.next_pos.line
+            {
+                // A trailing comment on the line where the previous
+                // node ended (e.g. `a: "v" # comment`): the comment is
+                // a presentation detail, consume it and move on.
+                self.scanner.advance_till_linebreak();
+                continue;
+            }
             if is_document_end_marker(trimmed_line) {
                 // Document end marker: leave it for the stream handler.
                 break;
@@ -432,12 +441,16 @@ impl<'a> YamlParser<'a> {
                             value_rest_indent_count = value_first_indent_count;
                         } else {
                             value_first_indent_count = 0;
-                            value_rest_indent_count =
-                                self.scanner.done_pos.column;
+                            value_rest_indent_count = rest_indent_count + 1;
                         }
                     } else {
+                        // A value on the same line as the key (e.g.
+                        // `a: value`): continuation lines only need to
+                        // be indented more than the mapping's own key
+                        // indentation (`rest_indent_count`), not as
+                        // much as the first content character.
                         value_first_indent_count = 0;
-                        value_rest_indent_count = self.scanner.done_pos.column;
+                        value_rest_indent_count = rest_indent_count + 1;
                     }
                 } else if trimmed_line.is_empty() {
                     self.scanner.next_line();
@@ -544,8 +557,68 @@ impl<'a> YamlParser<'a> {
         // position comparison is the reliable signal.)
         let same_line =
             self.scanner.done_pos.line == self.scanner.next_pos.line;
+        if !same_line {
+            // The key may still be a block node on the following lines
+            // (e.g. a zero-indented block sequence after a lone `?`,
+            // `?\n- a\n- b`). The sequence may sit at the mapping's own
+            // indentation; any other node must be deeper.
+            let map_indent = self.block_indent.unwrap_or(0);
+            let mut rest = self.scanner.remains();
+            let mut next_indent: Option<usize> = None;
+            let mut is_seq = false;
+            loop {
+                let line = rest
+                    .split_once(['\n', '\r'])
+                    .map(|(s, _)| s)
+                    .unwrap_or(rest);
+                let trimmed = line.trim_start_matches([' ', '\t']);
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    match rest.find(['\n', '\r']) {
+                        Some(i) => {
+                            rest = &rest[i + 1..];
+                            if rest.starts_with('\n') {
+                                rest = &rest[1..];
+                            }
+                        }
+                        None => break,
+                    }
+                    continue;
+                }
+                next_indent = Some(
+                    line.chars().take_while(|c| *c == ' ').count(),
+                );
+                is_seq = trimmed == "-" || trimmed.starts_with("- ");
+                break;
+            }
+            if let Some(indent) = next_indent {
+                if is_seq && indent >= map_indent {
+                    // The scanner already sits at the first content
+                    // line (the caller consumed the line break after
+                    // the `?`), so parse the sequence directly.
+                    self.handle_block_seq(indent, anchor, tag)?;
+                    return Ok(());
+                }
+                if indent > map_indent {
+                    self.handle_node(indent, indent, anchor, tag)?;
+                    return Ok(());
+                }
+            }
+            log::trace!(
+                "handle_explicit_key empty, anchor={anchor:?} tag={tag:?}"
+            );
+            // Empty explicit key.
+            self.push_event(YamlEvent::Scalar(
+                anchor,
+                tag,
+                String::new(),
+                YamlScalarStyle::Plain,
+                self.scanner.done_pos,
+                self.scanner.done_pos,
+            ));
+            return Ok(());
+        }
         match (same_line, self.scanner.peek_char()) {
-            (false, _) | (_, None) | (_, Some('#')) => {
+            (_, None) | (_, Some('#')) => {
                 log::trace!(
                     "handle_explicit_key empty, anchor={anchor:?} tag={tag:?}"
                 );
@@ -558,6 +631,10 @@ impl<'a> YamlParser<'a> {
                     self.scanner.done_pos,
                     self.scanner.done_pos,
                 ));
+            }
+            (false, Some(_)) => {
+                // Unreachable: `!same_line` returns above.
+                unreachable!();
             }
             (true, Some('\'')) | (true, Some('"')) => {
                 self.handle_scalar(0, 0, anchor, tag)?;
@@ -620,17 +697,61 @@ impl<'a> YamlParser<'a> {
     /// Parse the value of an explicit mapping entry, with the scanner
     /// positioned right after the `:`.
     fn parse_explicit_value_after_colon(&mut self) -> Result<(), YamlError> {
-        // `:` followed directly by a line break means an empty value.
+        // `:` followed directly by a line break: the value is empty
+        // unless content follows on the next lines (at a deeper
+        // indentation, or a zero-indented block sequence).
         if matches!(self.scanner.peek_char(), None | Some('\n') | Some('\r')) {
+            let map_indent = self.block_indent.unwrap_or(0);
+            let mut rest = self.scanner.remains();
+            let mut next_indent: Option<usize> = None;
+            let mut is_seq = false;
+            loop {
+                let line = rest
+                    .split_once(['\n', '\r'])
+                    .map(|(s, _)| s)
+                    .unwrap_or(rest);
+                let trimmed = line.trim_start_matches([' ', '\t']);
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    match rest.find(['\n', '\r']) {
+                        Some(i) => {
+                            rest = &rest[i + 1..];
+                            if rest.starts_with('\n') {
+                                rest = &rest[1..];
+                            }
+                        }
+                        None => break,
+                    }
+                    continue;
+                }
+                next_indent = Some(
+                    line.chars().take_while(|c| *c == ' ').count(),
+                );
+                is_seq = trimmed == "-" || trimmed.starts_with("- ");
+                break;
+            }
             let pos = self.scanner.next_pos;
-            self.push_event(YamlEvent::Scalar(
-                None,
-                None,
-                String::new(),
-                YamlScalarStyle::Plain,
-                pos,
-                pos,
-            ));
+            match next_indent {
+                Some(indent) if is_seq && indent >= map_indent => {
+                    self.scanner.next_line();
+                    self.skip_comment_and_empty_lines();
+                    self.handle_block_seq(indent, None, None)?;
+                }
+                Some(indent) if indent > map_indent => {
+                    self.scanner.next_line();
+                    self.skip_comment_and_empty_lines();
+                    self.handle_node(indent, indent, None, None)?;
+                }
+                _ => {
+                    self.push_event(YamlEvent::Scalar(
+                        None,
+                        None,
+                        String::new(),
+                        YamlScalarStyle::Plain,
+                        pos,
+                        pos,
+                    ));
+                }
+            }
             return Ok(());
         }
         self.scanner.skip_flow_separation();
