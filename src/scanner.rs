@@ -84,11 +84,13 @@ impl<'a> YamlScanner<'a> {
 
     /// Advance byte counts
     pub(crate) fn advance_offset(&mut self, offset: usize) {
-        let end_offset = self.iter.offset() + offset;
-        if self.remains().len() > offset {
-            while self.iter.offset() < end_offset {
-                self.next_char();
-            }
+        // Clamp to the remaining input: an `offset` past the end (e.g.
+        // consuming a trailing `--- ` marker that reaches EOF exactly)
+        // must still advance to EOF instead of leaving the scanner
+        // stuck, which would loop forever pushing events.
+        let end_offset = self.iter.offset() + offset.min(self.remains().len());
+        while self.iter.offset() < end_offset {
+            self.next_char();
         }
     }
 

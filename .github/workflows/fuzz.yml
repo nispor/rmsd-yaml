@@ -1,0 +1,35 @@
+name: Fuzz
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+  fuzz:
+    name: Fuzz smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust Nightly and cargo-fuzz
+        run: |
+          rustup override set nightly
+          rustup update nightly
+          cargo install cargo-fuzz --locked
+
+      - name: Build fuzz targets
+        run: cargo fuzz build
+
+      # Short smoke runs: the full coverage comes from the deterministic
+      # `tests::fuzz` smoke tests in `cargo test` plus manual
+      # `cargo fuzz run` sessions. Any panic, hang or OOM aborts the
+      # fuzzer and fails the job.
+      - name: Fuzz from_str (random characters)
+        run: cargo fuzz run from_str -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
+
+      - name: Fuzz from_reader (raw binary input)
+        run: cargo fuzz run from_reader -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
