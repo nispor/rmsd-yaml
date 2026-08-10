@@ -31,7 +31,9 @@
 //! # Ok::<(), rmsd_yaml::Error>(())
 //! ```
 //!
-//! Multiple documents, tags, anchors and block scalars are supported:
+//! Tags, anchors and block scalars are supported. Multi-document
+//! streams are not supported (see the "Limitations" section in
+//! `README.md`).
 //!
 //! ```
 //! use rmsd_yaml::{from_str, Value};
@@ -64,9 +66,8 @@ mod tests;
 
 pub use self::{
     deserializer::{
-        YamlDeserializer, YamlParseOption, documents, documents_with_opt,
-        from_reader, from_reader_with_opt, from_str, from_str_with_opt,
-        to_value,
+        YamlDeserializer, YamlParseOption, from_reader, from_reader_with_opt,
+        from_str, from_str_with_opt, to_value,
     },
     error::{Error, ErrorKind},
     event::YamlScalarStyle,

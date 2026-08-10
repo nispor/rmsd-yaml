@@ -131,7 +131,12 @@ impl Value {
 ///
 /// Anchors are scoped per document per the YAML specification, so the
 /// anchor table is reset between documents.
-pub(crate) fn compose_documents_with_limits(
+///
+/// Multi-document streams are not part of the public API (see the
+/// "Limitations" section in `README.md`); this composes every
+/// document anyway so [`Value::compose_with_limits`] can tell whether
+/// the stream held more than one and reject it accordingly.
+fn compose_documents_with_limits(
     events: Vec<YamlEvent>,
     max_depth: usize,
     max_nodes: usize,

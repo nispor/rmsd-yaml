@@ -21,8 +21,8 @@ use crate::{
 /// Options controlling the resource limits enforced while parsing
 /// YAML, guarding against maliciously crafted input (deeply nested
 /// documents, anchor/alias expansion bombs) exhausting the stack or
-/// memory. Used by the `_with_opt` variants of [`from_str`],
-/// [`from_reader`] and [`documents`].
+/// memory. Used by the `_with_opt` variants of [`from_str`] and
+/// [`from_reader`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct YamlParseOption {
@@ -37,11 +37,10 @@ pub struct YamlParseOption {
     /// the stream before giving up with `ErrorKind::InputTooLarge`, or
     /// `0` for no limit. Default is 0 (no limit, matching
     /// `from_reader`'s historical behavior). Has no effect on
-    /// [`from_str_with_opt`]/[`documents_with_opt`], whose input is
-    /// already fully in memory by the time they receive it; set this
-    /// instead of wrapping the reader in `Read::take` yourself when
-    /// reading from an untrusted, size-unbounded source (e.g. a
-    /// network socket).
+    /// [`from_str_with_opt`], whose input is already fully in memory
+    /// by the time it receives it; set this instead of wrapping the
+    /// reader in `Read::take` yourself when reading from an
+    /// untrusted, size-unbounded source (e.g. a network socket).
     pub max_input_bytes: usize,
 }
 
@@ -198,40 +197,6 @@ fn read_to_string_with_limit(
         ));
     }
     Ok(content)
-}
-
-/// Parse a YAML stream and compose every document into a `Value`.
-///
-/// Unlike [`from_str::<Value>`](crate::from_str), which rejects streams
-/// containing more than one document, this returns all documents of the
-/// stream:
-///
-/// ```
-/// use rmsd_yaml::documents;
-///
-/// let docs = documents("a: 1\n...\nb: 2\n")?;
-/// assert_eq!(docs.len(), 2);
-/// # Ok::<(), rmsd_yaml::Error>(())
-/// ```
-pub fn documents(input: &str) -> Result<Vec<Value>, Error> {
-    documents_with_opt(input, YamlParseOption::default())
-}
-
-/// Like [`documents`], but with configurable resource limits instead
-/// of the defaults.
-pub fn documents_with_opt(
-    input: &str,
-    option: YamlParseOption,
-) -> Result<Vec<Value>, Error> {
-    let events = crate::YamlParser::parse_to_events_with_max_depth(
-        input,
-        option.max_depth,
-    )?;
-    crate::compose::compose_documents_with_limits(
-        events,
-        option.max_depth,
-        option.max_nodes,
-    )
 }
 
 impl<'de> Deserializer<'de> for &mut YamlDeserializer {

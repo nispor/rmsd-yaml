@@ -90,8 +90,7 @@ impl<'a> YamlParser<'a> {
 
     /// Test-only convenience wrapper for `parse_to_events_with_max_depth`
     /// using the default `MAX_NESTING_DEPTH`; production code goes
-    /// through `YamlParseOption` (see `from_str_with_opt`,
-    /// `documents_with_opt`) instead.
+    /// through `YamlParseOption` (see `from_str_with_opt`) instead.
     #[cfg(test)]
     pub(crate) fn parse_to_events(
         input: &'a str,

@@ -125,13 +125,17 @@ fn test_wrong_indented_sequence_item() {
 }
 
 #[test]
-fn test_multiple_documents() {
-    use crate::documents;
-    let docs = documents("a: 1\n...\nb: 2\n").unwrap();
-    assert_eq!(docs.len(), 2);
+fn test_multiple_documents_rejected() {
+    // Multi-document streams are not supported (see the
+    // "Limitations" section in README.md); parsing one must fail
+    // with `NoSupportMultipleDocuments` instead of silently
+    // returning only the first document.
+    use crate::{ErrorKind, Value, from_str};
+    let err = from_str::<Value>("a: 1\n...\nb: 2\n").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::NoSupportMultipleDocuments);
     // A single-document stream still works.
-    let docs = documents("- 1\n- 2\n").unwrap();
-    assert_eq!(docs.len(), 1);
+    let value = from_str::<Value>("- 1\n- 2\n").unwrap();
+    assert_eq!(value, from_str::<Value>("[1, 2]").unwrap());
 }
 
 #[test]

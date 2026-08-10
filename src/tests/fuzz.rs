@@ -9,7 +9,7 @@
 
 use std::io::Cursor;
 
-use crate::{Value, documents, from_reader, from_str};
+use crate::{Value, from_reader, from_str};
 
 /// Tiny deterministic PRNG (xorshift64*) so results are reproducible.
 struct Rng(u64);
@@ -39,7 +39,7 @@ const SEED: u64 = 0x4d59_5df4_d0f3_3173;
 fn random_characters_never_panic() {
     let mut rng = Rng(SEED);
     // Mostly short inputs; occasionally a longer one to exercise
-    // multi-line and multi-document paths.
+    // multi-line paths.
     for i in 0..10_000u32 {
         let len = match i % 100 {
             99 => (rng.next() % 4_096) as usize,
@@ -52,7 +52,6 @@ fn random_characters_never_panic() {
         let s = String::from_utf8_lossy(&bytes);
         let _ = s.parse::<Value>();
         let _ = from_str::<Value>(&s);
-        let _ = documents(&s);
     }
 }
 
@@ -130,7 +129,6 @@ fn document_start_marker_with_trailing_space_at_eof_never_hangs() {
     ] {
         let _ = input.parse::<Value>();
         let _ = from_str::<Value>(input);
-        let _ = documents(input);
         let _ = from_reader::<_, Value>(Cursor::new(input.as_bytes()));
     }
     // Same-line document start with content still parses.
