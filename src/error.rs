@@ -78,6 +78,12 @@ pub enum ErrorKind {
     /// pathologically deep input (e.g. thousands of nested `[` or
     /// `- ` indicators).
     RecursionLimitExceeded,
+    /// Composing the document would produce more `Value` nodes than
+    /// supported. Guards against the "billion laughs" pattern, where a
+    /// chain of anchors each aliasing the previous one several times
+    /// duplicates its content exponentially without the input itself
+    /// growing much.
+    AliasExpansionLimitExceeded,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -122,6 +128,8 @@ impl std::fmt::Display for ErrorKind {
                 Self::InvalidDirective => "invalid_directive",
                 Self::InvalidTag => "invalid_tag",
                 Self::RecursionLimitExceeded => "recursion_limit_exceeded",
+                Self::AliasExpansionLimitExceeded =>
+                    "alias_expansion_limit_exceeded",
             }
         )
     }

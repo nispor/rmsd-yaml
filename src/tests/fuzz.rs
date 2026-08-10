@@ -167,3 +167,35 @@ fn deeply_nested_block_sequence_errors_instead_of_overflowing_stack() {
     let err = from_str::<Value>(&deep).unwrap_err();
     assert_eq!(err.kind(), crate::ErrorKind::RecursionLimitExceeded);
 }
+
+/// Build `levels` anchors `a0..a{levels - 1}`, each (after the first) a
+/// flow sequence of `width` aliases to the previous anchor. Resolving
+/// an alias duplicates the whole subtree it points to, so the total
+/// composed size grows as `width ^ levels` while the input text itself
+/// only grows linearly.
+fn alias_chain(levels: usize, width: usize) -> String {
+    let mut doc = "a0: &a0 [0,1,2,3,4,5,6,7,8,9]\n".to_string();
+    for level in 1..levels {
+        let refs = vec![format!("*a{}", level - 1); width].join(",");
+        doc.push_str(&format!("a{level}: &a{level} [{refs}]\n"));
+    }
+    doc
+}
+
+#[test]
+fn exponential_alias_expansion_errors_instead_of_exhausting_memory() {
+    // Regression: resolving an alias used to `clone()` the entire
+    // anchored subtree with no bound on the total composed size. A
+    // chain of anchors, each aliasing the previous one several times,
+    // duplicates its content exponentially (the "billion laughs"
+    // pattern) even though the input text itself only grows linearly,
+    // and used to run the process out of memory.
+    let shallow = alias_chain(3, 10);
+    assert!(from_str::<Value>(&shallow).is_ok());
+
+    // Six levels of tenfold aliasing composes over a million nodes,
+    // which must be rejected instead of allocated.
+    let deep = alias_chain(6, 10);
+    let err = from_str::<Value>(&deep).unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::AliasExpansionLimitExceeded);
+}

@@ -7,6 +7,58 @@ use crate::{
     YamlPosition, YamlTag, parser::MAX_NESTING_DEPTH,
 };
 
+/// Maximum number of `Value` nodes a single document may realize during
+/// composition. Every scalar, sequence and mapping produced counts as
+/// one node, and resolving an alias counts as the full number of nodes
+/// in the anchor it copies (since `Value::clone()` duplicates all of
+/// it). This bounds the "billion laughs" pattern, where a chain of
+/// anchors each aliasing the previous one several times duplicates its
+/// content exponentially without the input itself growing much.
+pub(crate) const MAX_COMPOSED_NODES: usize = 1_000_000;
+
+/// Number of nodes in `value`, including itself and, recursively, its
+/// children (sequence items, mapping keys/values, and tagged content).
+fn count_nodes(value: &Value) -> usize {
+    1 + count_child_nodes(&value.data)
+}
+
+fn count_child_nodes(data: &ValueData) -> usize {
+    match data {
+        ValueData::Null | ValueData::String(_) => 0,
+        ValueData::Array(items) => items.iter().map(count_nodes).sum(),
+        ValueData::Map(map) => map
+            .iter()
+            .map(|(key, val)| count_nodes(key) + count_nodes(val))
+            .sum(),
+        ValueData::Tag(tag) => count_child_nodes(&tag.data),
+    }
+}
+
+/// Charge `cost` nodes against the remaining composition `budget`,
+/// returning `ErrorKind::AliasExpansionLimitExceeded` if that would
+/// overdraw it.
+fn charge_budget(
+    budget: &mut usize,
+    cost: usize,
+    pos: YamlPosition,
+) -> Result<(), Error> {
+    match budget.checked_sub(cost) {
+        Some(remaining) => {
+            *budget = remaining;
+            Ok(())
+        }
+        None => Err(Error::new(
+            ErrorKind::AliasExpansionLimitExceeded,
+            format!(
+                "YAML document composes more than {MAX_COMPOSED_NODES} value \
+                 nodes; this is likely an anchor/alias expansion bomb"
+            ),
+            pos,
+            pos,
+        )),
+    }
+}
+
 impl Value {
     pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, Error> {
         let mut documents = compose_documents(events)?;
@@ -43,8 +95,13 @@ pub(crate) fn compose_documents(
                     _ => unreachable!(),
                 };
                 let mut anchors: HashMap<String, Value> = HashMap::new();
-                let mut value =
-                    compose_value(&mut events_iter, &mut anchors, 0)?;
+                let mut budget = MAX_COMPOSED_NODES;
+                let mut value = compose_value(
+                    &mut events_iter,
+                    &mut anchors,
+                    0,
+                    &mut budget,
+                )?;
                 // Record the explicit `---` / `...` document markers so
                 // the dump can reproduce them.
                 value.meta.doc_explicit = implicit;
@@ -69,6 +126,7 @@ fn compose_value(
     events_iter: &mut YamlEventIter,
     anchors: &mut HashMap<String, Value>,
     depth: usize,
+    budget: &mut usize,
 ) -> Result<Value, Error> {
     let mut doc_started_pos: Option<YamlPosition> = None;
     while let Some(event) = events_iter.next() {
@@ -98,8 +156,14 @@ fn compose_value(
                         pos,
                     ));
                 }
-                let array =
-                    compose_sequence(events_iter, anchors, pos, depth + 1)?;
+                charge_budget(budget, 1, pos)?;
+                let array = compose_sequence(
+                    events_iter,
+                    anchors,
+                    pos,
+                    depth + 1,
+                    budget,
+                )?;
                 let mut ret = if let Some(tag) = tag {
                     Value {
                         data: ValueData::Tag(Box::new(YamlTag {
@@ -144,7 +208,9 @@ fn compose_value(
                         pos,
                     ));
                 }
-                let map = compose_map(events_iter, anchors, pos, depth + 1)?;
+                charge_budget(budget, 1, pos)?;
+                let map =
+                    compose_map(events_iter, anchors, pos, depth + 1, budget)?;
                 let mut ret = if let Some(tag) = tag {
                     Value {
                         data: ValueData::Tag(Box::new(YamlTag {
@@ -178,6 +244,7 @@ fn compose_value(
                 ));
             }
             YamlEvent::Scalar(anchor, tag, val, style, start, end) => {
+                charge_budget(budget, 1, start)?;
                 let mut ret = if let Some(tag) = tag {
                     Value {
                         data: ValueData::Tag(Box::new(YamlTag {
@@ -205,6 +272,7 @@ fn compose_value(
             }
             YamlEvent::Alias(name, pos) => {
                 if let Some(value) = anchors.get(&name) {
+                    charge_budget(budget, count_nodes(value), pos)?;
                     let mut ret = value.clone();
                     ret.meta.alias = Some(name);
                     return Ok(ret);
@@ -231,6 +299,7 @@ fn compose_sequence(
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
     depth: usize,
+    budget: &mut usize,
 ) -> Result<Value, Error> {
     let mut ret: Vec<Value> = Vec::new();
     let mut end_pos = YamlPosition::default();
@@ -242,7 +311,7 @@ fn compose_sequence(
                 break;
             }
             _ => {
-                ret.push(compose_value(events_iter, anchors, depth)?);
+                ret.push(compose_value(events_iter, anchors, depth, budget)?);
             }
         }
     }
@@ -260,6 +329,7 @@ fn compose_map(
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
     depth: usize,
+    budget: &mut usize,
 ) -> Result<Value, Error> {
     let mut ret: Mapping = Mapping::new();
     let mut end_pos = YamlPosition::default();
@@ -273,10 +343,16 @@ fn compose_map(
             }
             _ => {
                 if let Some(key) = key.take() {
-                    let value = compose_value(events_iter, anchors, depth)?;
+                    let value =
+                        compose_value(events_iter, anchors, depth, budget)?;
                     ret.insert(key, value);
                 } else {
-                    key = Some(compose_value(events_iter, anchors, depth)?);
+                    key = Some(compose_value(
+                        events_iter,
+                        anchors,
+                        depth,
+                        budget,
+                    )?);
                 }
             }
         }
