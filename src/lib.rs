@@ -64,7 +64,9 @@ mod tests;
 
 pub use self::{
     deserializer::{
-        YamlDeserializer, documents, from_reader, from_str, to_value,
+        YamlDeserializer, YamlParseOption, documents, documents_with_opt,
+        from_reader, from_reader_with_opt, from_str, from_str_with_opt,
+        to_value,
     },
     error::{Error, ErrorKind},
     event::YamlScalarStyle,

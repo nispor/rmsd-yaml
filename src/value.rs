@@ -5,8 +5,8 @@ use std::str::FromStr;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 
 use crate::{
-    Error, ErrorKind, Mapping, YamlParser, YamlPosition, YamlScalarStyle,
-    YamlTag,
+    Error, ErrorKind, Mapping, YamlParseOption, YamlParser, YamlPosition,
+    YamlScalarStyle, YamlTag,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -81,8 +81,24 @@ impl FromStr for Value {
     type Err = Error;
 
     fn from_str(input: &str) -> Result<Self, Error> {
-        let events = YamlParser::parse_to_events(input)?;
-        Self::compose(events)
+        Self::from_str_with_opt(input, &YamlParseOption::default())
+    }
+}
+
+impl Value {
+    /// Like [`Value::from_str`](FromStr::from_str), but with
+    /// configurable resource limits instead of the defaults. A
+    /// separate associated function since `FromStr::from_str` cannot
+    /// take extra parameters.
+    pub fn from_str_with_opt(
+        input: &str,
+        option: &YamlParseOption,
+    ) -> Result<Self, Error> {
+        let events = YamlParser::parse_to_events_with_max_depth(
+            input,
+            option.max_depth,
+        )?;
+        Self::compose_with_limits(events, option.max_depth, option.max_nodes)
     }
 }
 

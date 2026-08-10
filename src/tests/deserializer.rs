@@ -6,8 +6,9 @@ use pretty_assertions::assert_eq;
 use serde::Deserialize;
 
 use crate::{
-    ErrorKind, Value, YamlCollectionStyle, YamlEvent, YamlParser, YamlPosition,
-    YamlScalarStyle, from_str,
+    ErrorKind, Value, YamlCollectionStyle, YamlEvent, YamlParseOption,
+    YamlParser, YamlPosition, YamlScalarStyle, documents_with_opt, from_str,
+    from_str_with_opt,
 };
 
 #[test]
@@ -481,4 +482,78 @@ fn test_quoted_numeric_and_bool_like_scalars_are_not_coerced() {
         b: i64,
     }
     assert!(from_str::<Num>("b: \"42\"\n").is_err());
+}
+
+#[test]
+fn test_yaml_parse_option_default_matches_previous_hardcoded_limits() {
+    // `YamlParseOption::default()` must keep the resource limits that
+    // used to be hardcoded constants, so existing callers of
+    // `from_str`/`from_reader`/`documents` (which delegate to the
+    // `_with_opt` variants with the default option) see no behavior
+    // change.
+    let option = YamlParseOption::default();
+    assert_eq!(option.max_depth, 128);
+    assert_eq!(option.max_nodes, 1_000_000);
+}
+
+#[test]
+fn test_from_str_with_opt_respects_custom_max_depth() {
+    // A `max_depth` tighter than the default must reject input that
+    // would otherwise parse fine, proving the option is actually
+    // threaded into both the parser's and the composer's depth checks
+    // instead of the option being silently ignored.
+    let option = YamlParseOption {
+        max_depth: 2,
+        ..Default::default()
+    };
+    let err = from_str_with_opt::<Value>("[[[[1]]]]", option).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
+}
+
+#[test]
+fn test_from_str_with_opt_custom_max_depth_allows_shallow_input() {
+    // The same tight `max_depth` must still accept input nested within
+    // that limit, proving it is not simply always rejecting.
+    let option = YamlParseOption {
+        max_depth: 2,
+        ..Default::default()
+    };
+    let got: Value = from_str_with_opt("[1, 2]", option).unwrap();
+    assert_eq!(got, from_str::<Value>("[1, 2]").unwrap());
+}
+
+#[test]
+fn test_from_str_with_opt_respects_custom_max_nodes() {
+    // A `max_nodes` tighter than the default must reject a document
+    // that composes more nodes than the budget allows.
+    let option = YamlParseOption {
+        max_nodes: 2,
+        ..Default::default()
+    };
+    let err = from_str_with_opt::<Value>("[1, 2, 3]", option).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::AliasExpansionLimitExceeded);
+}
+
+#[test]
+fn test_from_str_with_opt_custom_max_nodes_allows_small_input() {
+    let option = YamlParseOption {
+        max_nodes: 2,
+        ..Default::default()
+    };
+    let got: Value = from_str_with_opt("1", option).unwrap();
+    assert_eq!(got, from_str::<Value>("1").unwrap());
+}
+
+#[test]
+fn test_documents_with_opt_respects_custom_max_depth() {
+    // `documents_with_opt` goes through a separate entry point
+    // (`YamlParser::parse_to_events_with_max_depth` +
+    // `compose_documents_with_limits`) than `from_str_with_opt`; make
+    // sure it independently honors the option too.
+    let option = YamlParseOption {
+        max_depth: 2,
+        ..Default::default()
+    };
+    let err = documents_with_opt("[[[[1]]]]", option).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
 }

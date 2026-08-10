@@ -42,9 +42,12 @@ pub(crate) struct YamlParser<'a> {
     yaml_directive_seen: bool,
     /// Current node nesting depth, incremented by `handle_node()` and
     /// `handle_flow_node()` (the two recursive "parse one more node"
-    /// entry points) and checked against `MAX_NESTING_DEPTH` to guard
-    /// against a stack overflow on pathologically deep input.
+    /// entry points) and checked against `max_depth` to guard against a
+    /// stack overflow on pathologically deep input.
     depth: usize,
+    /// Maximum value `depth` may reach, configurable via
+    /// `YamlParseOption::max_depth`. Defaults to `MAX_NESTING_DEPTH`.
+    max_depth: usize,
 }
 
 /// Maximum supported YAML node nesting depth (block or flow). Chosen
@@ -85,8 +88,23 @@ impl<'a> YamlParser<'a> {
         log::trace!("Pop state: {:?}", state);
     }
 
+    /// Test-only convenience wrapper for `parse_to_events_with_max_depth`
+    /// using the default `MAX_NESTING_DEPTH`; production code goes
+    /// through `YamlParseOption` (see `from_str_with_opt`,
+    /// `documents_with_opt`) instead.
+    #[cfg(test)]
     pub(crate) fn parse_to_events(
         input: &'a str,
+    ) -> Result<Vec<YamlEvent>, Error> {
+        Self::parse_to_events_with_max_depth(input, MAX_NESTING_DEPTH)
+    }
+
+    /// Like [`Self::parse_to_events`], but nodes nested deeper than
+    /// `max_depth` are rejected instead of the default
+    /// `MAX_NESTING_DEPTH`. Backs `YamlParseOption::max_depth`.
+    pub(crate) fn parse_to_events_with_max_depth(
+        input: &'a str,
+        max_depth: usize,
     ) -> Result<Vec<YamlEvent>, Error> {
         let mut parser = Self {
             scanner: YamlScanner::new(input),
@@ -100,6 +118,7 @@ impl<'a> YamlParser<'a> {
             saw_directive: false,
             yaml_directive_seen: false,
             depth: 0,
+            max_depth,
         };
         loop {
             let cur_pos = parser.scanner.done_pos;
@@ -475,20 +494,20 @@ impl<'a> YamlParser<'a> {
         )
     }
 
-    /// Increment the node-nesting counter and fail once
-    /// `MAX_NESTING_DEPTH` is exceeded. Every recursive "parse one more
-    /// node" entry point (`handle_node`, `handle_flow_node`) must call
-    /// this before doing any work; the caller is responsible for
-    /// decrementing `self.depth` again once that work is done, however
-    /// it returns.
+    /// Increment the node-nesting counter and fail once `max_depth` is
+    /// exceeded. Every recursive "parse one more node" entry point
+    /// (`handle_node`, `handle_flow_node`) must call this before doing
+    /// any work; the caller is responsible for decrementing
+    /// `self.depth` again once that work is done, however it returns.
     fn enter_node(&mut self) -> Result<(), Error> {
         self.depth += 1;
-        if self.depth > MAX_NESTING_DEPTH {
+        if self.depth > self.max_depth {
             return Err(Error::new(
                 ErrorKind::RecursionLimitExceeded,
                 format!(
                     "YAML node nesting exceeds the maximum supported depth of \
-                     {MAX_NESTING_DEPTH}"
+                     {}",
+                    self.max_depth
                 ),
                 self.scanner.next_pos,
                 self.scanner.next_pos,

@@ -2,9 +2,14 @@
 
 use std::collections::HashMap;
 
+// Only used by the `#[cfg(test)]` `Value::compose` convenience wrapper
+// and its own tests; production code takes `max_depth` via
+// `YamlParseOption` instead.
+#[cfg(test)]
+use crate::parser::MAX_NESTING_DEPTH;
 use crate::{
     Error, ErrorKind, Mapping, Value, ValueData, YamlEvent, YamlEventIter,
-    YamlPosition, YamlTag, parser::MAX_NESTING_DEPTH,
+    YamlPosition, YamlTag,
 };
 
 /// Maximum number of `Value` nodes a single document may realize during
@@ -15,6 +20,31 @@ use crate::{
 /// anchors each aliasing the previous one several times duplicates its
 /// content exponentially without the input itself growing much.
 pub(crate) const MAX_COMPOSED_NODES: usize = 1_000_000;
+
+/// Depth and node-count limits enforced while composing a single
+/// document, configurable via `YamlParseOption`. A fresh instance is
+/// created per document, since anchors (and therefore the node
+/// budget) are scoped per document per the YAML specification.
+struct ComposeBudget {
+    /// Maximum nesting depth a `SequenceStart`/`MapStart` may reach.
+    max_depth: usize,
+    /// Node budget remaining, initialized from the configured maximum
+    /// and charged down by `charge_budget()` as nodes are composed.
+    remaining_nodes: usize,
+    /// The configured maximum node count, kept around only to report
+    /// an accurate value in the error message.
+    max_nodes: usize,
+}
+
+impl ComposeBudget {
+    fn new(max_depth: usize, max_nodes: usize) -> Self {
+        Self {
+            max_depth,
+            remaining_nodes: max_nodes,
+            max_nodes,
+        }
+    }
+}
 
 /// Number of nodes in `value`, including itself and, recursively, its
 /// children (sequence items, mapping keys/values, and tagged content).
@@ -34,24 +64,25 @@ fn count_child_nodes(data: &ValueData) -> usize {
     }
 }
 
-/// Charge `cost` nodes against the remaining composition `budget`,
+/// Charge `cost` nodes against the remaining composition budget,
 /// returning `ErrorKind::AliasExpansionLimitExceeded` if that would
 /// overdraw it.
 fn charge_budget(
-    budget: &mut usize,
+    budget: &mut ComposeBudget,
     cost: usize,
     pos: YamlPosition,
 ) -> Result<(), Error> {
-    match budget.checked_sub(cost) {
+    match budget.remaining_nodes.checked_sub(cost) {
         Some(remaining) => {
-            *budget = remaining;
+            budget.remaining_nodes = remaining;
             Ok(())
         }
         None => Err(Error::new(
             ErrorKind::AliasExpansionLimitExceeded,
             format!(
-                "YAML document composes more than {MAX_COMPOSED_NODES} value \
-                 nodes; this is likely an anchor/alias expansion bomb"
+                "YAML document composes more than {} value nodes; this is \
+                 likely an anchor/alias expansion bomb",
+                budget.max_nodes
             ),
             pos,
             pos,
@@ -60,8 +91,25 @@ fn charge_budget(
 }
 
 impl Value {
+    /// Test-only convenience wrapper for `compose_with_limits` using
+    /// the default `MAX_NESTING_DEPTH`/`MAX_COMPOSED_NODES`;
+    /// production code goes through `YamlParseOption` (see
+    /// `from_str_with_opt`) instead.
+    #[cfg(test)]
     pub(crate) fn compose(events: Vec<YamlEvent>) -> Result<Self, Error> {
-        let mut documents = compose_documents(events)?;
+        Self::compose_with_limits(events, MAX_NESTING_DEPTH, MAX_COMPOSED_NODES)
+    }
+
+    /// Like [`Self::compose`], but with configurable `max_depth`/
+    /// `max_nodes` limits instead of the defaults. Backs
+    /// `YamlParseOption`.
+    pub(crate) fn compose_with_limits(
+        events: Vec<YamlEvent>,
+        max_depth: usize,
+        max_nodes: usize,
+    ) -> Result<Self, Error> {
+        let mut documents =
+            compose_documents_with_limits(events, max_depth, max_nodes)?;
         if documents.len() > 1 {
             return Err(Error::new(
                 ErrorKind::NoSupportMultipleDocuments,
@@ -77,12 +125,16 @@ impl Value {
     }
 }
 
-/// Compose every document of an event stream into a `Value`.
+/// Compose every document of an event stream into a `Value`, with
+/// configurable `max_depth`/`max_nodes` limits (see
+/// `YamlParseOption`).
 ///
 /// Anchors are scoped per document per the YAML specification, so the
 /// anchor table is reset between documents.
-pub(crate) fn compose_documents(
+pub(crate) fn compose_documents_with_limits(
     events: Vec<YamlEvent>,
+    max_depth: usize,
+    max_nodes: usize,
 ) -> Result<Vec<Value>, Error> {
     let mut events_iter = YamlEventIter::new(events);
     let mut documents = Vec::new();
@@ -95,7 +147,7 @@ pub(crate) fn compose_documents(
                     _ => unreachable!(),
                 };
                 let mut anchors: HashMap<String, Value> = HashMap::new();
-                let mut budget = MAX_COMPOSED_NODES;
+                let mut budget = ComposeBudget::new(max_depth, max_nodes);
                 let mut value = compose_value(
                     &mut events_iter,
                     &mut anchors,
@@ -126,7 +178,7 @@ fn compose_value(
     events_iter: &mut YamlEventIter,
     anchors: &mut HashMap<String, Value>,
     depth: usize,
-    budget: &mut usize,
+    budget: &mut ComposeBudget,
 ) -> Result<Value, Error> {
     let mut doc_started_pos: Option<YamlPosition> = None;
     while let Some(event) = events_iter.next() {
@@ -145,12 +197,13 @@ fn compose_value(
                 break;
             }
             YamlEvent::SequenceStart(anchor, tag, _style, pos) => {
-                if depth >= MAX_NESTING_DEPTH {
+                if depth >= budget.max_depth {
                     return Err(Error::new(
                         ErrorKind::RecursionLimitExceeded,
                         format!(
                             "YAML node nesting exceeds the maximum supported \
-                             depth of {MAX_NESTING_DEPTH}"
+                             depth of {}",
+                            budget.max_depth
                         ),
                         pos,
                         pos,
@@ -197,12 +250,13 @@ fn compose_value(
                 ));
             }
             YamlEvent::MapStart(anchor, tag, _style, pos) => {
-                if depth >= MAX_NESTING_DEPTH {
+                if depth >= budget.max_depth {
                     return Err(Error::new(
                         ErrorKind::RecursionLimitExceeded,
                         format!(
                             "YAML node nesting exceeds the maximum supported \
-                             depth of {MAX_NESTING_DEPTH}"
+                             depth of {}",
+                            budget.max_depth
                         ),
                         pos,
                         pos,
@@ -299,7 +353,7 @@ fn compose_sequence(
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
     depth: usize,
-    budget: &mut usize,
+    budget: &mut ComposeBudget,
 ) -> Result<Value, Error> {
     let mut ret: Vec<Value> = Vec::new();
     let mut end_pos = YamlPosition::default();
@@ -329,7 +383,7 @@ fn compose_map(
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
     depth: usize,
-    budget: &mut usize,
+    budget: &mut ComposeBudget,
 ) -> Result<Value, Error> {
     let mut ret: Mapping = Mapping::new();
     let mut end_pos = YamlPosition::default();
