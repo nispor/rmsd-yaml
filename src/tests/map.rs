@@ -145,3 +145,28 @@ fn test_zero_indent_sequence_value_still_valid() {
     let value: crate::Value = crate::Value::from_str("a:\n- 1\n- 2\n").unwrap();
     assert_eq!(value.get("a").unwrap().as_sequence().unwrap().len(), 2);
 }
+
+#[test]
+fn test_duplicate_map_key_is_rejected() {
+    // Regression: a mapping repeating the same key used to be composed
+    // silently, keeping only the last value. The YAML specification
+    // (3.2.1.1) requires mapping keys to be unique, so this must be a
+    // clean `Err` instead.
+    let err = crate::Value::from_str("a: 1\nb: 2\na: 3\n").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::DuplicateMapKey);
+
+    // Duplicate keys nested inside a block sequence must also be
+    // rejected, not just at the document root.
+    let err = crate::Value::from_str("- a: 1\n  a: 2\n").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::DuplicateMapKey);
+
+    // Flow mappings go through the same composer, so they must reject
+    // duplicates too.
+    let err = crate::Value::from_str("{a: 1, a: 2}").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::DuplicateMapKey);
+
+    // A mapping with all-distinct keys is unaffected.
+    let value: crate::Value =
+        crate::Value::from_str("a: 1\nb: 2\nc: 3\n").unwrap();
+    assert_eq!(value.as_mapping().unwrap().len(), 3);
+}

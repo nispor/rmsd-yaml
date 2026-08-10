@@ -345,6 +345,18 @@ fn compose_map(
                 if let Some(key) = key.take() {
                     let value =
                         compose_value(events_iter, anchors, depth, budget)?;
+                    if ret.contains_key(&key) {
+                        return Err(Error::new(
+                            ErrorKind::DuplicateMapKey,
+                            format!(
+                                "Mapping key `{}` is duplicated; YAML \
+                                 requires unique mapping keys",
+                                key.data
+                            ),
+                            key.start,
+                            key.end,
+                        ));
+                    }
                     ret.insert(key, value);
                 } else {
                     key = Some(compose_value(

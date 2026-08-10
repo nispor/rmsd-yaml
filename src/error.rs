@@ -84,6 +84,9 @@ pub enum ErrorKind {
     /// duplicates its content exponentially without the input itself
     /// growing much.
     AliasExpansionLimitExceeded,
+    /// A mapping defines the same key more than once. The YAML
+    /// specification (3.2.1.1) requires mapping keys to be unique.
+    DuplicateMapKey,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -130,6 +133,7 @@ impl std::fmt::Display for ErrorKind {
                 Self::RecursionLimitExceeded => "recursion_limit_exceeded",
                 Self::AliasExpansionLimitExceeded =>
                     "alias_expansion_limit_exceeded",
+                Self::DuplicateMapKey => "duplicate_map_key",
             }
         )
     }
