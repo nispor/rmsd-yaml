@@ -2,6 +2,7 @@
 
 mod deserializer;
 mod edge_cases;
+mod error;
 mod fuzz;
 mod map;
 mod scalar;
