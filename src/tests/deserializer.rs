@@ -451,3 +451,34 @@ fn test_tagged_scalar_as_string_uses_content_not_tag_name() {
     assert_eq!(got.get("a"), Some(&1));
     assert_eq!(got.get("b"), Some(&2));
 }
+
+#[test]
+fn test_quoted_numeric_and_bool_like_scalars_are_not_coerced() {
+    // `is_bool`/`is_integer`/`is_signed_integer`/`is_float` (and the
+    // `as_bool`/`as_i64`/`as_u64`/`as_f64` parsers `deserialize_any`,
+    // `deserialize_bool` etc. use) never checked `scalar_style`, so a
+    // quoted scalar like `"true"` or `"42"` was auto-detected as a
+    // bool/number instead of staying a string, unlike `is_null` which
+    // already required a plain scalar. This matches `serde_yaml`:
+    // quoted scalars are always plain strings when deserialized
+    // generically, ...
+    let got: serde_json::Value =
+        from_str("a: \"true\"\nb: \"42\"\nc: \"1.5\"\n").unwrap();
+    assert_eq!(got, serde_json::json!({"a": "true", "b": "42", "c": "1.5"}),);
+
+    // ... and error rather than silently coerce when the target field
+    // has a concrete, incompatible type.
+    #[derive(Deserialize, Debug)]
+    struct Flag {
+        #[allow(dead_code)]
+        a: bool,
+    }
+    assert!(from_str::<Flag>("a: \"true\"\n").is_err());
+
+    #[derive(Deserialize, Debug)]
+    struct Num {
+        #[allow(dead_code)]
+        b: i64,
+    }
+    assert!(from_str::<Num>("b: \"42\"\n").is_err());
+}

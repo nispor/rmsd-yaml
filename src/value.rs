@@ -187,6 +187,14 @@ impl Value {
 
     pub fn as_bool(&self) -> Result<bool, Error> {
         if let ValueData::String(s) = &self.data {
+            if !self.is_plain_scalar() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a bool, but got string {s:?}"),
+                    self.start,
+                    self.end,
+                ));
+            }
             match s.as_str() {
                 "true" => Ok(true),
                 "false" => Ok(false),
@@ -211,6 +219,19 @@ impl Value {
         self.as_bool().is_ok()
     }
 
+    /// Whether this value is a *plain* (unquoted) scalar. Only plain
+    /// scalars take part in YAML Core Schema implicit type resolution
+    /// (null, booleans, numbers, YAML 1.2.2 SPEC, 10.3): an explicitly
+    /// quoted scalar such as `"true"`, `"42"` or `"null"` is always an
+    /// ordinary string, matching `serde_yaml`.
+    fn is_plain_scalar(&self) -> bool {
+        matches!(self.data, ValueData::String(_))
+            && matches!(
+                self.meta.scalar_style,
+                None | Some(YamlScalarStyle::Plain)
+            )
+    }
+
     /// Whether the value resolves to null per the YAML Core Schema:
     /// `null`, `Null`, `NULL`, `~` or an empty scalar.
     pub fn is_null(&self) -> bool {
@@ -222,10 +243,7 @@ impl Value {
             // 7.3.1, tag resolution): an explicitly quoted scalar such
             // as `"null"`, `"~"` or `""` is an ordinary string
             // (serde_yaml deserializes it into `Some(...)`).
-            if !matches!(
-                self.meta.scalar_style,
-                None | Some(YamlScalarStyle::Plain)
-            ) {
+            if !self.is_plain_scalar() {
                 return false;
             }
             return matches!(s.as_str(), "null" | "Null" | "NULL" | "~" | "");
@@ -265,7 +283,7 @@ impl Value {
 
     pub fn is_integer(&self) -> bool {
         if let ValueData::String(s) = &self.data {
-            str_is_integer(s)
+            self.is_plain_scalar() && str_is_integer(s)
         } else {
             false
         }
@@ -273,6 +291,9 @@ impl Value {
 
     pub fn is_signed_integer(&self) -> bool {
         if let ValueData::String(s) = &self.data {
+            if !self.is_plain_scalar() {
+                return false;
+            }
             if s.starts_with("-") || s.starts_with("+") {
                 str_is_integer(&s[1..])
             } else {
@@ -285,7 +306,7 @@ impl Value {
 
     pub fn is_float(&self) -> bool {
         if let ValueData::String(s) = &self.data {
-            str_is_float(s)
+            self.is_plain_scalar() && str_is_float(s)
         } else {
             false
         }
@@ -293,6 +314,14 @@ impl Value {
 
     pub fn as_f64(&self) -> Result<f64, Error> {
         if let ValueData::String(s) = &self.data {
+            if !self.is_plain_scalar() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a number, but got string {s:?}"),
+                    self.start,
+                    self.end,
+                ));
+            }
             match s.as_str() {
                 ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => {
                     Ok(f64::INFINITY)
@@ -320,6 +349,14 @@ impl Value {
 
     pub fn as_u64(&self) -> Result<u64, Error> {
         if let ValueData::String(s) = &self.data {
+            if !self.is_plain_scalar() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a number, but got string {s:?}"),
+                    self.start,
+                    self.end,
+                ));
+            }
             if s.starts_with("0x") | s.starts_with("0X") {
                 u64::from_str_radix(&s[2..], 16).map_err(|_| {
                     Error::new(
@@ -434,6 +471,14 @@ impl Value {
 
     pub fn as_i64(&self) -> Result<i64, Error> {
         if let ValueData::String(s) = &self.data {
+            if !self.is_plain_scalar() {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a number, but got string {s:?}"),
+                    self.start,
+                    self.end,
+                ));
+            }
             let original = s;
             let positive: bool = !s.starts_with("-");
 
