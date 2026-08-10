@@ -73,6 +73,11 @@ pub enum ErrorKind {
     /// Invalid tag: unknown tag handle, empty verbatim tag, or illegal
     /// character in a tag.
     InvalidTag,
+    /// YAML node nesting (block or flow collections) exceeds the
+    /// maximum supported depth. Guards against a stack overflow on
+    /// pathologically deep input (e.g. thousands of nested `[` or
+    /// `- ` indicators).
+    RecursionLimitExceeded,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -116,6 +121,7 @@ impl std::fmt::Display for ErrorKind {
                     "missing_document_end_marker_before_directive",
                 Self::InvalidDirective => "invalid_directive",
                 Self::InvalidTag => "invalid_tag",
+                Self::RecursionLimitExceeded => "recursion_limit_exceeded",
             }
         )
     }

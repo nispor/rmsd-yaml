@@ -139,3 +139,31 @@ fn document_start_marker_with_trailing_space_at_eof_never_hangs() {
         "x".parse::<Value>().unwrap()
     );
 }
+
+#[test]
+fn deeply_nested_flow_collection_errors_instead_of_overflowing_stack() {
+    // Regression: parsing a value with thousands of nested `[`
+    // characters used to recurse without a depth limit and abort the
+    // process with a stack overflow (not a catchable `Err`). A
+    // moderate nesting depth must still parse fine; a pathological one
+    // must return a clean `RecursionLimitExceeded` error.
+    let shallow = format!("{}1{}", "[".repeat(20), "]".repeat(20));
+    assert!(from_str::<Value>(&shallow).is_ok());
+
+    let deep = format!("{}1{}", "[".repeat(5_000), "]".repeat(5_000));
+    let err = from_str::<Value>(&deep).unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::RecursionLimitExceeded);
+}
+
+#[test]
+fn deeply_nested_block_sequence_errors_instead_of_overflowing_stack() {
+    // Same regression as the flow-collection case above, but for block
+    // sequences (`- - - ...`), which recurse through a different code
+    // path (`handle_node` <-> `handle_block_seq`).
+    let shallow = format!("{}1", "- ".repeat(20));
+    assert!(from_str::<Value>(&shallow).is_ok());
+
+    let deep = format!("{}1", "- ".repeat(5_000));
+    let err = from_str::<Value>(&deep).unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::RecursionLimitExceeded);
+}
