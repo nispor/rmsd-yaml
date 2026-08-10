@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 use crate::{
     ErrorKind, Value, YamlCollectionStyle, YamlEvent, YamlParseOption,
-    YamlParser, YamlPosition, YamlScalarStyle, documents_with_opt,
-    from_reader_with_opt, from_str, from_str_with_opt,
+    YamlParser, YamlPosition, YamlScalarStyle, from_reader_with_opt, from_str,
+    from_str_with_opt,
 };
 
 #[test]
@@ -488,9 +488,8 @@ fn test_quoted_numeric_and_bool_like_scalars_are_not_coerced() {
 fn test_yaml_parse_option_default_matches_previous_hardcoded_limits() {
     // `YamlParseOption::default()` must keep the resource limits that
     // used to be hardcoded constants, so existing callers of
-    // `from_str`/`from_reader`/`documents` (which delegate to the
-    // `_with_opt` variants with the default option) see no behavior
-    // change.
+    // `from_str`/`from_reader` (which delegate to the `_with_opt`
+    // variants with the default option) see no behavior change.
     let option = YamlParseOption::default();
     assert_eq!(option.max_depth, 128);
     assert_eq!(option.max_nodes, 1_000_000);
@@ -542,20 +541,6 @@ fn test_from_str_with_opt_custom_max_nodes_allows_small_input() {
     };
     let got: Value = from_str_with_opt("1", option).unwrap();
     assert_eq!(got, from_str::<Value>("1").unwrap());
-}
-
-#[test]
-fn test_documents_with_opt_respects_custom_max_depth() {
-    // `documents_with_opt` goes through a separate entry point
-    // (`YamlParser::parse_to_events_with_max_depth` +
-    // `compose_documents_with_limits`) than `from_str_with_opt`; make
-    // sure it independently honors the option too.
-    let option = YamlParseOption {
-        max_depth: 2,
-        ..Default::default()
-    };
-    let err = documents_with_opt("[[[[1]]]]", option).unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
 }
 
 #[test]

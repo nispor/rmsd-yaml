@@ -15,6 +15,4 @@ fuzz_target!(|data: &[u8]| {
     let s = String::from_utf8_lossy(data);
     // Full parse + compose into a Value tree.
     let _ = rmsd_yaml::from_str::<rmsd_yaml::Value>(&s);
-    // Multi-document parse path.
-    let _ = rmsd_yaml::documents(&s);
 });

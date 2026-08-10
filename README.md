@@ -7,8 +7,7 @@ for `serde_yaml` with minimal dependencies (`serde`, `indexmap`, `log`).
 ## Features
 
 - Parse YAML 1.2 documents (block and flow collections, block scalars
-  with chomping, anchors/aliases, tags and directives, multi-document
-  streams)
+  with chomping, anchors/aliases, tags and directives)
 - Serialize any `Serialize` type to YAML with round-trippable output
   (enums as `!Variant` tags, `!!binary` for byte buffers)
 - yaml-test-suite conformance: **251 of 402** cases passing and growing
@@ -83,6 +82,13 @@ let yaml = to_string_with_opt(
 
 Run `cargo bench` for a comparison against `serde_yaml` on a
 representative configuration document (parse and serialize throughput).
+
+## Limitations
+
+* Multi-document YAML streams (`---`-separated) are not supported.
+  Parsing one is an error (`ErrorKind::NoSupportMultipleDocuments`),
+  and there is no API to serialize more than one document into a
+  single output stream. See `TODO.md` for tracking.
 
 ## License
 
