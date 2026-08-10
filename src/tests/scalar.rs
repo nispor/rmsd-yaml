@@ -50,6 +50,33 @@ fn test_block_scalar_literal_block_clip_fixed_ident() {
 }
 
 #[test]
+fn test_block_scalar_literal_indentation_indicator_nine() {
+    // Regression: the indentation indicator was matched with the
+    // pattern `'1'..'9'`, an *exclusive* range in Rust, so `9` never
+    // matched and was rejected with `ExpectingCommentOrLineBreak`
+    // instead of being accepted as an explicit indentation of 9 (YAML
+    // 1.2.2 SPEC 8.1.1.1 allows indentation indicators 1-9 inclusive).
+    assert_eq!(
+        YamlParser::parse_to_events("--- |9\n          abc\n          def\n")
+            .unwrap(),
+        vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(true, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                None,
+                " abc\n def\n".to_string(),
+                YamlScalarStyle::Literal,
+                YamlPosition::new(2, 10),
+                YamlPosition::new(3, 14),
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(3, 14)),
+            YamlEvent::StreamEnd,
+        ]
+    );
+}
+
+#[test]
 fn test_block_scalar_literal_block_strip_fixed_ident() {
     let expected = vec![
         YamlEvent::StreamStart,
