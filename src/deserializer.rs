@@ -5,7 +5,7 @@
 //      (https://github.com/serde-rs/serde-rs.github.io)
 // which is licensed under CC-BY-SA-4.0 license
 
-use std::str::FromStr;
+use std::{io::Read, str::FromStr};
 
 use serde::{
     Deserialize, Serialize,
@@ -14,8 +14,8 @@ use serde::{
 
 use crate::{
     Error, ErrorKind, MappingAccess, SequenceAccess, Value, ValueData,
-    ValueEnumAccess, YamlScalarStyle, compose::MAX_COMPOSED_NODES,
-    parser::MAX_NESTING_DEPTH,
+    ValueEnumAccess, YamlPosition, YamlScalarStyle,
+    compose::MAX_COMPOSED_NODES, parser::MAX_NESTING_DEPTH,
 };
 
 /// Options controlling the resource limits enforced while parsing
@@ -33,6 +33,16 @@ pub struct YamlParseOption {
     /// during composition, including nodes duplicated by resolving an
     /// alias. Default is 1,000,000.
     pub max_nodes: usize,
+    /// Maximum number of bytes [`from_reader_with_opt`] will read from
+    /// the stream before giving up with `ErrorKind::InputTooLarge`, or
+    /// `0` for no limit. Default is 0 (no limit, matching
+    /// `from_reader`'s historical behavior). Has no effect on
+    /// [`from_str_with_opt`]/[`documents_with_opt`], whose input is
+    /// already fully in memory by the time they receive it; set this
+    /// instead of wrapping the reader in `Read::take` yourself when
+    /// reading from an untrusted, size-unbounded source (e.g. a
+    /// network socket).
+    pub max_input_bytes: usize,
 }
 
 impl Default for YamlParseOption {
@@ -40,6 +50,7 @@ impl Default for YamlParseOption {
         Self {
             max_depth: MAX_NESTING_DEPTH,
             max_nodes: MAX_COMPOSED_NODES,
+            max_input_bytes: 0,
         }
     }
 }
@@ -118,7 +129,12 @@ where
 
 /// Deserialize an instance of type `T` from an I/O stream of YAML.
 ///
-/// Mirrors `serde_yaml::from_reader`.
+/// Mirrors `serde_yaml::from_reader`. `rdr` is buffered into memory in
+/// full before parsing starts, with no size limit by default: when
+/// reading from an untrusted, size-unbounded source (e.g. a network
+/// socket), either wrap `rdr` in [`Read::take`](std::io::Read::take)
+/// yourself, or use [`from_reader_with_opt`] with
+/// `YamlParseOption::max_input_bytes` set.
 pub fn from_reader<R, T>(rdr: R) -> Result<T, Error>
 where
     R: std::io::Read,
@@ -128,7 +144,20 @@ where
 }
 
 /// Like [`from_reader`], but with configurable resource limits instead
-/// of the defaults.
+/// of the defaults:
+///
+/// ```
+/// use rmsd_yaml::{YamlParseOption, from_reader_with_opt};
+///
+/// let mut option = YamlParseOption::default();
+/// option.max_input_bytes = 8;
+/// let err = from_reader_with_opt::<_, String>(
+///     "this input is over 8 bytes long".as_bytes(),
+///     option,
+/// )
+/// .unwrap_err();
+/// assert_eq!(err.kind(), rmsd_yaml::ErrorKind::InputTooLarge);
+/// ```
 pub fn from_reader_with_opt<R, T>(
     mut rdr: R,
     option: YamlParseOption,
@@ -137,9 +166,38 @@ where
     R: std::io::Read,
     T: serde::de::DeserializeOwned,
 {
-    let mut content = String::new();
-    rdr.read_to_string(&mut content)?;
+    let content = read_to_string_with_limit(&mut rdr, option.max_input_bytes)?;
     from_str_with_opt(&content, option)
+}
+
+/// Read `rdr` to a `String`, capped at `max_input_bytes` (or
+/// unbounded when it is `0`). Reads one byte past the limit so a
+/// stream containing exactly `max_input_bytes` can be told apart from
+/// one that exceeds it, instead of silently truncating.
+fn read_to_string_with_limit(
+    rdr: &mut impl std::io::Read,
+    max_input_bytes: usize,
+) -> Result<String, Error> {
+    if max_input_bytes == 0 {
+        let mut content = String::new();
+        rdr.read_to_string(&mut content)?;
+        return Ok(content);
+    }
+    let take_limit = (max_input_bytes as u64).saturating_add(1);
+    let mut content = String::new();
+    rdr.take(take_limit).read_to_string(&mut content)?;
+    if content.len() > max_input_bytes {
+        return Err(Error::new(
+            ErrorKind::InputTooLarge,
+            format!(
+                "YAML input exceeds the maximum supported size of \
+                 {max_input_bytes} bytes"
+            ),
+            YamlPosition::EOF,
+            YamlPosition::EOF,
+        ));
+    }
+    Ok(content)
 }
 
 /// Parse a YAML stream and compose every document into a `Value`.
