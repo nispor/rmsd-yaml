@@ -14,8 +14,35 @@ use serde::{
 
 use crate::{
     Error, ErrorKind, MappingAccess, SequenceAccess, Value, ValueData,
-    ValueEnumAccess, YamlScalarStyle,
+    ValueEnumAccess, YamlScalarStyle, compose::MAX_COMPOSED_NODES,
+    parser::MAX_NESTING_DEPTH,
 };
+
+/// Options controlling the resource limits enforced while parsing
+/// YAML, guarding against maliciously crafted input (deeply nested
+/// documents, anchor/alias expansion bombs) exhausting the stack or
+/// memory. Used by the `_with_opt` variants of [`from_str`],
+/// [`from_reader`] and [`documents`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct YamlParseOption {
+    /// Maximum node nesting depth (block or flow, sequences and
+    /// mappings). Default is 128.
+    pub max_depth: usize,
+    /// Maximum number of `Value` nodes a single document may realize
+    /// during composition, including nodes duplicated by resolving an
+    /// alias. Default is 1,000,000.
+    pub max_nodes: usize,
+}
+
+impl Default for YamlParseOption {
+    fn default() -> Self {
+        Self {
+            max_depth: MAX_NESTING_DEPTH,
+            max_nodes: MAX_COMPOSED_NODES,
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct YamlDeserializer {
@@ -46,7 +73,28 @@ pub fn from_str<'a, T>(s: &'a str) -> Result<T, Error>
 where
     T: Deserialize<'a>,
 {
-    let parsed = Value::from_str(s)?;
+    from_str_with_opt(s, YamlParseOption::default())
+}
+
+/// Like [`from_str`], but with configurable resource limits instead of
+/// the defaults:
+///
+/// ```
+/// use rmsd_yaml::{YamlParseOption, from_str_with_opt};
+///
+/// let mut option = YamlParseOption::default();
+/// option.max_depth = 4;
+/// let err = from_str_with_opt::<i32>("[[[[[1]]]]]", option).unwrap_err();
+/// assert_eq!(err.kind(), rmsd_yaml::ErrorKind::RecursionLimitExceeded);
+/// ```
+pub fn from_str_with_opt<'a, T>(
+    s: &'a str,
+    option: YamlParseOption,
+) -> Result<T, Error>
+where
+    T: Deserialize<'a>,
+{
+    let parsed = Value::from_str_with_opt(s, &option)?;
     let mut deserializer = YamlDeserializer {
         parsed,
         path: String::new(),
@@ -71,14 +119,27 @@ where
 /// Deserialize an instance of type `T` from an I/O stream of YAML.
 ///
 /// Mirrors `serde_yaml::from_reader`.
-pub fn from_reader<R, T>(mut rdr: R) -> Result<T, Error>
+pub fn from_reader<R, T>(rdr: R) -> Result<T, Error>
+where
+    R: std::io::Read,
+    T: serde::de::DeserializeOwned,
+{
+    from_reader_with_opt(rdr, YamlParseOption::default())
+}
+
+/// Like [`from_reader`], but with configurable resource limits instead
+/// of the defaults.
+pub fn from_reader_with_opt<R, T>(
+    mut rdr: R,
+    option: YamlParseOption,
+) -> Result<T, Error>
 where
     R: std::io::Read,
     T: serde::de::DeserializeOwned,
 {
     let mut content = String::new();
     rdr.read_to_string(&mut content)?;
-    from_str(&content)
+    from_str_with_opt(&content, option)
 }
 
 /// Parse a YAML stream and compose every document into a `Value`.
@@ -95,8 +156,24 @@ where
 /// # Ok::<(), rmsd_yaml::Error>(())
 /// ```
 pub fn documents(input: &str) -> Result<Vec<Value>, Error> {
-    let events = crate::YamlParser::parse_to_events(input)?;
-    crate::compose::compose_documents(events)
+    documents_with_opt(input, YamlParseOption::default())
+}
+
+/// Like [`documents`], but with configurable resource limits instead
+/// of the defaults.
+pub fn documents_with_opt(
+    input: &str,
+    option: YamlParseOption,
+) -> Result<Vec<Value>, Error> {
+    let events = crate::YamlParser::parse_to_events_with_max_depth(
+        input,
+        option.max_depth,
+    )?;
+    crate::compose::compose_documents_with_limits(
+        events,
+        option.max_depth,
+        option.max_nodes,
+    )
 }
 
 impl<'de> Deserializer<'de> for &mut YamlDeserializer {
