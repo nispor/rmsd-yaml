@@ -119,9 +119,14 @@ fn is_valid_tag_suffix(s: &str) -> bool {
     !s.contains([' ', '\t', ',', '[', ']', '{', '}'])
 }
 
-/// Decode `%XX` URI escapes in a tag suffix (e.g. `%21` -> `!`).
+/// Decode `%XX` URI escapes in a tag suffix (e.g. `%21` -> `!`). Escaped
+/// bytes are accumulated and decoded as UTF-8 as a whole (falling back
+/// to lossy decoding if the result is not valid UTF-8) so multi-byte
+/// sequences split across several `%XX` escapes (e.g. `%C3%A9` -> `é`)
+/// decode correctly, instead of turning into mojibake from casting
+/// each decoded byte to a `char` on its own.
 fn decode_percent(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    let mut out: Vec<u8> = Vec::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '%' {
@@ -130,14 +135,16 @@ fn decode_percent(s: &str) -> String {
                 && hex.chars().all(|h| h.is_ascii_hexdigit())
                 && let Ok(byte) = u8::from_str_radix(&hex, 16)
             {
-                out.push(byte as char);
+                out.push(byte);
                 continue;
             }
-            out.push('%');
-            out.push_str(&hex);
+            out.push(b'%');
+            out.extend_from_slice(hex.as_bytes());
         } else {
-            out.push(c);
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
         }
     }
-    out
+    String::from_utf8(out)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
