@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![forbid(unsafe_code)]
+
 //! A pure-Rust YAML serializer and deserializer implementing the
 //! [`serde`](https://serde.rs) traits, designed as a drop-in
 //! replacement for `serde_yaml` with minimal dependencies.
