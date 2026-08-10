@@ -131,9 +131,20 @@ impl Value {
         if let ValueData::String(v) = &self.data {
             Ok(v.as_str())
         } else if let ValueData::Tag(tag) = &self.data {
-            // The `as_str()` is called to get tag name of enum instead of
-            // content.
-            Ok(tag.name.as_str())
+            // A tag is metadata (consumed separately by
+            // `ValueEnumAccess` for enum deserialization); accessing
+            // the value as a string resolves through it to the
+            // underlying scalar content, matching `serde_yaml`.
+            if let ValueData::String(v) = &tag.data {
+                Ok(v.as_str())
+            } else {
+                Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a string, but got {}", tag.data),
+                    self.start,
+                    self.end,
+                ))
+            }
         } else if self.data == ValueData::Null {
             Ok("")
         } else {
