@@ -87,6 +87,11 @@ pub enum ErrorKind {
     /// A mapping defines the same key more than once. The YAML
     /// specification (3.2.1.1) requires mapping keys to be unique.
     DuplicateMapKey,
+    /// Error raised through `serde::de::Error::custom()` /
+    /// `serde::ser::Error::custom()`, covering both serde's own
+    /// built-in messages (e.g. "invalid type: ...") and messages
+    /// raised by a caller's `Serialize`/`Deserialize` implementation.
+    Custom,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -134,6 +139,7 @@ impl std::fmt::Display for ErrorKind {
                 Self::AliasExpansionLimitExceeded =>
                     "alias_expansion_limit_exceeded",
                 Self::DuplicateMapKey => "duplicate_map_key",
+                Self::Custom => "custom",
             }
         )
     }
@@ -220,25 +226,23 @@ impl std::fmt::Display for Error {
 }
 
 impl From<&str> for Error {
+    /// Wrap an arbitrary message (e.g. from `serde::de::Error::custom()`
+    /// or `serde::ser::Error::custom()`) verbatim.
+    ///
+    /// This used to try to reconstruct `kind`/`start_pos`/`end_pos` by
+    /// pattern-matching this crate's own `Display` output (splitting
+    /// on the literal substrings `" kind: "` and `"error: "`).
+    /// Parsing a plain string back into structured fields that way is
+    /// inherently ambiguous: any *user-supplied* custom error message
+    /// that happens to contain a similarly-shaped substring got its
+    /// kind and position silently reinterpreted, and the rest of the
+    /// message silently discarded. `msg` is now always stored as-is.
     fn from(msg: &str) -> Self {
-        if let Some((pos_kind_str, msg_str)) = msg.split_once("error: ")
-            && let Some((pos_str, kind_str)) =
-                pos_kind_str.split_once(" kind: ")
-            && let Some((start_pos_str, end_pos_str)) = pos_str.split_once(":")
-        {
-            Self {
-                start_pos: YamlPosition::try_from(start_pos_str)
-                    .unwrap_or_default(),
-                end_pos: YamlPosition::try_from(end_pos_str)
-                    .unwrap_or_default(),
-                msg: msg_str.to_string(),
-                kind: ErrorKind::try_from(kind_str).unwrap_or_default(),
-            }
-        } else {
-            Self {
-                msg: msg.to_string(),
-                ..Default::default()
-            }
+        Self {
+            kind: ErrorKind::Custom,
+            msg: msg.to_string(),
+            start_pos: YamlPosition::default(),
+            end_pos: YamlPosition::default(),
         }
     }
 }
