@@ -40,7 +40,18 @@ pub(crate) struct YamlParser<'a> {
     /// Whether a `%YAML` directive was seen since the last document
     /// boundary; a second `%YAML` for the same document is an error.
     yaml_directive_seen: bool,
+    /// Current node nesting depth, incremented by `handle_node()` and
+    /// `handle_flow_node()` (the two recursive "parse one more node"
+    /// entry points) and checked against `MAX_NESTING_DEPTH` to guard
+    /// against a stack overflow on pathologically deep input.
+    depth: usize,
 }
+
+/// Maximum supported YAML node nesting depth (block or flow). Chosen
+/// well below the depth that overflows the stack (observed around
+/// 5,000 nested `[` or `- ` indicators) while comfortably fitting any
+/// realistic document.
+pub(crate) const MAX_NESTING_DEPTH: usize = 128;
 
 impl<'a> YamlParser<'a> {
     /// Current state
@@ -88,6 +99,7 @@ impl<'a> YamlParser<'a> {
             tag_handles: HashMap::new(),
             saw_directive: false,
             yaml_directive_seen: false,
+            depth: 0,
         };
         loop {
             let cur_pos = parser.scanner.done_pos;
@@ -463,8 +475,50 @@ impl<'a> YamlParser<'a> {
         )
     }
 
+    /// Increment the node-nesting counter and fail once
+    /// `MAX_NESTING_DEPTH` is exceeded. Every recursive "parse one more
+    /// node" entry point (`handle_node`, `handle_flow_node`) must call
+    /// this before doing any work; the caller is responsible for
+    /// decrementing `self.depth` again once that work is done, however
+    /// it returns.
+    fn enter_node(&mut self) -> Result<(), Error> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(Error::new(
+                ErrorKind::RecursionLimitExceeded,
+                format!(
+                    "YAML node nesting exceeds the maximum supported depth of \
+                     {MAX_NESTING_DEPTH}"
+                ),
+                self.scanner.next_pos,
+                self.scanner.next_pos,
+            ));
+        }
+        Ok(())
+    }
+
     /// Handle a container or scalar
     pub(crate) fn handle_node(
+        &mut self,
+        first_indent_count: usize,
+        rest_indent_count: usize,
+        anchor: Option<String>,
+        tag: Option<String>,
+    ) -> Result<(), Error> {
+        let result = match self.enter_node() {
+            Ok(()) => self.handle_node_impl(
+                first_indent_count,
+                rest_indent_count,
+                anchor,
+                tag,
+            ),
+            Err(e) => Err(e),
+        };
+        self.depth -= 1;
+        result
+    }
+
+    fn handle_node_impl(
         &mut self,
         first_indent_count: usize,
         rest_indent_count: usize,
@@ -1036,6 +1090,15 @@ impl<'a> YamlParser<'a> {
     /// Handle a node inside a flow collection. The entry terminators
     /// (`,` plus `]` or `}`) are handled by the caller.
     pub(crate) fn handle_flow_node(&mut self) -> Result<(), Error> {
+        let result = match self.enter_node() {
+            Ok(()) => self.handle_flow_node_impl(),
+            Err(e) => Err(e),
+        };
+        self.depth -= 1;
+        result
+    }
+
+    fn handle_flow_node_impl(&mut self) -> Result<(), Error> {
         self.scanner.skip_flow_separation();
         // YAML 1.2.2 SPEC, 6.9. Node Properties:
         //      Node properties may appear in any order, but each at

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     Error, ErrorKind, Mapping, Value, ValueData, YamlEvent, YamlEventIter,
-    YamlPosition, YamlTag,
+    YamlPosition, YamlTag, parser::MAX_NESTING_DEPTH,
 };
 
 impl Value {
@@ -43,7 +43,8 @@ pub(crate) fn compose_documents(
                     _ => unreachable!(),
                 };
                 let mut anchors: HashMap<String, Value> = HashMap::new();
-                let mut value = compose_value(&mut events_iter, &mut anchors)?;
+                let mut value =
+                    compose_value(&mut events_iter, &mut anchors, 0)?;
                 // Record the explicit `---` / `...` document markers so
                 // the dump can reproduce them.
                 value.meta.doc_explicit = implicit;
@@ -67,6 +68,7 @@ pub(crate) fn compose_documents(
 fn compose_value(
     events_iter: &mut YamlEventIter,
     anchors: &mut HashMap<String, Value>,
+    depth: usize,
 ) -> Result<Value, Error> {
     let mut doc_started_pos: Option<YamlPosition> = None;
     while let Some(event) = events_iter.next() {
@@ -85,7 +87,19 @@ fn compose_value(
                 break;
             }
             YamlEvent::SequenceStart(anchor, tag, _style, pos) => {
-                let array = compose_sequence(events_iter, anchors, pos)?;
+                if depth >= MAX_NESTING_DEPTH {
+                    return Err(Error::new(
+                        ErrorKind::RecursionLimitExceeded,
+                        format!(
+                            "YAML node nesting exceeds the maximum supported \
+                             depth of {MAX_NESTING_DEPTH}"
+                        ),
+                        pos,
+                        pos,
+                    ));
+                }
+                let array =
+                    compose_sequence(events_iter, anchors, pos, depth + 1)?;
                 let mut ret = if let Some(tag) = tag {
                     Value {
                         data: ValueData::Tag(Box::new(YamlTag {
@@ -119,7 +133,18 @@ fn compose_value(
                 ));
             }
             YamlEvent::MapStart(anchor, tag, _style, pos) => {
-                let map = compose_map(events_iter, anchors, pos)?;
+                if depth >= MAX_NESTING_DEPTH {
+                    return Err(Error::new(
+                        ErrorKind::RecursionLimitExceeded,
+                        format!(
+                            "YAML node nesting exceeds the maximum supported \
+                             depth of {MAX_NESTING_DEPTH}"
+                        ),
+                        pos,
+                        pos,
+                    ));
+                }
+                let map = compose_map(events_iter, anchors, pos, depth + 1)?;
                 let mut ret = if let Some(tag) = tag {
                     Value {
                         data: ValueData::Tag(Box::new(YamlTag {
@@ -205,6 +230,7 @@ fn compose_sequence(
     events_iter: &mut YamlEventIter,
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
+    depth: usize,
 ) -> Result<Value, Error> {
     let mut ret: Vec<Value> = Vec::new();
     let mut end_pos = YamlPosition::default();
@@ -216,7 +242,7 @@ fn compose_sequence(
                 break;
             }
             _ => {
-                ret.push(compose_value(events_iter, anchors)?);
+                ret.push(compose_value(events_iter, anchors, depth)?);
             }
         }
     }
@@ -233,6 +259,7 @@ fn compose_map(
     events_iter: &mut YamlEventIter,
     anchors: &mut HashMap<String, Value>,
     start_pos: YamlPosition,
+    depth: usize,
 ) -> Result<Value, Error> {
     let mut ret: Mapping = Mapping::new();
     let mut end_pos = YamlPosition::default();
@@ -246,10 +273,10 @@ fn compose_map(
             }
             _ => {
                 if let Some(key) = key.take() {
-                    let value = compose_value(events_iter, anchors)?;
+                    let value = compose_value(events_iter, anchors, depth)?;
                     ret.insert(key, value);
                 } else {
-                    key = Some(compose_value(events_iter, anchors)?);
+                    key = Some(compose_value(events_iter, anchors, depth)?);
                 }
             }
         }
@@ -628,5 +655,44 @@ mod test {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn test_compose_rejects_hand_built_events_nested_past_the_limit() {
+        // Regression: `compose_value`/`compose_sequence`/`compose_map`
+        // used to recurse once per `SequenceStart`/`MapStart` with no
+        // depth limit. This directly builds an event stream nested
+        // past `MAX_NESTING_DEPTH` (bypassing the parser's own guard)
+        // to prove the composer rejects it independently instead of
+        // overflowing the stack.
+        let nesting = MAX_NESTING_DEPTH + 1;
+        let mut events = vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+        ];
+        for _ in 0..nesting {
+            events.push(YamlEvent::SequenceStart(
+                None,
+                None,
+                YamlCollectionStyle::Flow,
+                YamlPosition::new(1, 1),
+            ));
+        }
+        events.push(YamlEvent::Scalar(
+            None,
+            None,
+            "1".to_string(),
+            YamlScalarStyle::Plain,
+            YamlPosition::new(1, 1),
+            YamlPosition::new(1, 1),
+        ));
+        for _ in 0..nesting {
+            events.push(YamlEvent::SequenceEnd(YamlPosition::new(1, 1)));
+        }
+        events.push(YamlEvent::DocumentEnd(false, YamlPosition::new(1, 1)));
+        events.push(YamlEvent::StreamEnd);
+
+        let err = Value::compose(events).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
     }
 }
