@@ -15,5 +15,6 @@ header:
     - 'LICENSE'
     - '.gitignore'
     - 'tags'
+    - 'fuzz/seeds/*'
 
   comment: on-failure
