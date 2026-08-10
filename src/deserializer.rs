@@ -108,7 +108,9 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     {
         match &self.parsed.data {
             ValueData::String(_) => {
-                if self.parsed.is_bool() {
+                if self.parsed.is_null() {
+                    self.deserialize_unit(visitor)
+                } else if self.parsed.is_bool() {
                     self.deserialize_bool(visitor)
                 } else if self.parsed.is_integer() {
                     self.deserialize_u64(visitor)
