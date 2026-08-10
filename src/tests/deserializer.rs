@@ -427,3 +427,27 @@ fn test_deserialize_any_resolves_tags_transparently() {
         }),
     );
 }
+
+#[test]
+fn test_tagged_scalar_as_string_uses_content_not_tag_name() {
+    // `Value::as_str()` used to return the tag's own name (e.g.
+    // `"<tag:yaml.org,2002:str>"`) instead of the tagged scalar's
+    // content for any tagged value, which corrupted map keys and
+    // string fields built from a tagged scalar.
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        key: String,
+    }
+    let got: S = from_str("key: !!str value\n").unwrap();
+    assert_eq!(
+        got,
+        S {
+            key: "value".to_string()
+        }
+    );
+
+    let got: std::collections::BTreeMap<String, i32> =
+        from_str("!!str a: 1\nb: 2\n").unwrap();
+    assert_eq!(got.get("a"), Some(&1));
+    assert_eq!(got.get("b"), Some(&2));
+}
