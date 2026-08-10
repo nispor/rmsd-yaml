@@ -397,3 +397,33 @@ fn test_deserialize_any_null_scalar_is_null() {
     let got: serde_json::Value = from_str("a: null\nb: ~\nc:\n").unwrap();
     assert_eq!(got, serde_json::json!({"a": null, "b": null, "c": null}),);
 }
+
+#[test]
+fn test_deserialize_any_resolves_tags_transparently() {
+    // `deserialize_any` used to treat *every* tagged node as an enum
+    // representation (`ValueEnumAccess`), which fails for generic
+    // targets like `serde_json::Value` since there is no enum to
+    // decode into. Per the YAML Core Schema, only `!!str`/`!`,
+    // `!!int`, `!!float`, `!!bool` and `!!null` force a scalar type;
+    // every other tag (custom application tags, `!!seq`, `!!map`,
+    // `!!set`, `!!omap`, `!!binary`, ...) resolves transparently to
+    // its underlying, untagged data.
+    let got: serde_json::Value = from_str(
+        "a: !!str 23\nb: !!int \"23\"\nc: !!float \"1.5\"\nd: !!bool \
+         \"true\"\ne: !!null ~\nf: ! 12\ng: !circle\n  center: 0\n  radius: \
+         1\n",
+    )
+    .unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!({
+            "a": "23",
+            "b": 23,
+            "c": 1.5,
+            "d": true,
+            "e": null,
+            "f": "12",
+            "g": {"center": 0, "radius": 1},
+        }),
+    );
+}

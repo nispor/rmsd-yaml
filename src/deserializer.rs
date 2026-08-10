@@ -14,7 +14,7 @@ use serde::{
 
 use crate::{
     Error, ErrorKind, MappingAccess, SequenceAccess, Value, ValueData,
-    ValueEnumAccess,
+    ValueEnumAccess, YamlScalarStyle,
 };
 
 #[derive(Debug, Default)]
@@ -124,9 +124,66 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
             }
             ValueData::Array(_) => self.deserialize_seq(visitor),
             ValueData::Map(_) => self.deserialize_map(visitor),
-            ValueData::Tag(_) => {
-                let access = ValueEnumAccess::new(self.parsed.clone());
-                visitor.visit_enum(access)
+            ValueData::Tag(tag) => {
+                // A YAML tag is metadata consumed by `deserialize_enum`
+                // (Rust enum variants are matched against the tag name
+                // via `ValueEnumAccess`); when the caller instead wants
+                // "any" value (e.g. deserializing into a generic
+                // `Value`), the node resolves from its underlying data,
+                // matching `serde_yaml`. The YAML core-schema scalar
+                // tags (`!!str`, `!!int`, `!!float`, `!!bool`,
+                // `!!null`) and the bare non-specific tag `!` (which
+                // resolves to `!!str`, YAML 1.2.2 SPEC, 10.3 Core
+                // Schema) force that specific type instead of
+                // auto-detecting it from content; every other tag
+                // (custom tags, and core-schema collection/binary tags
+                // like `!!seq`, `!!map`, `!!set`, `!!binary`) is
+                // transparent.
+                let mut inner = YamlDeserializer {
+                    parsed: Value {
+                        data: tag.data.clone(),
+                        start: self.parsed.start,
+                        end: self.parsed.end,
+                        meta: self.parsed.meta.clone(),
+                    },
+                    path: self.path.clone(),
+                };
+                match tag.name.as_str() {
+                    "<tag:yaml.org,2002:str>" | "<!>" => {
+                        inner.deserialize_str(visitor)
+                    }
+                    "<tag:yaml.org,2002:int>" => {
+                        // The tag forces integer resolution regardless
+                        // of how the scalar was styled in the source
+                        // (e.g. `!!int "23"` is `23`, not the string
+                        // `"23"`), unlike implicit (untagged)
+                        // resolution, which only auto-detects plain
+                        // scalars.
+                        inner.parsed.meta.scalar_style =
+                            Some(YamlScalarStyle::Plain);
+                        if inner.parsed.is_integer() {
+                            inner.deserialize_u64(visitor)
+                        } else {
+                            inner.deserialize_i64(visitor)
+                        }
+                    }
+                    "<tag:yaml.org,2002:float>" => {
+                        inner.parsed.meta.scalar_style =
+                            Some(YamlScalarStyle::Plain);
+                        inner.deserialize_f64(visitor)
+                    }
+                    "<tag:yaml.org,2002:bool>" => {
+                        inner.parsed.meta.scalar_style =
+                            Some(YamlScalarStyle::Plain);
+                        inner.deserialize_bool(visitor)
+                    }
+                    "<tag:yaml.org,2002:null>" => {
+                        inner.parsed.meta.scalar_style =
+                            Some(YamlScalarStyle::Plain);
+                        inner.deserialize_unit(visitor)
+                    }
+                    _ => inner.deserialize_any(visitor),
+                }
             }
             v => Err(Error::new(
                 ErrorKind::Bug,
