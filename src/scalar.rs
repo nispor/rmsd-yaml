@@ -24,7 +24,7 @@ impl<'a> YamlParser<'a> {
         let mut chomping_method = ChompingMethod::default();
         if let Some(next_char) = self.scanner.peek_char() {
             match next_char {
-                '1'..'9' => {
+                '1'..='9' => {
                     self.scanner.next_char();
                     indentation_indicator =
                         Some(next_char.to_digit(10).unwrap() as usize);
