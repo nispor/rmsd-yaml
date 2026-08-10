@@ -81,6 +81,22 @@ fn test_percent_escaped_suffix() {
 }
 
 #[test]
+fn test_percent_escaped_suffix_multibyte_utf8() {
+    // Regression: `decode_percent()` used to cast each decoded byte to
+    // `char` individually (`byte as char`), which is only correct for
+    // ASCII. A multi-byte UTF-8 character split across several `%XX`
+    // escapes (`%C3%A9` is the 2-byte encoding of `é`) decoded to
+    // mojibake (two separate Latin-1 code points) instead of the
+    // intended single character.
+    let input = "%TAG !e! tag:example.com,2000:app/\n---\n!e!caf%C3%A9 \"a\"\n";
+    let events = scalar_events(input);
+    assert_eq!(
+        events,
+        vec![(Some("<tag:example.com,2000:app/café>".into()), "a".into())]
+    );
+}
+
+#[test]
 fn test_invalid_tags() {
     // Flow indicators are not allowed in tag suffixes.
     assert!(
