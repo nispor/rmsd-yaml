@@ -11,6 +11,7 @@ const DESCRIPTION_FILE_NAME: &str = "===";
 const INPUT_YAML_FILE_NAME: &str = "in.yaml";
 const TEST_EVENT_FILE_NAME: &str = "test.event";
 const OUT_YAML_FILE_NAME: &str = "out.yaml";
+const IN_JSON_FILE_NAME: &str = "in.json";
 
 /// The test cases skipped for the `out.yaml` test. The test runs over
 /// *every* case with an `out.yaml` and a successful parse, and only
@@ -124,6 +125,49 @@ const SKIPPED_OUT_YAML_TEST: &[&str] = &[
     "two-scalar-docs-with-trailing-comments",
     // multi-doc stream: compose() rejects >1 document
     "various-combinations-of-tags-and-anchors",
+];
+
+/// The test cases skipped for the `in.json` test. The test runs over
+/// every case with an `in.json` and a successful parse, deserializing
+/// `in.yaml` into a `serde_json::Value` and comparing it against the
+/// JSON parsed from `in.json`.
+///
+/// The skipped cases all have an `in.json` that is not a single valid
+/// JSON value, for one of two reasons:
+///
+/// * The case is a multi-document YAML stream, so `in.json` is several JSON
+///   values concatenated back to back (one per document). This mirrors the
+///   multi-doc entries already in `SKIPPED_OUT_YAML_TEST`, since `compose()`
+///   likewise rejects more than one document.
+/// * The case's `in.yaml` produces no document at all (e.g. an empty stream, or
+///   a stream containing only comments/directives), so `in.json` is an empty
+///   file with nothing to parse or compare.
+const SKIPPED_IN_JSON_TEST: &[&str] = &[
+    // multi-doc stream: in.json is several JSON values concatenated
+    "bare-document-after-document-end-marker",
+    "document-start-on-last-line",
+    "scalars-on-line",
+    "spec-example-2-28-log-file",
+    "spec-example-2-7-two-documents-in-a-stream",
+    "spec-example-2-8-play-by-play-feed-from-a-game",
+    "spec-example-6-18-primary-tag-handle",
+    "spec-example-6-18-primary-tag-handle-1-3",
+    "spec-example-6-21-local-tag-prefix",
+    "spec-example-9-3-bare-documents",
+    "spec-example-9-4-explicit-documents",
+    "spec-example-9-5-directives-documents",
+    "spec-example-9-6-stream",
+    "spec-example-9-6-stream-1-3",
+    "tags-for-root-objects",
+    "two-document-start-markers",
+    "two-scalar-docs-with-trailing-comments",
+    "various-combinations-of-tags-and-anchors",
+    // empty stream: in.json is empty, there is no document to compare
+    "comment-and-document-end-marker",
+    "document-end-marker",
+    "empty-stream",
+    "spec-example-5-5-comment-indicator",
+    "spec-example-6-10-comment-lines",
 ];
 
 /// Collect the test directories under `test_data_dir`. A test directory is
@@ -252,6 +296,99 @@ fn yaml_test_suit_out_yaml() {
         tested += 1;
     }
     log::info!("Tested {tested} {OUT_YAML_FILE_NAME} tests");
+}
+
+/// Run the `in.json` comparison for every case except
+/// `SKIPPED_IN_JSON_TEST`.
+#[test]
+fn yaml_test_suit_in_json() {
+    super::testlib::init_logger();
+
+    let test_data_dir =
+        std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join(TEST_DATA_FOLDER_PATH);
+
+    let test_paths = discover_test_paths(&test_data_dir);
+    let mut tested = 0;
+
+    for test_path in test_paths.into_iter() {
+        let test_path_str = test_path
+            .strip_prefix(&test_data_dir)
+            .unwrap()
+            .display()
+            .to_string();
+        if SKIPPED_IN_JSON_TEST.iter().any(|t| {
+            test_path_str.as_str() == *t
+                || test_path_str.starts_with(&format!("{}/", t))
+        }) {
+            continue;
+        }
+
+        if !test_path.join(IN_JSON_FILE_NAME).exists() {
+            log::warn!("Skipping test {test_path_str}: no {IN_JSON_FILE_NAME}");
+            continue;
+        }
+        if test_path.join("error").exists() {
+            // The test expects a parse error (an `error` file); there
+            // is nothing to deserialize.
+            log::warn!("Skipping test {test_path_str}: expects a parse error");
+            continue;
+        }
+
+        log::trace!("====== {} ======", test_path_str);
+
+        // Deserialize `in.yaml` through serde into a `serde_json::Value`
+        // (exercising the real `Deserializer` impl and its type
+        // inference), then compare against the JSON parsed from
+        // `in.json`.
+        let input_yaml = read_file(&test_path.join(INPUT_YAML_FILE_NAME));
+        let expected_json = read_file(&test_path.join(IN_JSON_FILE_NAME));
+        let expected: serde_json::Value = serde_json::from_str(&expected_json)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{test_path_str}: {IN_JSON_FILE_NAME} is not valid JSON: \
+                     {e}"
+                )
+            });
+        let got: serde_json::Value = crate::from_str(&input_yaml)
+            .unwrap_or_else(|e| {
+                panic!("{test_path_str}: failed to deserialize in.yaml: {e}")
+            });
+        assert!(
+            json_value_eq(&expected, &got),
+            "in.json mismatch for {test_path_str}: expected {expected:?}, got \
+             {got:?}",
+        );
+
+        tested += 1;
+    }
+    log::info!("Tested {tested} {IN_JSON_FILE_NAME} tests");
+}
+
+/// Deep-compare two JSON values, treating numbers as equal whenever
+/// their `f64` representation matches. This is needed because
+/// `serde_json::Value`'s derived `PartialEq` distinguishes an
+/// integer-shaped `Number` from a float-shaped one even when they are
+/// mathematically equal (e.g. `450 != 450.0`), while a YAML float
+/// scalar like `450.00` is only guaranteed to round-trip to the
+/// correct magnitude, not to a specific JSON number representation.
+fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value;
+
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len()
+                && a.iter().zip(b.iter()).all(|(a, b)| json_value_eq(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|(k, v)| {
+                    b.get(k).is_some_and(|bv| json_value_eq(v, bv))
+                })
+        }
+        (a, b) => a == b,
+    }
 }
 
 fn run_event_parser_test(

@@ -25,5 +25,7 @@
 
 ## in.json tests
 
-* [ ] Enable in.json test suite: deserialize each `in.yaml` and compare
-      the result with the JSON value in `in.json`
+* [x] Enable in.json test suite: deserialize each `in.yaml` and compare
+      the result with the JSON value in `in.json` (256 of 279 cases;
+      the other 23 are multi-document streams or produce no document,
+      see `SKIPPED_IN_JSON_TEST`)
