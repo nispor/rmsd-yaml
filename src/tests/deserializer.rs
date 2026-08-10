@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 use crate::{
     ErrorKind, Value, YamlCollectionStyle, YamlEvent, YamlParseOption,
-    YamlParser, YamlPosition, YamlScalarStyle, documents_with_opt, from_str,
-    from_str_with_opt,
+    YamlParser, YamlPosition, YamlScalarStyle, documents_with_opt,
+    from_reader_with_opt, from_str, from_str_with_opt,
 };
 
 #[test]
@@ -556,4 +556,42 @@ fn test_documents_with_opt_respects_custom_max_depth() {
     };
     let err = documents_with_opt("[[[[1]]]]", option).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
+}
+
+#[test]
+fn test_from_reader_with_opt_respects_custom_max_input_bytes() {
+    // A reader delivering more than `max_input_bytes` must be rejected
+    // with `InputTooLarge` before parsing is even attempted, instead
+    // of being buffered into memory in full.
+    let option = YamlParseOption {
+        max_input_bytes: 4,
+        ..Default::default()
+    };
+    let err = from_reader_with_opt::<_, Value>("12345".as_bytes(), option)
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InputTooLarge);
+}
+
+#[test]
+fn test_from_reader_with_opt_max_input_bytes_allows_input_at_the_limit() {
+    // Input of exactly `max_input_bytes` must still be accepted (the
+    // limit is inclusive), proving the one-extra-byte read used to
+    // detect an overlong stream does not off-by-one reject it.
+    let option = YamlParseOption {
+        max_input_bytes: 4,
+        ..Default::default()
+    };
+    let got: Value = from_reader_with_opt("1234".as_bytes(), option).unwrap();
+    assert_eq!(got, from_str::<Value>("1234").unwrap());
+}
+
+#[test]
+fn test_from_reader_default_has_no_input_size_cap() {
+    // `from_reader` (without `_with_opt`) must keep its historical,
+    // unbounded behavior: `YamlParseOption::default().max_input_bytes`
+    // is 0, meaning no limit.
+    assert_eq!(YamlParseOption::default().max_input_bytes, 0);
+    let long_input = "a".repeat(10_000);
+    let got: String = crate::from_reader(long_input.as_bytes()).unwrap();
+    assert_eq!(got, long_input);
 }

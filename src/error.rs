@@ -87,6 +87,11 @@ pub enum ErrorKind {
     /// A mapping defines the same key more than once. The YAML
     /// specification (3.2.1.1) requires mapping keys to be unique.
     DuplicateMapKey,
+    /// `from_reader_with_opt` read more than `YamlParseOption::
+    /// max_input_bytes` from the stream. Guards against a small
+    /// adversarial or size-unbounded reader (e.g. a network socket)
+    /// forcing an unbounded allocation before parsing even starts.
+    InputTooLarge,
     /// Error raised through `serde::de::Error::custom()` /
     /// `serde::ser::Error::custom()`, covering both serde's own
     /// built-in messages (e.g. "invalid type: ...") and messages
@@ -139,6 +144,7 @@ impl std::fmt::Display for ErrorKind {
                 Self::AliasExpansionLimitExceeded =>
                     "alias_expansion_limit_exceeded",
                 Self::DuplicateMapKey => "duplicate_map_key",
+                Self::InputTooLarge => "input_too_large",
                 Self::Custom => "custom",
             }
         )
