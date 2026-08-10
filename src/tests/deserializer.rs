@@ -386,3 +386,14 @@ fn test_deserialize_empty_value_as_empty_map_and_seq() {
     let t: T = from_str("x:\n").unwrap();
     assert_eq!(t, T { x: vec![] });
 }
+
+#[test]
+fn test_deserialize_any_null_scalar_is_null() {
+    // `deserialize_any` (used e.g. by `serde_json::Value`) checked
+    // `is_bool`/`is_integer`/`is_float` before falling back to a
+    // plain string, but never checked `is_null`, so a null scalar
+    // used to deserialize into the empty string `""` instead of
+    // `Value::Null`.
+    let got: serde_json::Value = from_str("a: null\nb: ~\nc:\n").unwrap();
+    assert_eq!(got, serde_json::json!({"a": null, "b": null, "c": null}),);
+}
