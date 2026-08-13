@@ -9,7 +9,7 @@
 
 use std::io::Cursor;
 
-use crate::{Value, from_reader, from_str};
+use crate::{ErrorKind, Value, from_reader, from_str};
 
 /// Tiny deterministic PRNG (xorshift64*) so results are reproducible.
 struct Rng(u64);
@@ -180,6 +180,23 @@ fn alias_chain(levels: usize, width: usize) -> String {
     doc
 }
 
+/// The two 240-byte units libFuzzer flagged as slow/timeout during the
+/// `from_reader` fuzz run. They are 8-level anchor/alias chains whose
+/// cumulative expansion stays just under the old 1,000,000-node default:
+/// composition used to return `Ok` after materializing and cloning
+/// hundreds of thousands of nodes.
+const SLOW_ALIAS_CHAIN_TIMEOUT: &str =
+    "a0: &a0 [0,1,2,3,4,5,6,7,8,9]\na1: &a1 [*a0,*a0,*a0,*a0,*a0]\na2: &a2 \
+     [*a1,*a1,*a1,*a1,*a1]\na3: &a3 [*a2,*a2,*a2,*a0,*a2]\na4: &a4 \
+     [*a3,*a3,*a3,*a3,*a3]\na5: &a5 [*a4,*a4,*a4,*a4,*a4]\na6: &a6 \
+     [*a5,*a5,*a5,*a5,*a5]\na7: &a7 [*a6,*a6,*a6,*a6,*a6]\n";
+
+const SLOW_ALIAS_CHAIN_SLOW_UNIT: &str =
+    "a0: &a0 [0,1,2,3,4,5,6,7,8,9]\na1: &a1 [*a0,*a0,*a0,*a0,*a0]\na2: &a2 \
+     [*a1,*a1,*a1,*a1,*a1]\na3: &a3 [*a2,*a2,*a2,*a2,*a2]\na4: &a4 \
+     [*a3,*a3,*a3,*a3,*a3]\na5: &a5 [*a4,*a4,*a4,*a4,*a4]\na6: &a6 \
+     [*a5,*a5,*a5,*a5,*a5]\na7: &a7 [*a6,*a6,a*6,*a6,*a6]\n";
+
 #[test]
 fn exponential_alias_expansion_errors_instead_of_exhausting_memory() {
     // Regression: resolving an alias used to `clone()` the entire
@@ -191,9 +208,26 @@ fn exponential_alias_expansion_errors_instead_of_exhausting_memory() {
     let shallow = alias_chain(3, 10);
     assert!(from_str::<Value>(&shallow).is_ok());
 
-    // Six levels of tenfold aliasing composes over a million nodes,
-    // which must be rejected instead of allocated.
+    // Six levels of tenfold aliasing composes far more nodes than the
+    // default budget allows, so it must be rejected instead of
+    // allocated.
     let deep = alias_chain(6, 10);
     let err = from_str::<Value>(&deep).unwrap_err();
     assert_eq!(err.kind(), crate::ErrorKind::AliasExpansionLimitExceeded);
+}
+
+#[test]
+fn near_limit_alias_expansion_is_rejected_instead_of_timing_out() {
+    // Regression: these inputs used to pass the 1,000,000-node budget
+    // (their cumulative expansions are ~888k and ~923k nodes), so the
+    // composer eagerly materialized and cloned them. Under libFuzzer
+    // instrumentation that took >10 s. The budget must reject them
+    // before composing the last, largest anchor.
+    for input in [SLOW_ALIAS_CHAIN_TIMEOUT, SLOW_ALIAS_CHAIN_SLOW_UNIT] {
+        let err = from_str::<Value>(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AliasExpansionLimitExceeded);
+        let err =
+            from_reader::<_, Value>(Cursor::new(input.as_bytes())).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AliasExpansionLimitExceeded);
+    }
 }

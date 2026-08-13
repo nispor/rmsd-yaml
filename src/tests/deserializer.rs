@@ -485,14 +485,15 @@ fn test_quoted_numeric_and_bool_like_scalars_are_not_coerced() {
 }
 
 #[test]
-fn test_yaml_parse_option_default_matches_previous_hardcoded_limits() {
-    // `YamlParseOption::default()` must keep the resource limits that
-    // used to be hardcoded constants, so existing callers of
-    // `from_str`/`from_reader` (which delegate to the `_with_opt`
-    // variants with the default option) see no behavior change.
+fn test_yaml_parse_option_defaults() {
+    // `YamlParseOption::default()` must match the hardcoded resource
+    // limits used by `from_str`/`from_reader`. The node cap is kept
+    // deliberately low enough that a near-limit anchor/alias document
+    // cannot make the composer spend seconds materializing and cloning
+    // hundreds of thousands of nodes.
     let option = YamlParseOption::default();
     assert_eq!(option.max_depth, 128);
-    assert_eq!(option.max_nodes, 1_000_000);
+    assert_eq!(option.max_nodes, 100_000);
 }
 
 #[test]
