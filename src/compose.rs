@@ -16,10 +16,13 @@ use crate::{
 /// composition. Every scalar, sequence and mapping produced counts as
 /// one node, and resolving an alias counts as the full number of nodes
 /// in the anchor it copies (since `Value::clone()` duplicates all of
-/// it). This bounds the "billion laughs" pattern, where a chain of
-/// anchors each aliasing the previous one several times duplicates its
-/// content exponentially without the input itself growing much.
-pub(crate) const MAX_COMPOSED_NODES: usize = 1_000_000;
+/// it). Storing an anchor in the anchor table counts as another full
+/// copy of the anchored subtree, since the composer keeps that copy in
+/// addition to the node that appears in the document. This bounds the
+/// "billion laughs" pattern, where a chain of anchors each aliasing the
+/// previous one several times duplicates its content exponentially
+/// without the input itself growing much.
+pub(crate) const MAX_COMPOSED_NODES: usize = 100_000;
 
 /// Depth and node-count limits enforced while composing a single
 /// document, configurable via `YamlParseOption`. A fresh instance is
@@ -237,6 +240,7 @@ fn compose_value(
                 };
                 ret.meta.anchor = anchor;
                 if let Some(anchor) = &ret.meta.anchor {
+                    charge_budget(budget, count_nodes(&ret), pos)?;
                     anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
@@ -285,6 +289,7 @@ fn compose_value(
                 };
                 ret.meta.anchor = anchor;
                 if let Some(anchor) = &ret.meta.anchor {
+                    charge_budget(budget, count_nodes(&ret), pos)?;
                     anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
@@ -325,6 +330,7 @@ fn compose_value(
                 ret.meta.scalar_style = Some(style);
                 ret.meta.anchor = anchor;
                 if let Some(anchor) = &ret.meta.anchor {
+                    charge_budget(budget, count_nodes(&ret), start)?;
                     anchors.insert(anchor.clone(), ret.clone());
                 }
                 return Ok(ret);
@@ -841,5 +847,49 @@ mod test {
 
         let err = Value::compose(events).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::RecursionLimitExceeded);
+    }
+
+    #[test]
+    fn test_anchor_storage_counts_against_node_budget() {
+        // The composer returns an anchored value to the document *and*
+        // keeps a second full copy in the anchor table. Both copies are
+        // real `Value` nodes, so storing the anchor must charge the
+        // budget too; otherwise a document can retain nearly twice its
+        // declared node limit and still be accepted (the slow
+        // 8-level alias-chain fuzz artifacts).
+        let anchored_events = vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                Some("a".to_string()),
+                None,
+                "x".to_string(),
+                YamlScalarStyle::Plain,
+                YamlPosition::new(1, 1),
+                YamlPosition::new(1, 1),
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(1, 1)),
+            YamlEvent::StreamEnd,
+        ];
+        let err =
+            Value::compose_with_limits(anchored_events, 128, 1).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AliasExpansionLimitExceeded);
+
+        // The same scalar without an anchor fits within the same budget.
+        let plain_events = vec![
+            YamlEvent::StreamStart,
+            YamlEvent::DocumentStart(false, YamlPosition::new(1, 1)),
+            YamlEvent::Scalar(
+                None,
+                None,
+                "x".to_string(),
+                YamlScalarStyle::Plain,
+                YamlPosition::new(1, 1),
+                YamlPosition::new(1, 1),
+            ),
+            YamlEvent::DocumentEnd(false, YamlPosition::new(1, 1)),
+            YamlEvent::StreamEnd,
+        ];
+        assert!(Value::compose_with_limits(plain_events, 128, 1).is_ok());
     }
 }

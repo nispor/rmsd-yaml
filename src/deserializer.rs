@@ -31,7 +31,8 @@ pub struct YamlParseOption {
     pub max_depth: usize,
     /// Maximum number of `Value` nodes a single document may realize
     /// during composition, including nodes duplicated by resolving an
-    /// alias. Default is 1,000,000.
+    /// alias and the copies retained in the anchor table. Default is
+    /// 100,000.
     pub max_nodes: usize,
     /// Maximum number of bytes [`from_reader_with_opt`] will read from
     /// the stream before giving up with `ErrorKind::InputTooLarge`, or
