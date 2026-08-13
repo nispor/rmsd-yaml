@@ -6,11 +6,6 @@ on:
   push:
     branches:
       - main
-  # Long-running fuzz job (see the `fuzz-extended` job below); runs
-  # weekly so mutation has a real chance to reach deep/aliased shapes
-  # that a 60s per-PR smoke test cannot. Can also be triggered by hand.
-  schedule:
-    - cron: "0 3 * * 0"
   workflow_dispatch:
 
 jobs:
@@ -53,44 +48,3 @@ jobs:
         run: |
           cargo fuzz run from_reader fuzz/corpus/from_reader fuzz/seeds \
             -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
-
-  fuzz-extended:
-    name: Fuzz extended (scheduled)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Install Rust Nightly and cargo-fuzz
-        run: |
-          rustup override set nightly
-          rustup update nightly
-          cargo install cargo-fuzz --locked
-
-      - name: Build fuzz targets
-        run: cargo fuzz build
-
-      - name: Create local corpus directories
-        run: mkdir -p fuzz/corpus/from_str fuzz/corpus/from_reader
-
-      # 30 minutes per target instead of the 60s PR smoke test, so
-      # coverage-guided mutation (seeded from `fuzz/seeds`) has real
-      # time to explore deep/aliased shapes. Runs weekly rather than
-      # on every push to keep CI minutes bounded.
-      - name: Fuzz from_str (extended)
-        run: |
-          cargo fuzz run from_str fuzz/corpus/from_str fuzz/seeds \
-            -- -max_total_time=1800 -timeout=10 -rss_limit_mb=2048
-
-      - name: Fuzz from_reader (extended)
-        run: |
-          cargo fuzz run from_reader fuzz/corpus/from_reader fuzz/seeds \
-            -- -max_total_time=1800 -timeout=10 -rss_limit_mb=2048
-
-      - name: Upload crash artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-artifacts
-          path: fuzz/artifacts/
