@@ -16,5 +16,6 @@ header:
     - '.gitignore'
     - 'tags'
     - 'fuzz/seeds/*'
+    - 'CHANGELOG'
 
   comment: on-failure
