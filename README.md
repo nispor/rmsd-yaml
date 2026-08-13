@@ -6,11 +6,8 @@ for `serde_yaml` with minimal dependencies (`serde`, `indexmap`, `log`).
 
 ## Features
 
-- Parse YAML 1.2 documents (block and flow collections, block scalars
-  with chomping, anchors/aliases, tags and directives)
-- Serialize any `Serialize` type to YAML with round-trippable output
-  (enums as `!Variant` tags, `!!binary` for byte buffers)
-- yaml-test-suite conformance: **251 of 402** cases passing and growing
+- YAML 1.2 support
+- API similar to serde-yaml
 - No `unsafe` code; no C bindings
 
 ## Quick start
