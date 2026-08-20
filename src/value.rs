@@ -212,8 +212,8 @@ impl Value {
                 ));
             }
             match s.as_str() {
-                "true" => Ok(true),
-                "false" => Ok(false),
+                "true" | "True" | "TRUE" => Ok(true),
+                "false" | "False" | "FALSE" => Ok(false),
                 _ => Err(Error::new(
                     ErrorKind::InvalidBool,
                     format!("Expecting bool (true or false), but got {s}"),
