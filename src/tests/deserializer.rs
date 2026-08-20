@@ -138,6 +138,31 @@ fn test_deserialize_integers() {
 }
 
 #[test]
+fn test_i64_min_and_boundaries() {
+    // `i64::MIN` has a magnitude (`2^63`) that does not fit in an `i64`,
+    // so the old parse-by-unsigned-magnitude-then-negate logic rejected
+    // it. Every base spelling of `i64::MIN` must deserialize to the
+    // minimum value instead (matching `serde_yaml`, which parses the
+    // whole signed token with `i64::from_str`).
+    let mag: i128 = 1 << 63;
+    assert_eq!(from_str::<i64>("-9223372036854775808").unwrap(), i64::MIN);
+    assert_eq!(from_str::<i64>(&format!("-0x{:x}", mag)).unwrap(), i64::MIN);
+    assert_eq!(from_str::<i64>(&format!("-0o{:o}", mag)).unwrap(), i64::MIN);
+    assert_eq!(from_str::<i64>(&format!("-0b{:b}", mag)).unwrap(), i64::MIN);
+    // `i64::MAX` still parses, and `one-past` either end is rejected as
+    // out of range rather than silently wrapping.
+    assert_eq!(from_str::<i64>("9223372036854775807").unwrap(), i64::MAX);
+    assert!(from_str::<i64>("9223372036854775808").is_err());
+    assert!(from_str::<i64>("-9223372036854775809").is_err());
+    // A negative plain integer and the narrower signed targets still work.
+    assert_eq!(from_str::<i64>("-42").unwrap(), -42);
+    assert_eq!(from_str::<i32>("-2147483648").unwrap(), i32::MIN);
+    // The generic `serde_json::Value` path carries the integer too.
+    let got: serde_json::Value = from_str("-9223372036854775808").unwrap();
+    assert_eq!(got, serde_json::Value::from(i64::MIN));
+}
+
+#[test]
 fn test_deserialize_floats() {
     assert_eq!(from_str::<f64>("1.5").unwrap(), 1.5);
     assert_eq!(from_str::<f64>("-2.25").unwrap(), -2.25);
