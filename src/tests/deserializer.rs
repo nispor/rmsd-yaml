@@ -111,6 +111,48 @@ fn test_deserialize_bool() {
 }
 
 #[test]
+fn test_all_yaml_core_bool_spellings() {
+    // YAML 1.2 Core Schema (10.3.1) recognizes all six of
+    // `true|True|TRUE` and `false|False|FALSE` as booleans. The old
+    // `as_bool` only accepted lowercase, so e.g. `TRUE` failed to
+    // deserialize into a `bool` field and also leaked into
+    // `deserialize_any` as the plain string `"TRUE"`.
+    for (w, expected) in [
+        ("true", true),
+        ("True", true),
+        ("TRUE", true),
+        ("false", false),
+        ("False", false),
+        ("FALSE", false),
+    ] {
+        assert_eq!(
+            from_str::<bool>(w).unwrap(),
+            expected,
+            "{w:?} should deserialize to {expected}"
+        );
+        let got: serde_json::Value = from_str(w).unwrap();
+        assert_eq!(
+            got,
+            serde_json::json!(expected),
+            "{w:?} should be a JSON bool, not a string"
+        );
+    }
+    // The YAML 1.1 words (`yes`/`no`/`on`/`off`) and single digits
+    // must *not* be booleans under YAML 1.2; they stay ordinary
+    // strings / integers.
+    for w in ["yes", "no", "on", "off"] {
+        assert!(from_str::<bool>(w).is_err(), "{w:?} is not a YAML 1.2 bool");
+        let got: serde_json::Value = from_str(w).unwrap();
+        assert_eq!(got, serde_json::json!(w), "{w:?} must stay a string");
+    }
+    // A quoted scalar is never a bool, even when its content is a
+    // valid bool spelling (already covered by
+    // `test_quoted_numeric_and_bool_like_scalars_are_not_coerced` but
+    // restated here since the bool set just widened).
+    assert!(from_str::<bool>("\"True\"").is_err());
+}
+
+#[test]
 fn test_deserialize_char() {
     assert_eq!(from_str::<char>("a").unwrap(), 'a');
     assert_eq!(
