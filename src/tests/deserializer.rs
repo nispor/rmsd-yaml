@@ -159,6 +159,21 @@ fn test_deserialize_char() {
         from_str::<char>("ab").unwrap_err().kind(),
         ErrorKind::UnexpectedYamlNodeType
     );
+    // Null / integer / bool scalars must not be coerced to their
+    // single-character text (`~` -> '~', `0` -> '0'). `as_char` must
+    // respect the same null/number/bool gates as `as_str`, `as_bool`,
+    // `as_f64`, keeping type-safety consistent.
+    for c in ["~", "null", "Null", "NULL", "0", "1", "42", "true", "FALSE"] {
+        assert!(
+            from_str::<char>(c).is_err(),
+            "{c:?} is not a valid YAML char"
+        );
+    }
+    // A *quoted* single-character scalar is an ordinary string and does
+    // resolve to a char (its content is not a number / bool / null).
+    assert_eq!(from_str::<char>("\"0\"").unwrap(), '0');
+    assert_eq!(from_str::<char>("\"~\"").unwrap(), '~');
+    assert_eq!(from_str::<char>("'a'").unwrap(), 'a');
 }
 
 #[test]
