@@ -105,6 +105,14 @@ impl<'a> YamlParser<'a> {
         input: &'a str,
         max_depth: usize,
     ) -> Result<Vec<YamlEvent>, Error> {
+        // Strip a single leading UTF-8 BOM (`U+FEFF`, YAML 1.2.2 SPEC,
+        // 2.1.1) if present. Without this, the BOM character merges
+        // into the first token of the stream — e.g. `\u{feff}a: 1`
+        // would parse as the key `"\u{feff}a"` (a single character of
+        // BOM followed by `a`) instead of the correct key `"a"`.
+        // `U+FEFF` appearing anywhere else remains ordinary content
+        // (`str::strip_prefix` only removes a leading occurrence).
+        let input = input.strip_prefix('\u{feff}').unwrap_or(input);
         let mut parser = Self {
             scanner: YamlScanner::new(input),
             states: Vec::new(),

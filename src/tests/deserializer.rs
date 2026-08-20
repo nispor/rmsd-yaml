@@ -733,3 +733,32 @@ fn test_from_reader_default_has_no_input_size_cap() {
     let got: String = crate::from_reader(long_input.as_bytes()).unwrap();
     assert_eq!(got, long_input);
 }
+
+#[test]
+fn test_leading_bom_is_stripped_before_the_first_token() {
+    // A leading UTF-8 BOM (`U+FEFF`) is not part of the document's
+    // content (YAML 1.2.2 SPEC, 2.1.1). Before the fix, it merged into
+    // the first token, turning the key `a` of `\u{feff}a: 1` into the
+    // spurious key `"\u{feff}a"`.
+    let bom = '\u{feff}';
+
+    // The BOM on a block-map key must not leak into the key.
+    let map = format!("{bom}a: 1");
+    let v: Value = from_str(&map).unwrap();
+    assert_eq!(v, from_str::<Value>("a: 1").unwrap());
+    assert!(
+        v.get("\u{feff}a").is_none(),
+        "BOM must not leak into the key"
+    );
+    assert!(v.get("a").is_some(), "key must be the bare `a`");
+
+    // The BOM on a plain scalar must not corrupt the value.
+    let scalar = format!("{bom}42");
+    let v2: Value = from_str(&scalar).unwrap();
+    assert_eq!(v2.as_i64().unwrap(), 42);
+
+    // A BOM *inside* a value is ordinary content, not a stream BOM.
+    let mid = format!("a: {bom}b");
+    let v3: Value = from_str(&mid).unwrap();
+    assert_eq!(v3.get("a").unwrap().as_str().unwrap(), "\u{feff}b");
+}
