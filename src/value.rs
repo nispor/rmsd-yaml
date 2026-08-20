@@ -123,6 +123,22 @@ impl From<String> for Value {
 impl Value {
     pub fn as_char(&self) -> Result<char, Error> {
         if let ValueData::String(v) = &self.data {
+            // A null / bool / number scalar must not be coerced to its
+            // single-character text (`~` -> '~', `0` -> '0'), keeping
+            // type-safety consistent with the other `as_*` helpers.
+            if self.is_null()
+                || self.is_bool()
+                || self.is_signed_integer()
+                || self.is_integer()
+                || self.is_float()
+            {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a char, but got {}", self.data),
+                    self.start,
+                    self.end,
+                ));
+            }
             if v.len() == 1 {
                 Ok(v.chars().next().unwrap())
             } else {
