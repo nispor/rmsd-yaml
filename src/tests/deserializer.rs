@@ -149,6 +149,76 @@ fn test_deserialize_floats() {
 }
 
 #[test]
+fn test_bare_inf_nan_infinity_are_strings_not_floats() {
+    // Per the YAML 1.2 Core Schema (10.3), only the dot forms `.inf`,
+    // `+.inf`, `-.inf` and `.nan` resolve to real numbers. The bare
+    // words `inf`, `infinity` and `nan`, whatever their sign and/or
+    // casing, are ordinary strings. The bug they used to trigger was a
+    // straight copy-paste of Rust's `f64::FromStr` semantics (which
+    // does accept `inf`/`nan`/`infinity` in any case), leaking into
+    // both the generic `deserialize_any` path (they became `null` when
+    // fed into `serde_json::Value`) and the `as_f64` path (they parsed
+    // to `-inf`/`inf`/`NaN`).
+    //
+    // Generic / serde_json target: each bare word stays a string.
+    for w in [
+        "inf",
+        "-inf",
+        "+inf",
+        "INF",
+        "Inf",
+        "infinity",
+        "-infinity",
+        "INFINITY",
+        "Infinity",
+        "nan",
+        "NaN",
+        "Nan",
+        "-nan",
+        "+nan",
+    ] {
+        let got: serde_json::Value = from_str(w).unwrap();
+        assert_eq!(
+            got,
+            serde_json::json!(w),
+            "bare word {w:?} should deserialize to a string"
+        );
+    }
+    // Generic / String target: identity round trip.
+    for w in ["inf", "-inf", "infinity", "nan", "-nan"] {
+        assert_eq!(from_str::<String>(w).unwrap(), w);
+    }
+    // Deserializing into a concrete numeric target is a type error,
+    // matching serde_yaml ("invalid type: string `inf`, expected f64").
+    assert!(from_str::<f64>("inf").is_err());
+    assert!(from_str::<f64>("NaN").is_err());
+    assert!(from_str::<f64>("-infinity").is_err());
+    let err = from_str::<f64>("inf").unwrap_err();
+    assert!(
+        err.msg()
+            .contains("invalid type: string \"inf\", expected f64"),
+        "got: {err}"
+    );
+    // The dot forms and genuine YAML numeric floats must still be
+    // floats, so the fix does not over-reject.
+    assert_eq!(from_str::<f64>(".inf").unwrap(), f64::INFINITY);
+    assert_eq!(from_str::<f64>("+.inf").unwrap(), f64::INFINITY);
+    assert_eq!(from_str::<f64>("-.inf").unwrap(), f64::NEG_INFINITY);
+    assert!(from_str::<f64>(".nan").unwrap().is_nan());
+    assert_eq!(from_str::<f64>("1e400").unwrap(), f64::INFINITY);
+    assert_eq!(from_str::<f64>("-1e400").unwrap(), f64::NEG_INFINITY);
+    assert_eq!(from_str::<f64>("5.").unwrap(), 5.0);
+    assert_eq!(from_str::<f64>(".5").unwrap(), 0.5);
+    // And `Value`-level type predicates report "not a float" too.
+    for w in ["inf", "nan", "infinity"] {
+        let v = crate::Value::from_str(w).unwrap();
+        assert!(!v.is_float(), "{w:?} is not a YAML float");
+        assert!(v.as_f64().is_err());
+        assert_eq!(v.as_str().unwrap(), w);
+    }
+}
+
+#[test]
 fn test_deserialize_string() {
     assert_eq!(from_str::<String>("hello").unwrap(), "hello");
     assert_eq!(from_str::<String>("").unwrap(), "");

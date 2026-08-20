@@ -344,14 +344,28 @@ impl Value {
                 }
                 "-.inf" | "-.Inf" | "-.INF" => Ok(f64::NEG_INFINITY),
                 ".nan" | ".NaN" | ".NAN" => Ok(f64::NAN),
-                _ => s.parse::<f64>().map_err(|_| {
-                    Error::new(
-                        ErrorKind::InvalidNumber,
-                        format!("Expecting a float, but got {s}"),
-                        self.start,
-                        self.end,
-                    )
-                }),
+                _ => {
+                    if is_rust_float_word(s) {
+                        // `inf`, `nan`, `infinity` (any casing/sign) are
+                        // not valid YAML 1.2 floats, only the dot forms
+                        // are (already handled above). Keep them as
+                        // strings.
+                        return Err(Error::new(
+                            ErrorKind::UnexpectedYamlNodeType,
+                            format!("Expecting a float, but got {s:?}"),
+                            self.start,
+                            self.end,
+                        ));
+                    }
+                    s.parse::<f64>().map_err(|_| {
+                        Error::new(
+                            ErrorKind::InvalidNumber,
+                            format!("Expecting a float, but got {s}"),
+                            self.start,
+                            self.end,
+                        )
+                    })
+                }
             }
         } else {
             Err(Error::new(
@@ -667,7 +681,18 @@ fn str_is_float(s: &str) -> bool {
             | ".nan"
             | ".NaN"
             | ".NAN"
-    ) || s.parse::<f64>().is_ok()
+    ) || !is_rust_float_word(s) && s.parse::<f64>().is_ok()
+}
+
+/// Whether `s`, after an optional sign, is one of the bare words that
+/// Rust's `f64::FromStr` accepts (`inf`, `infinity` and `nan` in any
+/// casing) but that the YAML 1.2 Core Schema does **not** resolve as
+/// floats (only the dot forms `.inf`, `+.inf`, `-.inf` and `.nan` are;
+/// YAML 1.2.2 SPEC, 10.3.2). Such scalars must stay ordinary strings
+/// rather than leaking Rust's `f64::parse` leniency.
+fn is_rust_float_word(s: &str) -> bool {
+    let t = s.trim_start_matches(['+', '-']);
+    matches!(t.to_ascii_lowercase().as_str(), "inf" | "infinity" | "nan")
 }
 
 /// Deserialize a parsed [`Value`] from the `YamlDeserializer` used
