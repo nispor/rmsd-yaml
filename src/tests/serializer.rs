@@ -243,3 +243,49 @@ fn test_empty_collections_serialized_explicitly() {
     round_trip(&Empty {}, "{}\n");
     round_trip(&vec![Empty {}, Empty {}], "- {}\n- {}\n");
 }
+
+#[test]
+fn test_non_finite_floats_use_yaml_special_scalars() {
+    // The old code emitted Rust's `Display` forms (`inf`, `-inf`,
+    // `NaN`), which are not valid YAML floats and no longer deserialize
+    // back as numbers. Both the serialized shape and the re-parse must
+    // use the YAML 1.2 Core Schema special scalars (YAML 1.2.2 SPEC,
+    // 10.3.2), matching `serde_yaml`.
+    let pos = f64::INFINITY;
+    assert_eq!(to_string(&pos).unwrap(), ".inf\n");
+    assert_eq!(from_str::<f64>(".inf").unwrap(), pos);
+
+    let neg = -pos;
+    assert_eq!(to_string(&neg).unwrap(), "-.inf\n");
+    assert_eq!(from_str::<f64>("-.inf").unwrap(), neg);
+
+    let nan = f64::NAN;
+    assert_eq!(to_string(&nan).unwrap(), ".nan\n");
+    assert!(from_str::<f64>(".nan").unwrap().is_nan());
+
+    // The same path is exercised by `f32` (it up-converts to `f64`).
+    assert_eq!(to_string(&f32::INFINITY).unwrap(), ".inf\n");
+    assert_eq!(to_string(&f32::NEG_INFINITY).unwrap(), "-.inf\n");
+    assert!(from_str::<f32>(".nan").unwrap().is_nan());
+
+    // A nested structure with non-finite floats must round-trip as a
+    // whole.
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct Inner {
+        limit: f64,
+        score: f64,
+        err: f64,
+    }
+    let v = Inner {
+        limit: pos,
+        score: neg,
+        err: nan,
+    };
+    let s = to_string(&v).unwrap();
+    assert_eq!(s, "limit: .inf\nscore: -.inf\nerr: .nan\n");
+    // Compare field-by-field (NaN is not `PartialEq`).
+    let got: Inner = from_str(&s).unwrap();
+    assert_eq!(got.limit, pos);
+    assert_eq!(got.score, neg);
+    assert!(got.err.is_nan());
+}

@@ -843,7 +843,24 @@ impl ser::Serializer for &mut YamlSerializer {
     }
 
     fn serialize_f64(self, v: f64) -> Result<(), Error> {
-        write!(self.output, "{}{v}", self.get_indent()).ok();
+        // Non-finite floats must be rendered as the YAML 1.2 special
+        // scalars (`.inf`, `-.inf`, `.nan`), not as Rust's `Display`
+        // forms (`inf`, `-inf`, `NaN`). The latter are not valid YAML
+        // floats and would deserialize back as plain strings, breaking
+        // round-trip parity with `serde_yaml`. See YAML 1.2.2 SPEC,
+        // 10.3.2 (float).
+        let text = if v.is_nan() {
+            ".nan".to_string()
+        } else if v.is_infinite() {
+            if v > 0.0 {
+                ".inf".to_string()
+            } else {
+                "-.inf".to_string()
+            }
+        } else {
+            v.to_string()
+        };
+        write!(self.output, "{}{text}", self.get_indent()).ok();
         self.pending_tag = false;
         Ok(())
     }
