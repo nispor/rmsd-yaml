@@ -509,51 +509,30 @@ impl Value {
                     self.end,
                 ));
             }
-            let original = s;
-            let positive: bool = !s.starts_with("-");
+            let original = s.as_str();
+            let positive = !original.starts_with('-');
+            let unsigned =
+                original.strip_prefix(['+', '-']).unwrap_or(original);
 
-            let s = s.as_str().strip_prefix("-").unwrap_or(s.as_str());
-
-            let s = s.strip_prefix("+").unwrap_or(s);
-
-            let number = if s.starts_with("0x") | s.starts_with("0X") {
-                i64::from_str_radix(&s[2..], 16).map_err(|_| {
-                    Error::new(
-                        ErrorKind::InvalidNumber,
-                        format!(
-                            "Expecting signed hexadecimal integer like -0xfa, \
-                             but got {original}"
-                        ),
-                        self.start,
-                        self.end,
-                    )
-                })?
-            } else if s.starts_with("0o") | s.starts_with("0O") {
-                i64::from_str_radix(&s[2..], 8).map_err(|_| {
-                    Error::new(
-                        ErrorKind::InvalidNumber,
-                        format!(
-                            "Expecting signed octal integer like -0o20, but \
-                             got {original}"
-                        ),
-                        self.start,
-                        self.end,
-                    )
-                })?
-            } else if s.starts_with("0b") | s.starts_with("0B") {
-                i64::from_str_radix(&s[2..], 2).map_err(|_| {
-                    Error::new(
-                        ErrorKind::InvalidNumber,
-                        format!(
-                            "Expecting signed binary integer like -0b10, but \
-                             got {original}"
-                        ),
-                        self.start,
-                        self.end,
-                    )
-                })?
+            let (radix, digits) = if unsigned.starts_with("0x")
+                || unsigned.starts_with("0X")
+            {
+                (16, &unsigned[2..])
+            } else if unsigned.starts_with("0o") || unsigned.starts_with("0O") {
+                (8, &unsigned[2..])
+            } else if unsigned.starts_with("0b") || unsigned.starts_with("0B") {
+                (2, &unsigned[2..])
             } else {
-                i64::from_str(s).map_err(|_| {
+                (10, unsigned)
+            };
+
+            // Parse the magnitude into an `i128` first instead of an
+            // `i64`: `i64::MIN` has a magnitude (`2^63`) that does not
+            // fit in an `i64`, so magnitude-then-negate would reject it.
+            // The sign is applied and the result is range-checked in
+            // `i128` space.
+            let mag: i128 =
+                i128::from_str_radix(digits, radix).map_err(|_| {
                     Error::new(
                         ErrorKind::InvalidNumber,
                         format!(
@@ -563,9 +542,20 @@ impl Value {
                         self.start,
                         self.end,
                     )
-                })?
-            };
-            if positive { Ok(number) } else { Ok(0 - number) }
+                })?;
+            let value = if positive { mag } else { -mag };
+            if value < i64::MIN as i128 || value > i64::MAX as i128 {
+                return Err(Error::new(
+                    ErrorKind::InvalidNumber,
+                    format!(
+                        "Expecting signed integer like -1298, but got \
+                         {original}"
+                    ),
+                    self.start,
+                    self.end,
+                ));
+            }
+            Ok(value as i64)
         } else {
             Err(Error::new(
                 ErrorKind::UnexpectedYamlNodeType,
