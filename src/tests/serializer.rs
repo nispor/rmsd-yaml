@@ -301,3 +301,30 @@ fn test_non_finite_floats_use_yaml_special_scalars() {
     assert_eq!(got.score, neg);
     assert!(got.err.is_nan());
 }
+
+#[test]
+fn test_negative_zero_round_trips_as_float() {
+    // Rust's `Display` prints `-0.0` as `-0`, which the YAML Core
+    // Schema resolves as an integer; the serializer must emit `-0.0`
+    // so the float type and its sign survive a round trip (matching
+    // `serde_yaml`).
+    let neg_zero = -0.0_f64;
+    assert_eq!(to_string(&neg_zero).unwrap(), "-0.0\n");
+    let got: f64 = from_str("-0.0").unwrap();
+    assert!(got == 0.0 && got.is_sign_negative());
+
+    // `f32` routes through `serialize_f64` and keeps the sign.
+    assert_eq!(to_string(&-0.0_f32).unwrap(), "-0.0\n");
+    let got32: f32 = from_str("-0.0").unwrap();
+    assert!(got32 == 0.0 && got32.is_sign_negative());
+
+    // A nested structure round-trips the value as a whole.
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct Inner {
+        neg_zero: f64,
+    }
+    let s = to_string(&Inner { neg_zero }).unwrap();
+    assert_eq!(s, "neg_zero: -0.0\n");
+    let got_inner: Inner = from_str(&s).unwrap();
+    assert!(got_inner.neg_zero == 0.0 && got_inner.neg_zero.is_sign_negative());
+}

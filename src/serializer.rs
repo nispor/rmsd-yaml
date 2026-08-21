@@ -857,6 +857,13 @@ impl ser::Serializer for &mut YamlSerializer {
             } else {
                 "-.inf".to_string()
             }
+        } else if v == 0.0 && v.is_sign_negative() {
+            // Rust's `Display` renders `-0.0` as `-0`, which the YAML
+            // Core Schema resolves as an *integer*: re-parsing would
+            // silently turn the float `-0.0` into the integer `0`.
+            // Emit the full float spelling so the sign and type
+            // round-trip (matching `serde_yaml`).
+            "-0.0".to_string()
         } else {
             v.to_string()
         };
