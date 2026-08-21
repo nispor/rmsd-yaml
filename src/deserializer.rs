@@ -299,6 +299,13 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag (e.g. `!!bool "true"`) before type
+        // coercion; tag-driven type forcing is only performed in
+        // `deserialize_any`, so a concrete-boolean target would
+        // otherwise see a raw `ValueData::Tag` and be rejected.
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_bool() {
             Ok(v) => visitor.visit_bool(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -309,6 +316,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_i8() {
             Ok(v) => visitor.visit_i8(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -319,6 +330,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_i16() {
             Ok(v) => visitor.visit_i16(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -329,6 +344,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_i32() {
             Ok(v) => visitor.visit_i32(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -339,6 +358,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_i64() {
             Ok(v) => visitor.visit_i64(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -349,6 +372,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_u8() {
             Ok(v) => visitor.visit_u8(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -359,6 +386,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_u16() {
             Ok(v) => visitor.visit_u16(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -369,6 +400,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_u32() {
             Ok(v) => visitor.visit_u32(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -379,6 +414,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_u64() {
             Ok(v) => visitor.visit_u64(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -396,6 +435,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         match self.parsed.as_f64() {
             Ok(v) => visitor.visit_f64(v),
             Err(e) => Err(self.invalid_type_error(e.kind(), &visitor)),
@@ -406,6 +449,10 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        // Resolve a YAML tag before coercion (see deserialize_bool).
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            return self.deserialize_any(visitor);
+        }
         visitor.visit_char(self.parsed.as_char()?)
     }
 
