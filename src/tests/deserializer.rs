@@ -629,6 +629,25 @@ fn test_deserialize_any_resolves_tags_transparently() {
 }
 
 #[test]
+fn test_type_forcing_tags_coerce_for_concrete_targets() {
+    // Concrete primitives (i64/bool/f64 ...) bypass `deserialize_any`,
+    // so the core-schema type tags (`!!int`, `!!float`, `!!bool`) had
+    // to be resolved in each concrete deserialize method. Before the
+    // fix, `from_str::<i64>("!!int 5")` etc. failed with
+    // `invalid type: tagged value, expected i64`.
+    assert_eq!(from_str::<i64>("!!int 5").unwrap(), 5);
+    // `!!int` forces integer resolution even on a quoted scalar.
+    assert_eq!(from_str::<i64>(r##"!!int "5""##).unwrap(), 5);
+    assert_eq!(from_str::<u32>("!!int 42").unwrap(), 42);
+    assert_eq!(from_str::<f64>("!!float 5").unwrap(), 5.0);
+    assert_eq!(from_str::<bool>("!!bool true").unwrap(), true);
+    // `!!str` forces a string, so numeric/bool targets must be rejected.
+    assert!(from_str::<i64>("!!str 5").is_err());
+    assert!(from_str::<bool>("!!str true").is_err());
+    assert_eq!(from_str::<String>("!!str 5").unwrap(), "5");
+}
+
+#[test]
 fn test_tagged_scalar_as_string_uses_content_not_tag_name() {
     // `Value::as_str()` used to return the tag's own name (e.g.
     // `"<tag:yaml.org,2002:str>"`) instead of the tagged scalar's

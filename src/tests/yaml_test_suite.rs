@@ -264,7 +264,7 @@ fn yaml_test_suit_out_yaml() {
         }
 
         if !test_path.join(OUT_YAML_FILE_NAME).exists() {
-            log::warn!(
+            log::info!(
                 "Skipping test {test_path_str}: no {OUT_YAML_FILE_NAME}"
             );
             continue;
@@ -272,7 +272,7 @@ fn yaml_test_suit_out_yaml() {
         if test_path.join("error").exists() {
             // The test expects a parse error (an `error` file); there
             // is nothing to dump.
-            log::warn!("Skipping test {test_path_str}: expects a parse error");
+            log::info!("Skipping test {test_path_str}: expects a parse error");
             continue;
         }
 
@@ -325,13 +325,13 @@ fn yaml_test_suit_in_json() {
         }
 
         if !test_path.join(IN_JSON_FILE_NAME).exists() {
-            log::warn!("Skipping test {test_path_str}: no {IN_JSON_FILE_NAME}");
+            log::info!("Skipping test {test_path_str}: no {IN_JSON_FILE_NAME}");
             continue;
         }
         if test_path.join("error").exists() {
             // The test expects a parse error (an `error` file); there
             // is nothing to deserialize.
-            log::warn!("Skipping test {test_path_str}: expects a parse error");
+            log::info!("Skipping test {test_path_str}: expects a parse error");
             continue;
         }
 
