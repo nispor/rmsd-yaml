@@ -220,6 +220,35 @@ fn test_i64_min_and_boundaries() {
 }
 
 #[test]
+fn test_integer_parse_errors_are_radix_specific() {
+    // Regression: the i128 rework of `as_i64` collapsed all radix
+    // error messages into the generic decimal wording. Malformed
+    // hex / octal / binary literals must say which radix is wrong at
+    // the `Value` API level (the `from_str` deserializer path rewrites
+    // the message into serde's "invalid type" form).
+    for (bad, needle) in [
+        ("0xzz", "hexadecimal"),
+        ("0o9", "octal"),
+        ("0b2", "binary"),
+        ("12a", "signed integer"),
+    ] {
+        let err = crate::Value::from_str(bad).unwrap().as_i64().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidNumber, "{bad:?} -> {err}");
+        assert!(
+            err.msg().contains(needle),
+            "{bad:?} should mention {needle:?}, got: {err}"
+        );
+    }
+    // A range overflow keeps the radix hint as well.
+    let err = crate::Value::from_str("0xffffffffffffffff")
+        .unwrap()
+        .as_i64()
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidNumber, "got: {err}");
+    assert!(err.msg().contains("hexadecimal"), "got: {err}");
+}
+
+#[test]
 fn test_deserialize_floats() {
     assert_eq!(from_str::<f64>("1.5").unwrap(), 1.5);
     assert_eq!(from_str::<f64>("-2.25").unwrap(), -2.25);
