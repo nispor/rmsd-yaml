@@ -530,16 +530,32 @@ impl Value {
             let unsigned =
                 original.strip_prefix(['+', '-']).unwrap_or(original);
 
-            let (radix, digits) = if unsigned.starts_with("0x")
+            let (radix, digits, radix_hint) = if unsigned.starts_with("0x")
                 || unsigned.starts_with("0X")
             {
-                (16, &unsigned[2..])
+                (
+                    16,
+                    &unsigned[2..],
+                    "Expecting signed hexadecimal integer like -0xfa, but got ",
+                )
             } else if unsigned.starts_with("0o") || unsigned.starts_with("0O") {
-                (8, &unsigned[2..])
+                (
+                    8,
+                    &unsigned[2..],
+                    "Expecting signed octal integer like -0o20, but got ",
+                )
             } else if unsigned.starts_with("0b") || unsigned.starts_with("0B") {
-                (2, &unsigned[2..])
+                (
+                    2,
+                    &unsigned[2..],
+                    "Expecting signed binary integer like -0b10, but got ",
+                )
             } else {
-                (10, unsigned)
+                (
+                    10,
+                    unsigned,
+                    "Expecting signed integer like -1298, but got ",
+                )
             };
 
             // Parse the magnitude into an `i128` first instead of an
@@ -551,10 +567,7 @@ impl Value {
                 i128::from_str_radix(digits, radix).map_err(|_| {
                     Error::new(
                         ErrorKind::InvalidNumber,
-                        format!(
-                            "Expecting signed integer like -1298, but got \
-                             {original}"
-                        ),
+                        format!("{radix_hint}{original}"),
                         self.start,
                         self.end,
                     )
@@ -563,10 +576,7 @@ impl Value {
             if value < i64::MIN as i128 || value > i64::MAX as i128 {
                 return Err(Error::new(
                     ErrorKind::InvalidNumber,
-                    format!(
-                        "Expecting signed integer like -1298, but got \
-                         {original}"
-                    ),
+                    format!("{radix_hint}{original}"),
                     self.start,
                     self.end,
                 ));
