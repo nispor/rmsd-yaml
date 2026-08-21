@@ -98,6 +98,18 @@ fn test_option_and_unit() {
     round_trip(&"a\nb".to_string(), "\"a\\nb\"\n");
 }
 
+#[test]
+fn test_whitespace_edge_strings_are_quoted() {
+    // A leading or trailing YAML blank cannot be part of a plain scalar
+    // (the scanner trims/folds it), so either edge must be double
+    // quoted or the value corrupts on re-parse. Regression: "trailing "
+    // used to serialize unquoted and come back as "trailing".
+    round_trip(&"trailing ".to_string(), "\"trailing \"\n");
+    round_trip(&" leading".to_string(), "\" leading\"\n");
+    round_trip(&"a b ".to_string(), "\"a b \"\n");
+    round_trip(&"a\tb ".to_string(), "\"a\\tb \"\n");
+}
+
 /// Wrapper that serializes through `serializer.serialize_bytes`, the
 /// only way serde's data model reaches the byte-buffer path.
 struct Bytes<'a>(&'a [u8]);

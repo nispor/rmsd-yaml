@@ -51,6 +51,14 @@ fn needs_double_quote(input: &str) -> bool {
     if input.starts_with("---") || input.starts_with("...") {
         return true;
     }
+    // A trailing YAML blank (space or tab) cannot appear at the end of
+    // a plain scalar — the scanner trims/folds it — so the value would
+    // not round-trip unquoted (e.g. "trailing " re-parses as
+    // "trailing"). The leading-blank case is handled by the
+    // first-character check below.
+    if matches!(input.chars().last(), Some(' ' | '\t')) {
+        return true;
+    }
     let first = input.chars().next().unwrap();
     if matches!(
         first,
@@ -344,6 +352,18 @@ mod tests {
         assert_eq!(to_scalar_string(0, "a\u{01}b", 80), "\"a\\x01b\"");
         assert_eq!(to_scalar_string(0, "a\u{85}b", 80), "\"a\\x85b\"");
         assert_eq!(to_scalar_string(0, "a\u{2028}b", 80), "\"a\\u2028b\"");
+    }
+
+    #[test]
+    fn test_trailing_blank_is_quoted() {
+        // A trailing YAML blank cannot be part of a plain scalar (the
+        // scanner trims/folds it), so it must be double quoted to keep
+        // the value round-tripping. Regression: "trailing " used to be
+        // emitted unquoted and re-parse to "trailing".
+        assert_eq!(to_scalar_string(0, "trailing ", 80), "\"trailing \"");
+        assert_eq!(to_scalar_string(0, "a b\t", 80), "\"a b\\t\"");
+        // The leading-blank edge is already quoted by the first-char rule.
+        assert_eq!(to_scalar_string(0, " leading", 80), "\" leading\"");
     }
 
     #[test]
