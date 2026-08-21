@@ -330,6 +330,24 @@ fn test_bare_inf_nan_infinity_are_strings_not_floats() {
 }
 
 #[test]
+fn test_multi_sign_float_words_are_invalid_numbers() {
+    // `is_rust_float_word` strips exactly one optional sign, so a
+    // token with repeated signs (`--inf`, `+-nan`) is malformed
+    // garbage: at the `Value` API it is an invalid number, not a
+    // plausible float word of the wrong type.
+    for bad in ["--inf", "+-inf", "--nan", "+-nan", "--infinity"] {
+        let v = crate::Value::from_str(bad).unwrap();
+        let err = v.as_f64().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidNumber, "{bad:?} -> {err}");
+    }
+    // Single-sign bare words are still ordinary strings (YAML 1.2).
+    for w in ["-inf", "+inf", "-nan", "+nan", "-infinity"] {
+        let got: serde_json::Value = from_str(w).unwrap();
+        assert_eq!(got, serde_json::json!(w), "{w:?} should stay a string");
+    }
+}
+
+#[test]
 fn test_deserialize_string() {
     assert_eq!(from_str::<String>("hello").unwrap(), "hello");
     assert_eq!(from_str::<String>("").unwrap(), "");

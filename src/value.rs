@@ -707,7 +707,7 @@ fn str_is_float(s: &str) -> bool {
 /// YAML 1.2.2 SPEC, 10.3.2). Such scalars must stay ordinary strings
 /// rather than leaking Rust's `f64::parse` leniency.
 fn is_rust_float_word(s: &str) -> bool {
-    let t = s.trim_start_matches(['+', '-']);
+    let t = s.strip_prefix(['+', '-']).unwrap_or(s);
     matches!(t.to_ascii_lowercase().as_str(), "inf" | "infinity" | "nan")
 }
 
