@@ -417,3 +417,82 @@ fn run_event_parser_test(
 fn read_file(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap()
 }
+
+/// Every test-suite case flagged with an `error` file marks a malformed
+/// `in.yaml` that must be REJECTED by rmsd-yaml. This runs over **all**
+/// such cases (not a hard-coded subset) and asserts that both the public
+/// deserialize API [`from_str`](crate::from_str) and the low-level event
+/// parser [`YamlParser::parse_to_events`] fail on the input.
+///
+/// `from_str` is the API consumers actually call, so a lenient
+/// deserializer could silently accept a document the event parser would
+/// reject. Requiring both to reject keeps the two in lockstep and
+/// directly encodes the YAML test suite's "this input is an error"
+/// contract.
+#[test]
+fn yaml_test_suit_error_cases_fail() {
+    super::testlib::init_logger();
+
+    let test_data_dir =
+        std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join(TEST_DATA_FOLDER_PATH);
+
+    let test_paths = discover_test_paths(&test_data_dir);
+
+    let error_cases: Vec<String> = test_paths
+        .iter()
+        .filter(|p| p.join("error").exists())
+        .map(|p| {
+            p.strip_prefix(&test_data_dir)
+                .unwrap()
+                .display()
+                .to_string()
+        })
+        .collect();
+
+    // Guard against the suite losing its `error` cases and making this
+    // test vacuously true.
+    assert!(
+        !error_cases.is_empty(),
+        "expected at least one test case with an `error` file under \
+         {TEST_DATA_FOLDER_PATH}"
+    );
+    // The named example must be present, so a regression that removes
+    // the case (rather than fixing a parse bug) is caught.
+    assert!(
+        error_cases.iter().any(|c| {
+            c == "wrong-indendation-in-map"
+                || c.starts_with("wrong-indendation-in-map/")
+        }),
+        "expected `wrong-indendation-in-map` to be an `error` case; found \
+         {error_cases:?}"
+    );
+
+    for test_path in test_paths {
+        if !test_path.join("error").exists() {
+            continue;
+        }
+        let test_path_str = test_path
+            .strip_prefix(&test_data_dir)
+            .unwrap()
+            .display()
+            .to_string();
+        let input_yaml = read_file(&test_path.join(INPUT_YAML_FILE_NAME));
+
+        // Public deserialize API: a malformed `in.yaml` must be
+        // rejected. A successful parse is a correctness bug.
+        let from_str_result: Result<crate::Value, _> =
+            crate::from_str(&input_yaml);
+        assert!(
+            from_str_result.is_err(),
+            "{test_path_str}: `from_str` succeeded on an `error` case: \
+             {from_str_result:?}"
+        );
+
+        // Low-level event parser: must reject the same input.
+        assert!(
+            YamlParser::parse_to_events(&input_yaml).is_err(),
+            "{test_path_str}: `parse_to_events` succeeded on an `error` case"
+        );
+    }
+}
