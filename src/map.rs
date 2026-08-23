@@ -302,6 +302,12 @@ impl<'a> YamlParser<'a> {
                 }
                 let mut value_anchor = None;
                 let mut value_tag = None;
+                // Captured before any implicit key arm consumes input,
+                // so the implicit-key length limit can be measured up
+                // to the `:` indicator (YAML 1.2.2 SPEC, productions
+                // [154]/[155]). Explicit (`?`) and empty (`:`) key
+                // entries `continue` before the check below.
+                let key_span_start_remains = self.scanner.remains();
                 if trimmed_key == "?"
                     || trimmed_key.starts_with("? ")
                     || trimmed_key.starts_with("?\t")
@@ -585,6 +591,15 @@ impl<'a> YamlParser<'a> {
                         None,
                     )?;
                 }
+                // An implicit key must not span more than 1024 Unicode
+                // characters (YAML 1.2.2 SPEC, 8.2.2, production [193],
+                // via [154]/[155]); the leading indentation is not part
+                // of the key. Explicit and empty key entries `continue`
+                // before this point.
+                self.check_implicit_key_length(
+                    self.consumed_chars_since(key_span_start_remains)
+                        .saturating_sub(cur_indent),
+                )?;
                 let Some(line) = self.scanner.peek_line() else {
                     continue;
                 };
@@ -1325,6 +1340,8 @@ impl<'a> YamlParser<'a> {
                 }
                 self.scanner.skip_flow_separation();
                 self.check_flow_entry_indentation(flow_start_line)?;
+                let key_start_remains = self.scanner.remains();
+                let mut implicit_key = true;
                 match self.scanner.peek_char() {
                     Some(':') => {
                         // Empty key, e.g. `{: value}`
@@ -1350,7 +1367,9 @@ impl<'a> YamlParser<'a> {
                     {
                         // Explicit key, e.g. `{? key : value}`; a `?`
                         // followed directly by content (`{?foo: bar}`)
-                        // is a plain scalar key.
+                        // is a plain scalar key. Explicit keys are not
+                        // subject to the implicit-key length limit.
+                        implicit_key = false;
                         self.scanner.next_char();
                         self.scanner.skip_flow_separation();
                         if self.scanner.peek_char() == Some(':') {
@@ -1387,6 +1406,14 @@ impl<'a> YamlParser<'a> {
                 self.scanner.skip_flow_separation();
                 // Value
                 if self.scanner.peek_char() == Some(':') {
+                    // An implicit key must not span more than 1024
+                    // Unicode characters (YAML 1.2.2 SPEC, 7.4.2,
+                    // productions [154]/[155]).
+                    if implicit_key {
+                        self.check_implicit_key_length(
+                            self.consumed_chars_since(key_start_remains),
+                        )?;
+                    }
                     self.scanner.next_char();
                     self.scanner.skip_flow_separation();
                     self.handle_flow_node()?;

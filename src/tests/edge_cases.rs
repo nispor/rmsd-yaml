@@ -203,6 +203,70 @@ fn test_multiple_documents_rejected() {
 }
 
 #[test]
+fn test_implicit_key_length_limit() {
+    // An implicit key must not span more than 1024 Unicode characters
+    // (YAML 1.2.2 SPEC, productions [154]/[155], Example 7.22).
+    let key_1024 = "a".repeat(1024);
+    let key_1025 = "a".repeat(1025);
+    // Block mapping keys (plain, quoted, anchored).
+    assert!(YamlParser::parse_to_events(&format!("{key_1024}: v\n")).is_ok());
+    assert!(YamlParser::parse_to_events(&format!("{key_1025}: v\n")).is_err());
+    assert!(YamlParser::parse_to_events(&format!("{key_1025}:\n")).is_err());
+    assert!(
+        YamlParser::parse_to_events(&format!("\"{}\": v\n", "a".repeat(1022)))
+            .is_ok()
+    );
+    assert!(
+        YamlParser::parse_to_events(&format!("\"{}\": v\n", "a".repeat(1023)))
+            .is_err()
+    );
+    assert!(
+        YamlParser::parse_to_events(&format!(
+            "&k {key_1023}: v\n",
+            key_1023 = "a".repeat(1023)
+        ))
+        .is_err()
+    );
+    // Indentation does not count toward the limit.
+    assert!(
+        YamlParser::parse_to_events(&format!("k:\n  {key_1024}: v\n")).is_ok()
+    );
+    assert!(
+        YamlParser::parse_to_events(&format!("k:\n  {key_1025}: v\n")).is_err()
+    );
+    // Flow mapping keys.
+    assert!(YamlParser::parse_to_events(&format!("{{{key_1024}: v}}")).is_ok());
+    assert!(
+        YamlParser::parse_to_events(&format!("{{{key_1025}: v}}")).is_err()
+    );
+    // Flow sequence single-pair keys.
+    assert!(YamlParser::parse_to_events(&format!("[ {key_1024}: v ]")).is_ok());
+    assert!(
+        YamlParser::parse_to_events(&format!("[ {key_1025}: v ]")).is_err()
+    );
+    // Multi-byte characters count as characters, not bytes.
+    let mb_1024 = "\u{e9}".repeat(1024);
+    let mb_1025 = "\u{e9}".repeat(1025);
+    assert!(YamlParser::parse_to_events(&format!("{mb_1024}: v\n")).is_ok());
+    assert!(YamlParser::parse_to_events(&format!("{mb_1025}: v\n")).is_err());
+    // Explicit keys are exempt from the limit.
+    assert!(
+        YamlParser::parse_to_events(&format!("? {key_1025}\n: v\n")).is_ok()
+    );
+    assert!(
+        YamlParser::parse_to_events(&format!("{{ ? {key_1025} : v }}")).is_ok()
+    );
+    // A long scalar that is not a key and a long value stay valid.
+    assert!(
+        YamlParser::parse_to_events(&format!("{}\n", "a".repeat(2000))).is_ok()
+    );
+    assert!(
+        YamlParser::parse_to_events(&format!("k: {}\n", "a".repeat(2000)))
+            .is_ok()
+    );
+}
+
+#[test]
 fn test_line_break_normalization_in_scalars() {
     // YAML 1.2.2 SPEC, 5.4 (productions [28]/[29]): CRLF and CR
     // inside scalar content are normalized to LF before line folding.

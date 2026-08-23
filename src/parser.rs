@@ -56,10 +56,52 @@ pub(crate) struct YamlParser<'a> {
 /// realistic document.
 pub(crate) const MAX_NESTING_DEPTH: usize = 128;
 
+/// Maximum length of an implicit key in Unicode characters (YAML
+/// 1.2.2 SPEC, productions [154]/[155]). To limit the amount of
+/// lookahead required to recognize an implicit key, the `:` indicator
+/// must appear at most 1024 Unicode characters beyond the start of the
+/// key. Explicit (`? `-prefixed) keys are not subject to this limit.
+pub(crate) const MAX_IMPLICIT_KEY_LENGTH: usize = 1024;
+
 impl<'a> YamlParser<'a> {
     /// Current state
     pub(crate) fn cur_state(&self) -> &YamlState {
         self.states.last().unwrap_or(&YamlState::EndOfFile)
+    }
+
+    /// Reject an implicit key whose span (from its first character to
+    /// the `:` value indicator, including any trailing separation)
+    /// exceeds [`MAX_IMPLICIT_KEY_LENGTH`] Unicode characters.
+    pub(crate) fn check_implicit_key_length(
+        &self,
+        key_chars: usize,
+    ) -> Result<(), Error> {
+        if key_chars > MAX_IMPLICIT_KEY_LENGTH {
+            return Err(Error::new(
+                ErrorKind::InvalidImplicitKey,
+                format!(
+                    "An implicit key must not span more than {} Unicode \
+                     characters, but got {}",
+                    MAX_IMPLICIT_KEY_LENGTH, key_chars
+                ),
+                self.scanner.next_pos,
+                self.scanner.next_pos,
+            ));
+        }
+        Ok(())
+    }
+
+    /// The number of Unicode characters consumed since
+    /// `key_start_remains` was captured via `self.scanner.remains()`,
+    /// i.e. the span of the key node just parsed plus any trailing
+    /// separation before the `:` indicator.
+    pub(crate) fn consumed_chars_since(
+        &self,
+        key_start_remains: &str,
+    ) -> usize {
+        let consumed_len =
+            key_start_remains.len() - self.scanner.remains().len();
+        key_start_remains[..consumed_len].chars().count()
     }
 
     pub(crate) fn push_event(&mut self, event: YamlEvent) {

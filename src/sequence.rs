@@ -452,6 +452,7 @@ impl<'a> YamlParser<'a> {
         }
         let events_start = self.events_len();
         let key_start_line = self.scanner.next_pos.line;
+        let key_start_remains = self.scanner.remains();
         self.handle_flow_node()?;
         self.scanner.skip_flow_separation();
         if self.scanner.peek_char() == Some(':') {
@@ -467,6 +468,12 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_pos,
                 ));
             }
+            // An implicit key must not span more than 1024 Unicode
+            // characters (YAML 1.2.2 SPEC, 7.4.1, productions
+            // [154]/[155]).
+            self.check_implicit_key_length(
+                self.consumed_chars_since(key_start_remains),
+            )?;
             // Single-pair entry, e.g. `[ key: value ]`. Wrap the
             // already-emitted key node events into a flow mapping.
             let key_events = self.take_events_since(events_start);
