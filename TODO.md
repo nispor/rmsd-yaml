@@ -1,13 +1,5 @@
 # TODO
 
-## Edge Cases & Compliance
-
-* [ ] Explicit/empty keys in flow collections (`{ ? foo :, : bar }`,
-      `{ foo : !!str }`)
-* [ ] Explicit-key edge cases (`? : x`, `? []: x` nested structures)
-* [ ] Unicode NFC/NFD normalization
-* [ ] Line-length limits / max_width enforcement in the parser
-
 ## Performance & Polish
 
 * [ ] Streaming `Deserializer` (incremental, without the intermediate
