@@ -1240,6 +1240,19 @@ impl<'a> YamlParser<'a> {
                             self.handle_flow_node()?;
                         }
                     }
+                    Some(',') => {
+                        // YAML 1.2.2 SPEC, 7.4.2: every flow mapping
+                        // entry starts with a `?` indicator, a key node
+                        // or a `:` (empty key); a bare `,` starts no
+                        // entry at all.
+                        return Err(Error::new(
+                            ErrorKind::UnfinishedMapIndicator,
+                            "A flow mapping entry may not start with ','"
+                                .to_string(),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
                     _ => {
                         self.handle_flow_node()?;
                     }

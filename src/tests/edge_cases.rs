@@ -46,6 +46,70 @@ fn test_explicit_mapping_keys() {
 }
 
 #[test]
+fn test_flow_explicit_and_empty_keys() {
+    // Explicit entry with an empty value plus an empty-key entry
+    // (YAML 1.2.2 SPEC, 7.4.2, productions [143] and [146]).
+    let input = "{ ? foo :, : bar }";
+    assert_eq!(scalar_values(input), vec!["foo", "", "", "bar"]);
+    // A tag decorating an empty flow mapping value.
+    let events = YamlParser::parse_to_events("{ foo : !!str }").unwrap();
+    let tagged: Vec<(Option<String>, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            crate::YamlEvent::Scalar(_, tag, v, _, _, _) => {
+                Some((tag.clone(), v.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        tagged,
+        vec![
+            (None, "foo".to_string()),
+            (Some("<tag:yaml.org,2002:str>".into()), String::new()),
+        ]
+    );
+    // Empty key with a value.
+    assert_eq!(scalar_values("{ : bar }"), vec!["", "bar"]);
+    // A lone `?` is an explicit entry with empty key and empty value.
+    assert_eq!(scalar_values("{ ? }"), vec!["", ""]);
+    assert_eq!(scalar_values("{ ? , a: b }"), vec!["", "", "a", "b"]);
+    // Entries with an omitted value.
+    assert_eq!(scalar_values("{ ? foo }"), vec!["foo", ""]);
+    assert_eq!(scalar_values("{a:}"), vec!["a", ""]);
+    // A `:` followed by a plain-safe character stays in the key scalar.
+    assert_eq!(scalar_values("{a:1}"), vec!["a:1", ""]);
+    // Empty key and explicit entries in single-pair flow sequences.
+    assert_eq!(scalar_values("[ : v ]"), vec!["", "v"]);
+    assert_eq!(scalar_values("[ ? ]"), vec!["", ""]);
+    assert_eq!(scalar_values("[ ? k ]"), vec!["k", ""]);
+    assert_eq!(scalar_values("[ ? k : v ]"), vec!["k", "v"]);
+}
+
+#[test]
+fn test_flow_empty_entry_rejected() {
+    // A bare `,` starts no entry: an entry must begin with a `?`
+    // indicator, a key node or a `:` (empty key) (YAML 1.2.2 SPEC,
+    // 7.4.2, productions [138], [142] and [144]).
+    assert!(YamlParser::parse_to_events("{ , }").is_err());
+    assert!(YamlParser::parse_to_events("{,}").is_err());
+}
+
+#[test]
+fn test_flow_explicit_and_empty_key_values() {
+    use crate::{Value, from_str};
+    let value: Value = from_str("{ ? foo :, : bar }").unwrap();
+    let map = value.as_mapping().unwrap();
+    assert_eq!(map.len(), 2);
+    let foo_key: Value = from_str("foo\n").unwrap();
+    let bar: Value = from_str("bar\n").unwrap();
+    // The empty-key entry.
+    assert_eq!(map.get(&Value::default()), Some(&bar));
+    // The explicit entry with an empty value.
+    assert!(map.get(&foo_key).unwrap().is_null());
+}
+
+#[test]
 fn test_anchors_on_empty_scalars() {
     let input = "- &a\n- a\n-\n  &c : &a\n";
     let values = scalar_values(input);
