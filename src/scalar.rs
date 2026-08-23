@@ -392,7 +392,10 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_char();
                 }
                 self.check_quoted_scalar_document_marker()?;
-                ret.push(c);
+                // Line breaks inside scalar content must be normalized
+                // to a single line feed (YAML 1.2.2 SPEC, 5.4,
+                // production [29]) before line folding applies.
+                ret.push('\n');
             } else {
                 ret.push(c);
             }
@@ -482,6 +485,14 @@ impl<'a> YamlParser<'a> {
                             '\n' | '\r' => {
                                 line_breaks += 1;
                                 self.scanner.next_char();
+                                // A CRLF pair is a single (normalized)
+                                // line break (YAML 1.2.2 SPEC, 5.4,
+                                // production [29]).
+                                if w == '\r'
+                                    && self.scanner.peek_char() == Some('\n')
+                                {
+                                    self.scanner.next_char();
+                                }
                             }
                             ' ' | '\t' => {
                                 self.scanner.next_char();

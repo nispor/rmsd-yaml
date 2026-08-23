@@ -203,6 +203,55 @@ fn test_multiple_documents_rejected() {
 }
 
 #[test]
+fn test_line_break_normalization_in_scalars() {
+    // YAML 1.2.2 SPEC, 5.4 (productions [28]/[29]): CRLF and CR
+    // inside scalar content are normalized to LF before line folding.
+    assert_eq!(scalar_values("k: 'a\r\nb'\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("k: 'a\rb'\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("[ a\r\nb ]\n"), vec!["a b"]);
+    assert_eq!(scalar_values("[ a\rb ]\n"), vec!["a b"]);
+    // Two normalized breaks fold to a line feed.
+    assert_eq!(scalar_values("k: 'a\r\n\r\nb'\n"), vec!["k", "a\nb"]);
+    assert_eq!(scalar_values("[ a\r\n\r\nb ]\n"), vec!["a\nb"]);
+    // Double-quoted continuation lines keep the indentation rule for
+    // every line break flavor (YAML 1.2.2 SPEC, 7.3.4 with
+    // production [197]).
+    assert!(YamlParser::parse_to_events("k: \"a\nb\"\n").is_err());
+    assert!(YamlParser::parse_to_events("k: \"a\r\nb\"\n").is_err());
+    assert!(YamlParser::parse_to_events("k: \"a\rb\"\n").is_err());
+    assert_eq!(scalar_values("k: \"a\r\n b\"\n"), vec!["k", "a b"]);
+}
+
+#[test]
+fn test_unicode_nfc_nfd_preserved() {
+    use crate::{Value, from_str};
+    // YAML performs no Unicode normalization: NFC and NFD forms of the
+    // same grapheme stay distinct keys (YAML 1.2.2 SPEC, 3.2.1.3:
+    // scalar equality is character-by-character on the canonical
+    // form).
+    let value: Value = from_str("caf\u{e9}: 1\ncafe\u{301}: 2\n").unwrap();
+    let map = value.as_mapping().unwrap();
+    assert_eq!(map.len(), 2);
+    // Content is preserved verbatim.
+    let nfc: Value = from_str("caf\u{e9}\n").unwrap();
+    let nfd: Value = from_str("cafe\u{301}\n").unwrap();
+    assert_eq!(nfc.as_str().unwrap(), "caf\u{e9}");
+    assert_eq!(nfd.as_str().unwrap(), "cafe\u{301}");
+    assert_ne!(nfc, nfd);
+    // Round-trip keeps the exact code points.
+    let dumped = nfd.to_string().unwrap();
+    assert_eq!(from_str::<Value>(&dumped).unwrap(), nfd);
+    // NEL, LS and PS are YAML 1.2.2 content characters, not line
+    // breaks (5.1, production [27]).
+    assert_eq!(scalar_values("k: a\u{85}b\n"), vec!["k", "a\u{85}b"]);
+    assert_eq!(scalar_values("k: a\u{2028}b\n"), vec!["k", "a\u{2028}b"]);
+    assert_eq!(scalar_values("k: a\u{2029}b\n"), vec!["k", "a\u{2029}b"]);
+    // Surrogate escapes are not valid Unicode scalar values.
+    assert!(YamlParser::parse_to_events("k: \"\\uD800\"\n").is_err());
+    assert!(YamlParser::parse_to_events("k: \"\\uD83D\\uDE00\"\n").is_err());
+}
+
+#[test]
 fn test_nested_explicit_mapping_keys() {
     // A nested `?` starts a block mapping whose entries sit at the
     // nested indicator's column; the outer value follows on its own
