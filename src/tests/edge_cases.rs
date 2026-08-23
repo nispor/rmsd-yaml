@@ -203,6 +203,25 @@ fn test_multiple_documents_rejected() {
 }
 
 #[test]
+fn test_comment_directly_after_colon() {
+    // An inline comment right after `: ` ends the value: a sibling
+    // key on the next line is not swallowed as the value.
+    let input = "a: # c\nb: 2\n";
+    assert_eq!(scalar_values(input), vec!["a", "", "b", "2"]);
+    // A deeper-indented node after the comment is the value.
+    let input = "a: # c\n  b: 2\n";
+    assert_eq!(scalar_values(input), vec!["a", "b", "2"]);
+    // A zero-indented block sequence is a valid value.
+    let input = "a: # c\n- x\n";
+    assert_eq!(scalar_values(input), vec!["a", "x"]);
+    // Node properties before the comment keep their anchor.
+    let input = "a: &x # c\nb: 2\n";
+    assert_eq!(scalar_values(input), vec!["a", "", "b", "2"]);
+    let input = "a: &x # c\n  v\n";
+    assert_eq!(scalar_values(input), vec!["a", "v"]);
+}
+
+#[test]
 fn test_double_quoted_escaped_line_break() {
     // `\` + line break is a line continuation (removed).
     assert_eq!(scalar_values("\"a\\\nb\"\n"), vec!["ab"]);

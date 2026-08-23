@@ -654,7 +654,70 @@ impl<'a> YamlParser<'a> {
                         self.push_state(YamlState::InBlockMapKey);
                         continue;
                     }
-                    if self.scanner.done_pos.line != self.scanner.next_pos.line
+                    // An inline comment after `: ` (or after same-line
+                    // node properties) ends the line: the value may only
+                    // sit on the following lines, indented deeper than
+                    // the key; a sibling key leaves the value empty.
+                    // The space skip must not cross a line break (node
+                    // properties may have ended at a line break, in
+                    // which case the next line's indentation is
+                    // significant).
+                    if self.scanner.done_pos.line == self.scanner.next_pos.line
+                    {
+                        while matches!(
+                            self.scanner.peek_char(),
+                            Some(' ') | Some('\t')
+                        ) {
+                            self.scanner.next_char();
+                        }
+                    }
+                    if self.scanner.done_pos.line == self.scanner.next_pos.line
+                        && self.scanner.peek_char() == Some('#')
+                    {
+                        self.scanner.advance_till_linebreak();
+                        self.skip_comment_and_empty_lines();
+                        if let Some(next_line) = self.scanner.peek_line() {
+                            let next_line_indent_count = next_line
+                                .chars()
+                                .take_while(|c| *c == ' ')
+                                .count();
+                            let next_trimmed =
+                                next_line.trim_start_matches([' ', '\t']);
+                            let is_seq = next_trimmed == "-"
+                                || next_trimmed.starts_with("- ");
+                            if next_line_indent_count < desired_indent_count
+                                || (next_line_indent_count
+                                    == desired_indent_count
+                                    && !is_seq)
+                            {
+                                self.push_event(YamlEvent::Scalar(
+                                    value_anchor,
+                                    value_tag,
+                                    String::new(),
+                                    YamlScalarStyle::Plain,
+                                    self.scanner.done_pos,
+                                    self.scanner.done_pos,
+                                ));
+                                self.pop_state();
+                                // Back to key mode for the next iteration.
+                                self.push_state(YamlState::InBlockMapKey);
+                                continue;
+                            }
+                            value_first_indent_count = next_line_indent_count;
+                            value_rest_indent_count = next_line_indent_count;
+                        } else {
+                            self.push_event(YamlEvent::Scalar(
+                                value_anchor,
+                                value_tag,
+                                String::new(),
+                                YamlScalarStyle::Plain,
+                                self.scanner.done_pos,
+                                self.scanner.done_pos,
+                            ));
+                            break;
+                        }
+                    } else if self.scanner.done_pos.line
+                        != self.scanner.next_pos.line
                     {
                         // The node properties decorate a node whose
                         // content sits on the following lines (e.g.
