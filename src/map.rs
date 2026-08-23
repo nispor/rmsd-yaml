@@ -314,10 +314,12 @@ impl<'a> YamlParser<'a> {
                     //     : value
                     self.scanner.advance(cur_indent);
                     self.scanner.next_char(); // consume '?'
+                    let key_line = self.scanner.next_pos.line;
                     self.skip_block_indicator_separation(
                         trimmed_key.starts_with("?\t"),
                     )?;
                     self.scanner.skip_flow_separation();
+                    let key_events_start = self.events_len();
                     self.handle_explicit_key()?;
                     self.pop_state();
                     self.push_state(YamlState::InBlockMapValue);
@@ -332,20 +334,50 @@ impl<'a> YamlParser<'a> {
                                 | Some('\r')
                                 | Some('#')
                         )
+                        && self.scanner.next_pos.line == key_line
                     {
-                        // Same-line `: value` after the key.
-                        self.scanner.next_char();
+                        // A same-line `: value` after a non-plain key:
+                        // the key and the value form a compact
+                        // single-pair mapping which is this entry's key
+                        // (YAML 1.2.2 SPEC, 8.2.2, Example 8.19); the
+                        // entry's own value stays empty unless a `: `
+                        // line follows. Plain-scalar keys never arrive
+                        // here: `handle_explicit_key()` re-parses them
+                        // as compact mappings up front.
+                        let key_events =
+                            self.take_events_since(key_events_start);
+                        self.push_event(YamlEvent::MapStart(
+                            None,
+                            None,
+                            YamlCollectionStyle::Block,
+                            self.scanner.next_pos,
+                        ));
+                        for event in key_events {
+                            self.push_event(event);
+                        }
+                        self.scanner.next_char(); // consume ':'
                         self.parse_explicit_value_after_colon()?;
-                        value_consumed = true;
-                    } else if let Some(next_line) = self.scanner.peek_line() {
-                        let next_trimmed = next_line.trim_start_matches(' ');
-                        if next_trimmed == ":"
-                            || next_trimmed.starts_with(": ")
-                            || next_trimmed.starts_with(":\t")
-                            || next_trimmed.starts_with(":#")
-                        {
-                            // Value on the following line: `: value`.
-                            self.scanner.advance_till_non_space();
+                        self.push_event(YamlEvent::MapEnd(
+                            self.scanner.done_pos,
+                        ));
+                        self.scanner.skip_flow_separation();
+                    }
+                    if self.scanner.peek_char() == Some(':')
+                        && matches!(
+                            self.scanner.remains().chars().nth(1),
+                            None | Some(' ')
+                                | Some('\t')
+                                | Some('\n')
+                                | Some('\r')
+                                | Some('#')
+                        )
+                    {
+                        // The explicit value line `: value` must sit at
+                        // the mapping's key column (YAML 1.2.2 SPEC,
+                        // 8.2.2, production [191]); a less or more
+                        // indented `:` belongs to an outer context.
+                        let value_column = self.map_key_indent.unwrap_or(0) + 1;
+                        if self.scanner.next_pos.column == value_column {
                             self.scanner.next_char(); // consume ':'
                             self.parse_explicit_value_after_colon()?;
                             value_consumed = true;
@@ -373,7 +405,22 @@ impl<'a> YamlParser<'a> {
                 {
                     // An explicit entry with an empty key, e.g.
                     // `: value` or `: # comment` (YAML 1.2.2 SPEC,
-                    // 8.2.4).
+                    // 8.2.4). The `:` must sit at the mapping's key
+                    // column (production [191]); a differently indented
+                    // `:` line is an error.
+                    let key_column = self.map_key_indent.unwrap_or(0) + 1;
+                    if self.scanner.next_pos.column != key_column {
+                        return Err(Error::new(
+                            ErrorKind::InvalidImplicitKey,
+                            format!(
+                                "An explicit value line must sit at the \
+                                 mapping's key column {key_column}, but got: \
+                                 {line}"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
                     log::trace!(
                         "handle_block_map explicit empty key: {trimmed_key:?}"
                     );
@@ -970,6 +1017,23 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
+            }
+            (true, Some('?'))
+                if matches!(
+                    self.scanner.remains().chars().nth(1),
+                    None | Some(' ')
+                        | Some('\t')
+                        | Some('\n')
+                        | Some('\r')
+                        | Some('#')
+                ) =>
+            {
+                // A nested explicit mapping as the key, e.g.
+                // `? ? a\n: b`: the nested `?` indicator starts a
+                // block mapping whose entries sit at the nested
+                // indicator's column (YAML 1.2.2 SPEC, 8.2.2).
+                let key_column = self.scanner.next_pos.column.saturating_sub(1);
+                self.handle_block_map(0, key_column, anchor, tag)?;
             }
             (true, Some('&')) => {
                 // An anchored empty key, e.g. `? &d` (YAML 1.2.2

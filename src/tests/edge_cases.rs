@@ -203,6 +203,70 @@ fn test_multiple_documents_rejected() {
 }
 
 #[test]
+fn test_nested_explicit_mapping_keys() {
+    // A nested `?` starts a block mapping whose entries sit at the
+    // nested indicator's column; the outer value follows on its own
+    // `: ` line (yaml-test-suite style, libyaml compatible).
+    let input = "? ? a\n: b\n";
+    assert_eq!(scalar_values(input), vec!["a", "", "b"]);
+    // The nested entry takes its own value line at the nested column.
+    let input = "? ? a\n  : b\n: c\n";
+    assert_eq!(scalar_values(input), vec!["a", "b", "c"]);
+    // Same inside a block sequence entry.
+    let input = "- ? ? a\n    : b\n  : c\n";
+    assert_eq!(scalar_values(input), vec!["a", "b", "c"]);
+    // A nested compact mapping as the nested explicit key.
+    let input = "? ? []: y\n: z\n";
+    assert_eq!(scalar_values(input), vec!["y", "", "z"]);
+    // A same-line nested compact mapping.
+    let input = "? ? a : b\n";
+    assert_eq!(scalar_values(input), vec!["a", "b", "", ""]);
+}
+
+#[test]
+fn test_explicit_value_line_indentation() {
+    // The explicit value line must sit at the mapping's key column
+    // (YAML 1.2.2 SPEC, 8.2.2, production [191]).
+    assert!(YamlParser::parse_to_events("? a\n  : b\n").is_err());
+    assert!(YamlParser::parse_to_events("? k\n : v\n").is_err());
+    assert!(YamlParser::parse_to_events("- ? a\n: b\n").is_err());
+    // Correct indentation keeps working.
+    assert!(YamlParser::parse_to_events("- ? a\n  : b\n").is_ok());
+    assert!(YamlParser::parse_to_events("? a\n: b\n").is_ok());
+}
+
+#[test]
+fn test_explicit_key_same_line_value_is_compact_mapping() {
+    // A same-line `: value` after a quoted key forms a compact
+    // single-pair mapping used as the entry key (YAML 1.2.2 SPEC,
+    // 8.2.2, Example 8.19); the entry value stays empty.
+    let input = "? \"q\" : v\n";
+    assert_eq!(scalar_values(input), vec!["q", "v", ""]);
+    // The entry's own value may follow on a `: ` line.
+    let input = "? \"q\" : v\n: w\n";
+    assert_eq!(scalar_values(input), vec!["q", "v", "w"]);
+    // Same for an alias or a trailing-colon plain key.
+    let input = "? *a : v\n";
+    let events = YamlParser::parse_to_events(input).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, crate::YamlEvent::Alias(a, _) if a == "a"))
+    );
+    let input = "? a:\n";
+    assert_eq!(scalar_values(input), vec!["a", "", ""]);
+    // A comment between the key and the value line keeps the regular
+    // explicit value semantics.
+    let input = "? a: # c\n: v\n";
+    assert_eq!(scalar_values(input), vec!["a", "", "v"]);
+    let input = "? \"q\" # c\n: v\n";
+    assert_eq!(scalar_values(input), vec!["q", "v"]);
+    // A block scalar key keeps the regular explicit value.
+    let input = "? |-\n  k\n: v\n";
+    assert_eq!(scalar_values(input), vec!["k", "v"]);
+}
+
+#[test]
 fn test_comment_directly_after_colon() {
     // An inline comment right after `: ` ends the value: a sibling
     // key on the next line is not swallowed as the value.
