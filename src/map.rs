@@ -324,9 +324,14 @@ impl<'a> YamlParser<'a> {
                     self.skip_block_indicator_separation(
                         trimmed_key.starts_with("?\t"),
                     )?;
-                    self.scanner.skip_flow_separation();
+                    // Consume the line break (and any comment or empty
+                    // lines) after a lone `?`, leaving the scanner at
+                    // the start of the next content line so its
+                    // indentation stays intact; stop at same-line key
+                    // content.
+                    self.skip_comment_and_empty_lines();
                     let key_events_start = self.events_len();
-                    self.handle_explicit_key()?;
+                    self.handle_explicit_key(key_line)?;
                     self.pop_state();
                     self.push_state(YamlState::InBlockMapValue);
                     self.scanner.skip_flow_separation();
@@ -888,76 +893,71 @@ impl<'a> YamlParser<'a> {
     }
 
     /// Parse the key node of an explicit mapping entry (`? key`).
-    fn handle_explicit_key(&mut self) -> Result<(), Error> {
+    /// `indicator_line` is the line of the `?` indicator itself; the
+    /// caller may have consumed the line break after a lone `?` before
+    /// calling, so the key's line must be derived from it.
+    fn handle_explicit_key(
+        &mut self,
+        indicator_line: usize,
+    ) -> Result<(), Error> {
         log::trace!(
             "handle_explicit_key starts at {:?}",
             self.scanner.remains()
         );
         let mut anchor = None;
         let mut tag = None;
-        // The key content must sit on the same line as the `?`
-        // indicator; the anchor helper may consume the trailing line
-        // break, so compare against the `?`'s line captured up front.
-        let key_line = self.scanner.done_pos.line;
+        // The key content (and any node properties) must sit on the
+        // same line as the `?` indicator. The caller may already have
+        // consumed the line break after a lone `?`, so compare against
+        // the indicator's line instead of the current position, and
+        // only consume separation spaces while still on that line.
         loop {
+            let on_indicator_line =
+                self.scanner.next_pos.line == indicator_line;
             match self.scanner.peek_char() {
-                Some(' ') | Some('\t') => {
+                Some(' ') | Some('\t') if on_indicator_line => {
                     self.scanner.next_char();
                 }
-                Some('&') if anchor.is_none() => {
+                Some('&') if on_indicator_line && anchor.is_none() => {
                     anchor = Some(self.handle_anchor()?);
                 }
-                Some('!') if tag.is_none() => {
+                Some('!') if on_indicator_line && tag.is_none() => {
                     tag = self.handle_tag()?;
                 }
                 _ => break,
             }
         }
-        // The key content must be on the same line as the `?`
-        // indicator; when the line ended, the key is empty.
-        let same_line = self.scanner.next_pos.line == key_line;
+        let same_line = self.scanner.next_pos.line == indicator_line;
         if !same_line {
             // The key may still be a block node on the following lines
             // (e.g. a zero-indented block sequence after a lone `?`,
             // `?\n- a\n- b`). The sequence may sit at the mapping's own
-            // indentation; any other node must be deeper.
+            // indentation; any other node must be deeper. The caller
+            // positioned the scanner at the start of the next content
+            // line. A `: ` line is the entry's explicit value, not a
+            // key node.
             let map_indent = self.block_indent.unwrap_or(0);
-            let mut rest = self.scanner.remains();
-            let mut next_indent: Option<usize> = None;
-            let mut is_seq = false;
-            loop {
-                let line = rest
-                    .split_once(['\n', '\r'])
-                    .map(|(s, _)| s)
-                    .unwrap_or(rest);
-                let trimmed = line.trim_start_matches([' ', '\t']);
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    match rest.find(['\n', '\r']) {
-                        Some(i) => {
-                            rest = &rest[i + 1..];
-                            if rest.starts_with('\n') {
-                                rest = &rest[1..];
-                            }
-                        }
-                        None => break,
-                    }
-                    continue;
-                }
-                next_indent =
-                    Some(line.chars().take_while(|c| *c == ' ').count());
-                is_seq = trimmed == "-" || trimmed.starts_with("- ");
-                break;
-            }
-            if let Some(indent) = next_indent {
-                if is_seq && indent >= map_indent {
-                    // The scanner already sits at the first content
-                    // line (the caller consumed the line break after
-                    // the `?`), so parse the sequence directly.
-                    self.handle_block_seq(indent, anchor, tag)?;
+            let next_line = self
+                .scanner
+                .remains()
+                .split(['\n', '\r'])
+                .next()
+                .unwrap_or_default();
+            let next_trimmed = next_line.trim_start_matches([' ', '\t']);
+            let next_indent =
+                next_line.chars().take_while(|c| *c == ' ').count();
+            let is_seq = next_trimmed == "-" || next_trimmed.starts_with("- ");
+            let is_value_line = next_trimmed == ":"
+                || next_trimmed.starts_with(": ")
+                || next_trimmed.starts_with(":\t")
+                || next_trimmed.starts_with(":#");
+            if !next_trimmed.is_empty() && !is_value_line {
+                if is_seq && next_indent >= map_indent {
+                    self.handle_block_seq(next_indent, anchor, tag)?;
                     return Ok(());
                 }
-                if indent > map_indent {
-                    self.handle_node(indent, indent, anchor, tag)?;
+                if next_indent > map_indent {
+                    self.handle_node(next_indent, next_indent, anchor, tag)?;
                     return Ok(());
                 }
             }

@@ -203,6 +203,58 @@ fn test_multiple_documents_rejected() {
 }
 
 #[test]
+fn test_lone_explicit_key_indicator() {
+    // A `?` indicator alone on its line: the key is empty and the
+    // value follows on the `: ` line at the mapping's key column.
+    let input = "?\n: x\n";
+    assert_eq!(scalar_values(input), vec!["", "x"]);
+    // Comment and empty lines between the indicator and the value.
+    let input = "? # c\n: v\n";
+    assert_eq!(scalar_values(input), vec!["", "v"]);
+    let input = "?\n\n: v\n";
+    assert_eq!(scalar_values(input), vec!["", "v"]);
+    // A nested lone `?` keeps the outer value on its own line.
+    let input = "? ? \n  : x\n:\n";
+    assert_eq!(scalar_values(input), vec!["", "x", ""]);
+    // A deeper block node after a lone `?` is the key node.
+    let input = "?\n  k: v\n: y\n";
+    assert_eq!(scalar_values(input), vec!["k", "v", "y"]);
+    let input = "? ?\n    k: v\n: y\n";
+    assert_eq!(scalar_values(input), vec!["k", "v", "", "y"]);
+    // A block sequence at the mapping's indentation is the key
+    // (yaml-test-suite:
+    // zero-indented-sequences-in-explicit-mapping-keys).
+    let input = "?\n- a\n- b\n:\n- c\n- d\n";
+    assert_eq!(scalar_values(input), vec!["a", "b", "c", "d"]);
+    // Same inside a block sequence entry.
+    let input = "- ? \n  : v\n";
+    assert_eq!(scalar_values(input), vec!["", "v"]);
+    // Anchors and tags keep decorating the empty key.
+    let input = "? &a\n: v\n";
+    assert_eq!(scalar_values(input), vec!["", "v"]);
+    let input = "? !!str\n: v\n";
+    assert_eq!(scalar_values(input), vec!["", "v"]);
+    // A lone `?` at end of input is a complete empty entry.
+    assert_eq!(scalar_values("?\n"), vec!["", ""]);
+}
+
+#[test]
+fn test_explicit_key_dump_roundtrip() {
+    use crate::{Value, from_str};
+    // The value dumper renders null-keyed maps as explicit entries;
+    // the dumped form must re-parse to the same value.
+    for input in ["? : x\n", "[ : v ]\n", "? []: x\n", "? ? a\n: b\n"] {
+        let value: Value = from_str(input).unwrap();
+        let dumped = value.to_string().unwrap();
+        assert_eq!(
+            from_str::<Value>(&dumped).unwrap(),
+            value,
+            "round-trip of {input:?} via {dumped:?}"
+        );
+    }
+}
+
+#[test]
 fn test_implicit_key_length_limit() {
     // An implicit key must not span more than 1024 Unicode characters
     // (YAML 1.2.2 SPEC, productions [154]/[155], Example 7.22).
