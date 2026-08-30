@@ -288,10 +288,7 @@ fn plain_safe(input: &str) -> bool {
         }
     }
     let last = input.chars().next_back().unwrap();
-    if last == ' ' || last == '\t' {
-        return false;
-    }
-    true
+    !(last == ' ' || last == '\t')
 }
 
 /// Whether the string can be rendered as a single-quoted scalar.
