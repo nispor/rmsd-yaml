@@ -70,6 +70,7 @@ let yaml = to_string_with_opt(
         leading_start_indicator: true, // emit a leading `---`
         indent_count: 2,
         max_width: 80,
+        ..Default::default()
     },
 )?;
 # Ok::<(), rmsd_yaml::Error>(())
@@ -86,6 +87,13 @@ representative configuration document (parse and serialize throughput).
   Parsing one is an error (`ErrorKind::NoSupportMultipleDocuments`),
   and there is no API to serialize more than one document into a
   single output stream. See `TODO.md` for tracking.
+* Byte-identical round-trip is not promised. `Value::to_string()`
+  re-emits parsed documents as faithfully as supported, but
+  yaml-test-suite corner cases requiring extensive design changes
+  are unsupported.
+* Tagged YAML is not supported when deserializing into generic `any`
+  targets without `visit_enum`. Tagged nodes are supported by `Value`
+  and Rust enum targets.
 
 ## License
 

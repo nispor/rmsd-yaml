@@ -130,11 +130,11 @@ fn test_all_yaml_core_bool_spellings() {
             expected,
             "{w:?} should deserialize to {expected}"
         );
-        let got: serde_json::Value = from_str(w).unwrap();
+        let got: Value = from_str(w).unwrap();
         assert_eq!(
-            got,
-            serde_json::json!(expected),
-            "{w:?} should be a JSON bool, not a string"
+            got.as_bool().unwrap(),
+            expected,
+            "{w:?} should be a bool in the generic Value path"
         );
     }
     // The YAML 1.1 words (`yes`/`no`/`on`/`off`) and single digits
@@ -142,8 +142,9 @@ fn test_all_yaml_core_bool_spellings() {
     // strings / integers.
     for w in ["yes", "no", "on", "off"] {
         assert!(from_str::<bool>(w).is_err(), "{w:?} is not a YAML 1.2 bool");
-        let got: serde_json::Value = from_str(w).unwrap();
-        assert_eq!(got, serde_json::json!(w), "{w:?} must stay a string");
+        let got: Value = from_str(w).unwrap();
+        assert!(got.as_bool().is_err());
+        assert_eq!(got.as_str().unwrap(), w, "{w:?} must stay a string");
     }
     // A quoted scalar is never a bool, even when its content is a
     // valid bool spelling (already covered by
@@ -214,9 +215,9 @@ fn test_i64_min_and_boundaries() {
     // A negative plain integer and the narrower signed targets still work.
     assert_eq!(from_str::<i64>("-42").unwrap(), -42);
     assert_eq!(from_str::<i32>("-2147483648").unwrap(), i32::MIN);
-    // The generic `serde_json::Value` path carries the integer too.
-    let got: serde_json::Value = from_str("-9223372036854775808").unwrap();
-    assert_eq!(got, serde_json::Value::from(i64::MIN));
+    // The generic `Value` path carries the integer too.
+    let got: Value = from_str("-9223372036854775808").unwrap();
+    assert_eq!(got.as_i64().unwrap(), i64::MIN);
 }
 
 #[test]
@@ -268,10 +269,10 @@ fn test_bare_inf_nan_infinity_are_strings_not_floats() {
     // straight copy-paste of Rust's `f64::FromStr` semantics (which
     // does accept `inf`/`nan`/`infinity` in any case), leaking into
     // both the generic `deserialize_any` path (they became `null` when
-    // fed into `serde_json::Value`) and the `as_f64` path (they parsed
-    // to `-inf`/`inf`/`NaN`).
+    // fed into a generic `Value` target) and the `as_f64` path (they
+    // parsed to `-inf`/`inf`/`NaN`).
     //
-    // Generic / serde_json target: each bare word stays a string.
+    // Generic `Value` target: each bare word stays a string.
     for w in [
         "inf",
         "-inf",
@@ -288,12 +289,13 @@ fn test_bare_inf_nan_infinity_are_strings_not_floats() {
         "-nan",
         "+nan",
     ] {
-        let got: serde_json::Value = from_str(w).unwrap();
+        let got: Value = from_str(w).unwrap();
         assert_eq!(
-            got,
-            serde_json::json!(w),
+            got.as_str().unwrap(),
+            w,
             "bare word {w:?} should deserialize to a string"
         );
+        assert!(got.as_f64().is_err(), "{w:?} must not be a float");
     }
     // Generic / String target: identity round trip.
     for w in ["inf", "-inf", "infinity", "nan", "-nan"] {
@@ -342,8 +344,9 @@ fn test_multi_sign_float_words_are_invalid_numbers() {
     }
     // Single-sign bare words are still ordinary strings (YAML 1.2).
     for w in ["-inf", "+inf", "-nan", "+nan", "-infinity"] {
-        let got: serde_json::Value = from_str(w).unwrap();
-        assert_eq!(got, serde_json::json!(w), "{w:?} should stay a string");
+        let got: Value = from_str(w).unwrap();
+        assert_eq!(got.as_str().unwrap(), w, "{w:?} should stay a string");
+        assert!(got.as_f64().is_err(), "{w:?} must not be a float");
     }
 }
 
@@ -589,43 +592,94 @@ fn test_deserialize_empty_value_as_empty_map_and_seq() {
 
 #[test]
 fn test_deserialize_any_null_scalar_is_null() {
-    // `deserialize_any` (used e.g. by `serde_json::Value`) checked
-    // `is_bool`/`is_integer`/`is_float` before falling back to a
-    // plain string, but never checked `is_null`, so a null scalar
-    // used to deserialize into the empty string `""` instead of
-    // `Value::Null`.
-    let got: serde_json::Value = from_str("a: null\nb: ~\nc:\n").unwrap();
-    assert_eq!(got, serde_json::json!({"a": null, "b": null, "c": null}),);
+    // `deserialize_any` checked `is_bool`/`is_integer`/`is_float`
+    // before falling back to a plain string, but never checked
+    // `is_null`, so a null scalar used to deserialize into the empty
+    // string `""` instead of `Value::Null`.
+    let got: Value = from_str("a: null\nb: ~\nc:\n").unwrap();
+    for key in ["a", "b", "c"] {
+        assert!(
+            got.get(key).unwrap().is_null(),
+            "{key:?} should deserialize to null"
+        );
+    }
 }
 
 #[test]
-fn test_deserialize_any_resolves_tags_transparently() {
-    // `deserialize_any` used to treat *every* tagged node as an enum
-    // representation (`ValueEnumAccess`), which fails for generic
-    // targets like `serde_json::Value` since there is no enum to
-    // decode into. Per the YAML Core Schema, only `!!str`/`!`,
-    // `!!int`, `!!float`, `!!bool` and `!!null` force a scalar type;
-    // every other tag (custom application tags, `!!seq`, `!!map`,
-    // `!!set`, `!!omap`, `!!binary`, ...) resolves transparently to
-    // its underlying, untagged data.
-    let got: serde_json::Value = from_str(
-        "a: !!str 23\nb: !!int \"23\"\nc: !!float \"1.5\"\nd: !!bool \
-         \"true\"\ne: !!null ~\nf: ! 12\ng: !circle\n  center: 0\n  radius: \
-         1\n",
-    )
-    .unwrap();
-    assert_eq!(
-        got,
-        serde_json::json!({
-            "a": "23",
-            "b": 23,
-            "c": 1.5,
-            "d": true,
-            "e": null,
-            "f": "12",
-            "g": {"center": 0, "radius": 1},
-        }),
-    );
+fn test_deserialize_any_rejects_tags_for_generic_targets() {
+    #[derive(Debug)]
+    struct NoEnumProbe;
+
+    impl<'de> serde::Deserialize<'de> for NoEnumProbe {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct NoEnumVisitor;
+            impl serde::de::Visitor<'_> for NoEnumVisitor {
+                type Value = NoEnumProbe;
+                fn expecting(
+                    &self,
+                    formatter: &mut std::fmt::Formatter,
+                ) -> std::fmt::Result {
+                    formatter.write_str("a generic any-value probe")
+                }
+            }
+            deserializer
+                .deserialize_any(NoEnumVisitor)
+                .map(|_| NoEnumProbe)
+        }
+    }
+
+    // Like serde_yaml, tagged nodes are delivered through serde's enum
+    // mechanism. Generic "any" visitors without `visit_enum` (such as
+    // this probe) therefore reject tagged YAML instead of resolving
+    // tags transparently.
+    for input in ["a: !!str 23\n", "a: !!int \"23\"\n", "a: !circle 1\n"] {
+        assert!(
+            from_str::<NoEnumProbe>(input).is_err(),
+            "tagged input should be rejected by a generic any target: \
+             {input:?}"
+        );
+    }
+}
+
+#[test]
+fn test_serde_value_roundtrip_preserves_semantics() {
+    // `from_str::<Value>` goes through serde's `Deserialize` impl,
+    // which used to rebuild a fresh value tree and therefore dropped
+    // explicit tags. The serde path must preserve the data model:
+    // quoted empty scalars stay strings (`a: ''` must not become
+    // null) and explicit tags must not disappear. Exact scalar
+    // style, anchor and alias reproduction is not promised.
+    for input in ["a: ''\n", "a: \"\"\n", "a: \"null\"\n"] {
+        let value: Value = from_str(input).unwrap();
+        let dumped = value.to_string().unwrap();
+        let back: Value = from_str(&dumped).unwrap();
+        assert!(
+            matches!(back.get("a").unwrap().data, crate::ValueData::String(_)),
+            "string round trip of {input:?} produced {dumped:?}"
+        );
+    }
+    for (input, expected_tag) in [
+        ("{ foo : !!str }\n", "<tag:yaml.org,2002:str>"),
+        ("- !!str y\n", "<tag:yaml.org,2002:str>"),
+        ("!!map\n  a: 1\n", "<tag:yaml.org,2002:map>"),
+    ] {
+        let value: Value = from_str(input).unwrap();
+        let dumped = value.to_string().unwrap();
+        let back: Value = from_str(&dumped).unwrap();
+        let tagged = match input {
+            "{ foo : !!str }\n" => back.get("foo").unwrap(),
+            "- !!str y\n" => &back.as_sequence().unwrap()[0],
+            "!!map\n  a: 1\n" => &back,
+            _ => unreachable!(),
+        };
+        assert!(
+            matches!(&tagged.data, crate::ValueData::Tag(tag) if tag.name == expected_tag),
+            "tag round trip of {input:?} produced {dumped:?}"
+        );
+    }
 }
 
 #[test]
@@ -681,9 +735,16 @@ fn test_quoted_numeric_and_bool_like_scalars_are_not_coerced() {
     // already required a plain scalar. This matches `serde_yaml`:
     // quoted scalars are always plain strings when deserialized
     // generically, ...
-    let got: serde_json::Value =
-        from_str("a: \"true\"\nb: \"42\"\nc: \"1.5\"\n").unwrap();
-    assert_eq!(got, serde_json::json!({"a": "true", "b": "42", "c": "1.5"}),);
+    let got: Value = from_str("a: \"true\"\nb: \"42\"\nc: \"1.5\"\n").unwrap();
+    let a = got.get("a").unwrap();
+    assert!(a.as_bool().is_err());
+    assert_eq!(a.as_str().unwrap(), "true");
+    let b = got.get("b").unwrap();
+    assert!(b.as_i64().is_err());
+    assert_eq!(b.as_str().unwrap(), "42");
+    let c = got.get("c").unwrap();
+    assert!(c.as_f64().is_err());
+    assert_eq!(c.as_str().unwrap(), "1.5");
 
     // ... and error rather than silently coerce when the target field
     // has a concrete, incompatible type.

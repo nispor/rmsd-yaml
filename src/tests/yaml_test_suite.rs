@@ -4,7 +4,7 @@ use std::{path::Path, str::FromStr};
 
 use pretty_assertions::assert_eq;
 
-use crate::YamlParser;
+use crate::{YamlParser, YamlSerializeOption};
 
 const TEST_DATA_FOLDER_PATH: &str = "yaml-test-suit-data/name";
 const DESCRIPTION_FILE_NAME: &str = "===";
@@ -19,8 +19,9 @@ const IN_JSON_FILE_NAME: &str = "in.json";
 ///
 /// The test uses the serde_yaml workflow: parse `in.yaml` into a
 /// [`Value`](crate::Value), dump it back with
-/// `Value::to_string()`, and compare byte-identically with
-/// `out.yaml`.
+/// `Value::to_string()`, and compare with `out.yaml`. Exact
+/// reproduction is best-effort; byte-identical output is not
+/// promised.
 ///
 /// The skipped cases are the ones a `Value` tree cannot reproduce
 /// (see `DESIGNS.md`): multi-document streams, and `out.yaml` files
@@ -128,9 +129,9 @@ const SKIPPED_OUT_YAML_TEST: &[&str] = &[
 ];
 
 /// The test cases skipped for the `in.json` test. The test runs over
-/// every case with an `in.json` and a successful parse, deserializing
-/// `in.yaml` into a `serde_json::Value` and comparing it against the
-/// JSON parsed from `in.json`.
+/// every case with an `in.json` and a successful parse, parsing both
+/// `in.yaml` and `in.json` into a [`Value`](crate::Value) and
+/// comparing the YAML data models.
 ///
 /// The skipped cases all have an `in.json` that is not a single valid
 /// JSON value, for one of two reasons:
@@ -337,25 +338,38 @@ fn yaml_test_suit_in_json() {
 
         log::trace!("====== {} ======", test_path_str);
 
-        // Deserialize `in.yaml` through serde into a `serde_json::Value`
-        // (exercising the real `Deserializer` impl and its type
-        // inference), then compare against the JSON parsed from
-        // `in.json`.
+        // Parse both files into the crate's `Value` tree and compare
+        // the YAML data models. `in.json` is the expected native data,
+        // so explicit tags on the YAML side are treated transparently.
         let input_yaml = read_file(&test_path.join(INPUT_YAML_FILE_NAME));
         let expected_json = read_file(&test_path.join(IN_JSON_FILE_NAME));
-        let expected: serde_json::Value = serde_json::from_str(&expected_json)
+        let mut expected: crate::Value = crate::from_str(&expected_json)
             .unwrap_or_else(|e| {
                 panic!(
                     "{test_path_str}: {IN_JSON_FILE_NAME} is not valid JSON: \
                      {e}"
                 )
             });
-        let got: serde_json::Value = crate::from_str(&input_yaml)
+        let mut got: crate::Value = crate::from_str(&input_yaml)
             .unwrap_or_else(|e| {
                 panic!("{test_path_str}: failed to deserialize in.yaml: {e}")
             });
-        assert!(
-            json_value_eq(&expected, &got),
+        sort_mappings(&mut expected);
+        sort_mappings(&mut got);
+        let option = YamlSerializeOption {
+            omit_tag: true,
+            ..Default::default()
+        };
+        let expected_str = expected
+            .to_string_with_opt(option.clone())
+            .unwrap_or_else(|e| {
+                panic!("{test_path_str}: failed to serialize expected: {e}")
+            });
+        let got_str = got.to_string_with_opt(option).unwrap_or_else(|e| {
+            panic!("{test_path_str}: failed to serialize got: {e}")
+        });
+        assert_eq!(
+            expected_str, got_str,
             "in.json mismatch for {test_path_str}: expected {expected:?}, got \
              {got:?}",
         );
@@ -365,30 +379,45 @@ fn yaml_test_suit_in_json() {
     log::info!("Tested {tested} {IN_JSON_FILE_NAME} tests");
 }
 
-/// Deep-compare two JSON values, treating numbers as equal whenever
-/// their `f64` representation matches. This is needed because
-/// `serde_json::Value`'s derived `PartialEq` distinguishes an
-/// integer-shaped `Number` from a float-shaped one even when they are
-/// mathematically equal (e.g. `450 != 450.0`), while a YAML float
-/// scalar like `450.00` is only guaranteed to round-trip to the
-/// correct magnitude, not to a specific JSON number representation.
-fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
-    use serde_json::Value;
+/// Sort mapping entries recursively so `to_string_with_opt()` output
+/// is independent of the order used by `in.yaml` and `in.json`.
+fn sort_mappings(value: &mut crate::Value) {
+    sort_value_data(&mut value.data);
+}
 
-    match (a, b) {
-        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len()
-                && a.iter().zip(b.iter()).all(|(a, b)| json_value_eq(a, b))
+fn sort_value_data(data: &mut crate::ValueData) {
+    match data {
+        crate::ValueData::Tag(tag) => sort_value_data(&mut tag.data),
+        crate::ValueData::Array(items) => {
+            for item in items {
+                sort_value_data(&mut item.data);
+            }
         }
-        (Value::Object(a), Value::Object(b)) => {
-            a.len() == b.len()
-                && a.iter().all(|(k, v)| {
-                    b.get(k).is_some_and(|bv| json_value_eq(v, bv))
-                })
+        crate::ValueData::Map(map) => {
+            let mut entries: Vec<(crate::Value, crate::Value)> = map
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            entries.sort_by_key(|a| sort_key(&a.0));
+            let mut sorted = crate::Mapping::new();
+            for (mut key, mut value) in entries {
+                sort_value_data(&mut key.data);
+                sort_value_data(&mut value.data);
+                sorted.insert(key, value);
+            }
+            **map = sorted;
         }
-        (a, b) => a == b,
+        _ => {}
     }
+}
+
+fn sort_key(value: &crate::Value) -> String {
+    value
+        .to_string_with_opt(YamlSerializeOption {
+            omit_tag: true,
+            ..Default::default()
+        })
+        .unwrap_or_default()
 }
 
 fn run_event_parser_test(

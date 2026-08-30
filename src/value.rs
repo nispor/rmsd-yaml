@@ -16,9 +16,10 @@ pub struct Value {
     pub end: YamlPosition,
     /// Round-trip metadata from the parsed events (scalar style,
     /// anchor, alias). Preserved by [`Value::to_string`] so a
-    /// parsed document can be dumped byte-identically, but
-    /// deliberately *not* part of [`PartialEq`]/[`Hash`]: two values
-    /// with the same data are equal regardless of their style.
+    /// parsed document can be re-emitted with its original
+    /// presentation where supported; byte-identical output is not
+    /// promised. Deliberately *not* part of [`PartialEq`]/[`Hash`]:
+    /// two values with the same data are equal regardless of style.
     pub meta: ValueMeta,
 }
 
@@ -52,7 +53,7 @@ impl PartialEq for Value {
         // plain scalar with the same text compare equal. Anchors and
         // aliases take part so that an anchored node and a distinct
         // alias reference to it stay separate map keys, preserving
-        // byte-identical round-trip (yaml-test-suite:
+        // round-trip fidelity (yaml-test-suite:
         // aliases-in-flow-objects).
         self.data == other.data
             && self.meta.anchor == other.meta.anchor
@@ -258,10 +259,7 @@ impl Value {
     /// ordinary string, matching `serde_yaml`.
     fn is_plain_scalar(&self) -> bool {
         matches!(self.data, ValueData::String(_))
-            && matches!(
-                self.meta.scalar_style,
-                None | Some(YamlScalarStyle::Plain)
-            )
+            && matches!(self.meta.scalar_style, Some(YamlScalarStyle::Plain))
     }
 
     /// Whether the value resolves to null per the YAML Core Schema:
@@ -715,11 +713,10 @@ fn is_rust_float_word(s: &str) -> bool {
 /// by [`from_str`](crate::from_str). The parse result is already a
 /// `Value`; this visits it back into a fresh value tree.
 ///
-/// Note: `ValueData::Tag` nodes are rebuilt from the variant name
-/// derived by [`ValueEnumAccess`](crate::variant::ValueEnumAccess),
-/// which loses the original tag URI (e.g. `<tag:yaml.org,2002:int>`
-/// becomes `!int`). For a lossless parse use
-/// [`Value::from_str`](std::str::FromStr) instead.
+/// Explicit tags are preserved as their resolved names (for example
+/// `<tag:yaml.org,2002:str>`). Scalar style, anchors and aliases are
+/// not preserved; for those use [`Value::from_str`](std::str::FromStr)
+/// on the compose path.
 impl<'de> serde::Deserialize<'de> for Value {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -758,6 +755,20 @@ impl serde::Serialize for Value {
 
 struct ValueVisitor;
 
+impl ValueVisitor {
+    fn visit_plain_scalar<E>(v: String) -> Result<Value, E> {
+        Ok(Value {
+            data: ValueData::String(v),
+            start: YamlPosition::EOF,
+            end: YamlPosition::EOF,
+            meta: ValueMeta {
+                scalar_style: Some(YamlScalarStyle::Plain),
+                ..Default::default()
+            },
+        })
+    }
+}
+
 impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     type Value = Value;
 
@@ -787,12 +798,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     }
 
     fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
-        Ok(Value {
-            data: ValueData::String(v.to_string()),
-            start: YamlPosition::EOF,
-            end: YamlPosition::EOF,
-            ..Default::default()
-        })
+        Self::visit_plain_scalar(v.to_string())
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -823,21 +829,21 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     where
         E: serde::de::Error,
     {
-        self.visit_str(&v.to_string())
+        Self::visit_plain_scalar(v.to_string())
     }
 
     fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        self.visit_str(&v.to_string())
+        Self::visit_plain_scalar(v.to_string())
     }
 
     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        self.visit_str(&v.to_string())
+        Self::visit_plain_scalar(v.to_string())
     }
 
     fn visit_char<E>(self, v: char) -> Result<Self::Value, E>
@@ -884,11 +890,11 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         A: serde::de::EnumAccess<'de>,
     {
         use serde::de::VariantAccess;
-        let (name, variant) = data.variant_seed(VariantName)?;
+        let (name, variant) = data.variant_seed(FullTagName)?;
         let inner = variant.newtype_variant_seed(ValueVisitor)?;
         Ok(Value {
             data: ValueData::Tag(Box::new(YamlTag {
-                name: format!("!{name}"),
+                name,
                 data: inner.data,
             })),
             start: YamlPosition::EOF,
@@ -898,7 +904,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     }
 }
 
-struct VariantName;
+struct FullTagName;
 
 impl<'de> serde::de::DeserializeSeed<'de> for ValueVisitor {
     type Value = Value;
@@ -911,7 +917,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for ValueVisitor {
     }
 }
 
-impl<'de> serde::de::DeserializeSeed<'de> for VariantName {
+impl<'de> serde::de::DeserializeSeed<'de> for FullTagName {
     type Value = String;
 
     fn deserialize<D>(self, deserializer: D) -> Result<String, D::Error>
@@ -930,7 +936,10 @@ impl<'de> serde::de::DeserializeSeed<'de> for VariantName {
             fn visit_str<E>(self, v: &str) -> Result<String, E> {
                 Ok(v.to_string())
             }
+            fn visit_string<E>(self, v: String) -> Result<String, E> {
+                Ok(v)
+            }
         }
-        deserializer.deserialize_str(NameVisitor)
+        deserializer.deserialize_any(NameVisitor)
     }
 }

@@ -23,6 +23,10 @@ pub struct YamlSerializeOption {
     pub indent_count: usize,
     /// The max width of each line. 0 means no limit. Default is 80.
     pub max_width: usize,
+    /// Whether explicit tags (`!!str`, `!foo`, ...) should be omitted
+    /// and the tagged node serialized as its inner data. Default is
+    /// false.
+    pub omit_tag: bool,
 }
 
 impl Default for YamlSerializeOption {
@@ -31,6 +35,7 @@ impl Default for YamlSerializeOption {
             leading_start_indicator: false,
             indent_count: 2,
             max_width: 80,
+            omit_tag: false,
         }
     }
 }
@@ -389,18 +394,36 @@ impl YamlSerializer {
                         self.pending_tag = false;
                     }
                     _ => {
-                        write!(
-                            self.output,
-                            "{}{}",
-                            self.get_indent(),
-                            to_out_yaml_scalar_plain(s)
-                        )
-                        .ok();
-                        self.pending_tag = false;
-                        if s.is_empty() && value.meta.anchor.is_some() {
-                            // `&name ` alone is the anchored empty scalar.
-                            self.output.pop();
+                        if value.meta.scalar_style
+                            == Some(crate::YamlScalarStyle::Plain)
+                        {
+                            write!(
+                                self.output,
+                                "{}{}",
+                                self.get_indent(),
+                                to_out_yaml_scalar_plain(s)
+                            )
+                            .ok();
+                            if s.is_empty() && value.meta.anchor.is_some() {
+                                // `&name ` alone is the anchored empty
+                                // scalar.
+                                self.output.pop();
+                            }
+                        } else {
+                            write!(
+                                self.output,
+                                "{}{}",
+                                self.get_indent(),
+                                to_scalar_string(
+                                    self.current_indent_level
+                                        * self.option.indent_count,
+                                    s,
+                                    self.option.max_width
+                                )
+                            )
+                            .ok();
                         }
+                        self.pending_tag = false;
                     }
                 }
                 Ok(())
@@ -496,7 +519,7 @@ impl YamlSerializer {
                             self.output,
                             "{}{}: ",
                             self.get_indent(),
-                            simple_key_text(key)
+                            simple_key_text(key, self.option.omit_tag)
                         )
                         .ok();
                         let before = self.output.len();
@@ -542,6 +565,28 @@ impl YamlSerializer {
                 Ok(())
             }
             ValueData::Tag(tag) => {
+                if self.option.omit_tag {
+                    let mut inner = crate::Value {
+                        data: tag.data.clone(),
+                        start: value.start,
+                        end: value.end,
+                        meta: value.meta.clone(),
+                    };
+                    match tag.name.as_str() {
+                        "<tag:yaml.org,2002:str>" | "<!>" => {
+                            inner.meta.scalar_style = None;
+                        }
+                        "<tag:yaml.org,2002:int>"
+                        | "<tag:yaml.org,2002:float>"
+                        | "<tag:yaml.org,2002:bool>"
+                        | "<tag:yaml.org,2002:null>" => {
+                            inner.meta.scalar_style =
+                                Some(crate::YamlScalarStyle::Plain);
+                        }
+                        _ => {}
+                    }
+                    return self.serialize_yaml_value_ctx(&inner, ctx);
+                }
                 self.write_tag(&tag_shorthand(&tag.name));
                 let empty = matches!(
                     &tag.data,
@@ -601,7 +646,7 @@ fn is_simple_key(key: &crate::Value) -> bool {
 /// The text of a simple key, rendered before the `:` — including a
 /// leading `&anchor ` (so `&a a:` and the anchored empty key `&a :`)
 /// and the `*alias ` spacing for alias keys (`*b : *a`).
-fn simple_key_text(key: &crate::Value) -> String {
+fn simple_key_text(key: &crate::Value, omit_tag: bool) -> String {
     let mut text = String::new();
     if let Some(alias) = &key.meta.alias {
         text.push_str(&format!("*{alias} "));
@@ -621,20 +666,28 @@ fn simple_key_text(key: &crate::Value) -> String {
             _ => to_out_yaml_scalar_plain(s),
         },
         crate::ValueData::Tag(tag) => {
-            let mut tag_text = format!("!{}", tag_shorthand(&tag.name));
-            if let crate::ValueData::String(s) = &tag.data {
-                tag_text.push(' ');
-                // An anchored tagged key is rendered with a quoted
-                // scalar (`&a1 !!str "foo"`), matching
-                // `spec-example-6-23-node-properties`.
-                let scalar = if key.meta.anchor.is_some() {
-                    format!("\"{}\"", escape_double_quoted(s))
-                } else {
+            if omit_tag {
+                if let crate::ValueData::String(s) = &tag.data {
                     to_out_yaml_scalar_plain(s)
-                };
-                tag_text.push_str(&scalar);
+                } else {
+                    String::new()
+                }
+            } else {
+                let mut tag_text = format!("!{}", tag_shorthand(&tag.name));
+                if let crate::ValueData::String(s) = &tag.data {
+                    tag_text.push(' ');
+                    // An anchored tagged key is rendered with a quoted
+                    // scalar (`&a1 !!str "foo"`), matching
+                    // `spec-example-6-23-node-properties`.
+                    let scalar = if key.meta.anchor.is_some() {
+                        format!("\"{}\"", escape_double_quoted(s))
+                    } else {
+                        to_out_yaml_scalar_plain(s)
+                    };
+                    tag_text.push_str(&scalar);
+                }
+                tag_text
             }
-            tag_text
         }
         crate::ValueData::Array(_) => "[]".to_string(),
         crate::ValueData::Map(_) => "{}".to_string(),
