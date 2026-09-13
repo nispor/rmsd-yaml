@@ -120,6 +120,48 @@ impl<'a> YamlParser<'a> {
         self.events.drain(start..).collect()
     }
 
+    /// Attach node properties (`anchor`/`tag`) to the first node event
+    /// pushed at or after `start`, ignoring that range's leading
+    /// `MapStart`.
+    ///
+    /// Used for the compact mapping that an explicit key's content
+    /// forms (`? &a k : v`): the compact mapping has no node properties
+    /// slot, so properties written on the `?` indicator line decorate
+    /// its first key node instead (YAML 1.2.2 SPEC, production [202];
+    /// libyaml agrees), e.g. the `&a` of `? &a k : v` belongs to the
+    /// `k` scalar, not to the `{k: v}` mapping used as the key.
+    pub(crate) fn attach_props_to_compact_key(
+        &mut self,
+        start: usize,
+        anchor: Option<String>,
+        tag: Option<String>,
+    ) {
+        if anchor.is_none() && tag.is_none() {
+            return;
+        }
+        let mut events = self.events[start..].iter_mut();
+        // Skip the compact mapping's own `MapStart` event.
+        let _ = events.next();
+        for event in events {
+            match event {
+                YamlEvent::Scalar(a, t, ..)
+                | YamlEvent::MapStart(a, t, ..)
+                | YamlEvent::SequenceStart(a, t, ..) => {
+                    *a = anchor;
+                    *t = tag;
+                    return;
+                }
+                YamlEvent::Alias(..) => {
+                    // An alias carries no node properties; the callers
+                    // reject properties in front of an alias before
+                    // reaching here.
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub(crate) fn push_state(&mut self, state: YamlState) {
         log::trace!("Push state {:?}", state);
         self.states.push(state);

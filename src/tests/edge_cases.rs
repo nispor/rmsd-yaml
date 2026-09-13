@@ -432,6 +432,121 @@ fn test_explicit_key_same_line_value_is_compact_mapping() {
 }
 
 #[test]
+fn test_properties_on_explicit_compact_key() {
+    use crate::YamlEvent;
+    // Node properties written on the `?` indicator line decorate the
+    // first key node of the compact mapping that the key content forms,
+    // not the compact mapping itself: production [202]
+    // (`ns-l-compact-mapping`) has no node properties slot, so `? &a k
+    // : v` anchors the `k` scalar (libyaml compatible) and an alias
+    // `*a` refers to `k`, not to the `{k: v}` mapping used as the key.
+    let map_anchors = |input: &str| -> Vec<Option<String>> {
+        YamlParser::parse_to_events(input)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e {
+                YamlEvent::MapStart(anchor, _, _, _) => Some(anchor),
+                _ => None,
+            })
+            .collect()
+    };
+    let scalars = |input: &str| -> Vec<(Option<String>, String)> {
+        YamlParser::parse_to_events(input)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e {
+                YamlEvent::Scalar(anchor, _, value, _, _, _) => {
+                    Some((anchor, value))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    // The anchor belongs to the plain-scalar key.
+    assert_eq!(map_anchors("? &a k : v\n"), vec![None, None]);
+    assert_eq!(
+        scalars("? &a k : v\n"),
+        vec![
+            (Some("a".to_string()), "k".to_string()),
+            (None, "v".to_string()),
+            (None, String::new()),
+        ]
+    );
+    // A tag behaves like an anchor.
+    let tags: Vec<Option<String>> =
+        YamlParser::parse_to_events("? !!str k : v\n")
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e {
+                YamlEvent::MapStart(tag, _, _, _)
+                | YamlEvent::Scalar(_, tag, _, _, _, _) => Some(tag),
+                _ => None,
+            })
+            .collect();
+    assert_eq!(
+        tags,
+        vec![
+            None,
+            None,
+            Some("<tag:yaml.org,2002:str>".to_string()),
+            None,
+            None,
+        ]
+    );
+    // A flow collection key carries the properties itself.
+    let seq_anchors = |input: &str| -> Vec<Option<String>> {
+        YamlParser::parse_to_events(input)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e {
+                YamlEvent::SequenceStart(anchor, _, _, _) => Some(anchor),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(map_anchors("? &a [x] : v\n"), vec![None, None]);
+    assert_eq!(seq_anchors("? &a [x] : v\n"), vec![Some("a".to_string())]);
+    assert_eq!(
+        map_anchors("? &a {x: y} : v\n"),
+        vec![None, None, Some("a".to_string())]
+    );
+    // The empty key of a compact mapping is anchored too.
+    assert_eq!(
+        scalars("? &a : x\n"),
+        vec![
+            (Some("a".to_string()), String::new()),
+            (None, "x".to_string()),
+            (None, String::new()),
+        ]
+    );
+    // The same rules apply inside block sequences and nested explicit
+    // keys.
+    assert_eq!(
+        scalars("- ? &a k : v\n  : w\n"),
+        vec![
+            (Some("a".to_string()), "k".to_string()),
+            (None, "v".to_string()),
+            (None, "w".to_string()),
+        ]
+    );
+    assert_eq!(
+        scalars("? ? &a k: v\n: w\n"),
+        vec![
+            (Some("a".to_string()), "k".to_string()),
+            (None, "v".to_string()),
+            (None, String::new()),
+            (None, "w".to_string()),
+        ]
+    );
+    // The alias resolves to the anchored scalar `k`.
+    let value: crate::Value = crate::from_str("? &a k : v\n: *a\n").unwrap();
+    let map = value.as_mapping().unwrap();
+    let (key, val) = map.iter().next().unwrap();
+    assert_eq!(key.as_mapping().unwrap().len(), 1);
+    assert_eq!(val.as_str().unwrap(), "k");
+}
+
+#[test]
 fn test_comment_directly_after_colon() {
     // An inline comment right after `: ` ends the value: a sibling
     // key on the next line is not swallowed as the value.

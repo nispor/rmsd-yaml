@@ -1007,7 +1007,9 @@ impl<'a> YamlParser<'a> {
                 if flow_collection_is_key(first_line) {
                     let key_column =
                         self.scanner.next_pos.column.saturating_sub(1);
-                    self.handle_block_map(0, key_column, anchor, tag)?;
+                    let events_start = self.events_len();
+                    self.handle_block_map(0, key_column, None, None)?;
+                    self.attach_props_to_compact_key(events_start, anchor, tag);
                 } else if self.scanner.peek_char() == Some('[') {
                     self.handle_flow_seq(anchor, tag)?;
                 } else {
@@ -1078,7 +1080,9 @@ impl<'a> YamlParser<'a> {
                 {
                     let key_column =
                         self.scanner.next_pos.column.saturating_sub(1);
-                    self.handle_block_map(0, key_column, anchor, tag)?;
+                    let events_start = self.events_len();
+                    self.handle_block_map(0, key_column, None, None)?;
+                    self.attach_props_to_compact_key(events_start, anchor, tag);
                     return Ok(());
                 }
                 // A plain-scalar key on the `?` line. Unlike an

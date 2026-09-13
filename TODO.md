@@ -1,7 +1,3 @@
-- Anchor placement on compact explicit keys: `? &a k : v` attaches
-  `&a` to the compact single-pair mapping used as the key, while
-  libyaml attaches it to the scalar `k` (an alias `*a` resolves to
-  a different node).
 - Divergence from libyaml (stricter, spec-supported): a lone `\r`
   line break inside a double-quoted scalar in block context is
   rejected by the continuation-line indentation rule (production
