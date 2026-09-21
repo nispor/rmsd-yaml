@@ -572,3 +572,39 @@ fn test_double_quoted_escaped_line_break() {
     // `\ ` is a space escape.
     assert_eq!(scalar_values("\"a\\ \nb\"\n"), vec!["a b"]);
 }
+
+#[test]
+fn test_document_marker_only_at_line_start() {
+    // An indented `...` is block scalar content, not a document end
+    // marker: the kernel stack traces stored in the CVE records have a
+    // `...` line followed by trace lines starting with `[`.
+    let input = "description: |-\n  ...\n  [  134.222]  foo+0x64\n";
+    assert_eq!(
+        scalar_values(input),
+        vec!["description", "...\n[  134.222]  foo+0x64"]
+    );
+    // Same for a block scalar in a sequence and for the folded style.
+    let input = "- |-\n  x\n  ...\n  y\n";
+    assert_eq!(scalar_values(input), vec!["x\n...\ny"]);
+    let input = "k: |\n  x\n  ---\n  y\n";
+    assert_eq!(scalar_values(input), vec!["k", "x\n---\ny\n"]);
+    // An indented `...` continues a plain scalar as content.
+    let input = "k: a\n  ...\n  b\n";
+    assert_eq!(scalar_values(input), vec!["k", "a ... b"]);
+    let input = "key:\n  ...\n";
+    assert_eq!(scalar_values(input), vec!["key", "..."]);
+    // A scalar that starts mid-line is never a marker.
+    let input = "key: ...\n";
+    assert_eq!(scalar_values(input), vec!["key", "..."]);
+}
+
+#[test]
+fn test_document_marker_at_line_start_ends_document() {
+    // A `...` at column 0 still ends the document, even when it
+    // follows an open block scalar.
+    let value: crate::Value = crate::from_str("k: |-\n  x\n...\n").unwrap();
+    assert_eq!(value.get("k").unwrap().as_str().unwrap(), "x");
+    // An empty document terminated by `...` stays empty.
+    let value: crate::Value = crate::from_str("---\n...\n").unwrap();
+    assert!(value.data == crate::ValueData::Null);
+}

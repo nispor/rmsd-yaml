@@ -130,11 +130,11 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 continue;
             }
-            if is_document_end_marker(trimmed) {
+            if is_document_end_marker(line) {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
-            if is_document_start_marker(trimmed) {
+            if is_document_start_marker(line) {
                 // Document start marker: the sequence ends here.
                 break;
             }

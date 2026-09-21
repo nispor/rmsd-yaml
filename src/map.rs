@@ -227,11 +227,11 @@ impl<'a> YamlParser<'a> {
                 self.scanner.advance_till_linebreak();
                 continue;
             }
-            if is_document_end_marker(trimmed_line) {
+            if is_document_end_marker(line) {
                 // Document end marker: leave it for the stream handler.
                 break;
             }
-            if is_document_start_marker(trimmed_line) {
+            if is_document_start_marker(line) {
                 // Document start marker: the mapping ends here.
                 break;
             }
@@ -1145,8 +1145,8 @@ impl<'a> YamlParser<'a> {
                         || next_indent < floor
                         || next_trimmed.is_empty()
                         || next_trimmed.starts_with('#')
-                        || is_document_start_marker(next_trimmed)
-                        || is_document_end_marker(next_trimmed)
+                        || is_document_start_marker(next_line)
+                        || is_document_end_marker(next_line)
                     {
                         break;
                     }

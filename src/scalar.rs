@@ -91,7 +91,10 @@ impl<'a> YamlParser<'a> {
         if let Some(line) = self.scanner.peek_line()
             && let Some(next_char) = line.trim_start_matches(' ').chars().next()
         {
-            if line == "..." {
+            // A document end marker is only a marker at column 0; a
+            // node that starts mid-line (e.g. `key: ...`) is the plain
+            // scalar `...`.
+            if self.scanner.next_pos.column == 1 && line == "..." {
                 return Ok(());
             }
             match next_char {
@@ -196,9 +199,9 @@ impl<'a> YamlParser<'a> {
             };
             let spaces = line.chars().take_while(|c| *c == ' ').count();
 
-            // The document end marker `...` terminates the block scalar
-            // even when it is as indented as the content.
-            if is_document_end_marker(line.trim_start_matches(' ')) {
+            // A document end marker at column 0 terminates the block
+            // scalar; an indented `...` is content.
+            if is_document_end_marker(line) {
                 break;
             }
 
@@ -742,6 +745,10 @@ impl<'a> YamlParser<'a> {
             self.scanner.remains()
         );
         let mut start_pos = self.scanner.next_pos;
+        // Whether the scalar starts at the beginning of a line: only
+        // then can its own first line be a document marker (e.g. the
+        // empty document between two `---` markers).
+        let starts_at_line_start = self.scanner.next_pos.column == 1;
         let mut string_to_fold: Vec<&str> = Vec::new();
         let mut is_first_line = true;
         while let Some(line) = self.scanner.peek_line() {
@@ -784,15 +791,20 @@ impl<'a> YamlParser<'a> {
                 is_first_line = false;
             }
 
-            // document end indicator (optionally followed by a comment)
-            if is_document_end_marker(line.trim_start_matches(' ')) {
+            // A document marker ends the scalar when it starts a line.
+            // An indented `...`/`---` and a scalar whose first line
+            // starts mid-line (e.g. `key: ...` is the plain scalar
+            // `...`) are ordinary content.
+            if (!first_line || starts_at_line_start)
+                && is_document_end_marker(line)
+            {
                 break;
             }
 
             // A `---` document start marker terminates the scalar too.
-            if line.trim_start_matches(' ').starts_with("---")
-                && (line.trim_start_matches(' ').len() == 3
-                    || line.trim_start_matches(' ').chars().nth(3) == Some(' '))
+            if (!first_line || starts_at_line_start)
+                && line.starts_with("---")
+                && (line.len() == 3 || line.chars().nth(3) == Some(' '))
             {
                 break;
             }
@@ -1014,10 +1026,10 @@ impl<'a> YamlParser<'a> {
                 if indent < rest_indent_count {
                     return false;
                 }
-                if is_document_end_marker(trimmed) {
+                if is_document_end_marker(line) {
                     return false;
                 }
-                if is_document_start_marker(trimmed) {
+                if is_document_start_marker(line) {
                     return false;
                 }
                 if self.cur_state().is_block_seq() && trimmed.starts_with("- ")
