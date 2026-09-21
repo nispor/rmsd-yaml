@@ -1,4 +1,34 @@
 # Changelog
+## [0.1.1] - 2026-09-21
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - parser: Recognize document markers only at column 0. (7be4263)
+ - parser: Attach explicit-key properties to the compact key node. (5e8eaff)
+ - value: preserve resolved tags in serde Value path. (7c6d52a)
+ - parser: Keep a lone explicit-key `?` from swallowing the value line. (fe8c807)
+ - parser: Enforce the 1024-character implicit key limit. (3f826e6)
+ - parser: Normalize CR/CRLF line breaks in scalars. (516079c)
+ - parser: Fix explicit-key edge cases for block mappings. (a62cab8)
+ - parser: Stop a comment after `key: ` from swallowing the next node. (b75432b)
+ - parser: Reject bare `,` at flow mapping entry start. (ecfb967)
+ - deserializer: Resolve type-forcing tags for concrete target types. (d1fd631)
+ - value: Treat repeated-sign float words as invalid numbers. (a892ffe)
+ - value: Restore radix-specific `as_i64` error messages. (c65e08c)
+ - serializer: Keep -0.0 a float when serializing. (9f7d080)
+ - serializer: Quote strings with a trailing blank so they round-trip. (1931d86)
+ - parser: Strip a leading UTF-8 BOM so it does not corrupt the first token. (66aa086)
+ - value: Reject null / bool / number scalars in `as_char`. (6ed0b1b)
+ - value: Accept all six YAML 1.2 Core Schema boolean spellings. (bccf2ba)
+ - serializer: Render non-finite floats as .inf / -.inf / .nan. (654bae0)
+ - value: Fix as_i64() rejecting i64::MIN in every radix. (3f0c6b6)
+ - value: Don't classify bare inf/nan/infinity words as YAML floats. (e4e319c)
+ - compose: reject near-limit alias expansion bombs. (0a80d73)
+
 ## [0.1.0] - 2026-08-13
 ### Breaking changes
  - N/A
