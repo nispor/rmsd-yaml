@@ -330,7 +330,7 @@ impl<'a> YamlParser<'a> {
                 had_any_document = true;
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
-            } else if is_document_end_marker(trimmed) {
+            } else if is_document_end_marker(line) {
                 if self.saw_directive && !doc_started {
                     return Err(Error::new(
                         ErrorKind::InvalidDirective,
@@ -1100,7 +1100,9 @@ impl<'a> YamlParser<'a> {
                         self.scanner.done_pos,
                     ));
                 }
-            } else if is_document_end_marker(trimmed) {
+            } else if self.scanner.next_pos.column == 1
+                && is_document_end_marker(line)
+            {
                 // Document end marker with an empty document: emit an
                 // empty scalar node (the stream handler emits the
                 // `DocumentEnd`).
@@ -1350,14 +1352,19 @@ pub(crate) fn find_key_value_separator(line: &str) -> Option<usize> {
     line.find(": ").or_else(|| line.find(":\t"))
 }
 
-/// Whether a trimmed line is a document start marker `---`, optionally
+/// Whether `line` is a document start marker `---`, optionally
 /// followed by separation (space or tab), a comment or nothing
 /// (YAML 1.2.2 SPEC, 6.3 / 9.1).
-pub(crate) fn is_document_start_marker(trimmed: &str) -> bool {
-    if trimmed == "---" {
+///
+/// A document marker is only recognized at the start of a line
+/// (column 0, YAML 1.2.2 SPEC, 9.1.2): an indented `---` is ordinary
+/// content. Callers must therefore pass the line as it appears in the
+/// input, without stripping its indentation.
+pub(crate) fn is_document_start_marker(line: &str) -> bool {
+    if line == "---" {
         return true;
     }
-    if let Some(rest) = trimmed.strip_prefix("---") {
+    if let Some(rest) = line.strip_prefix("---") {
         return rest.starts_with([' ', '\t']) || rest.starts_with('#');
     }
     false
@@ -1402,13 +1409,17 @@ pub(crate) fn tab_content_is_block_node(content: &str) -> bool {
     token.ends_with(':')
 }
 
-/// Whether a trimmed line is a document end marker `...`, optionally
-/// followed by a comment (YAML 1.2.2 SPEC, 9.3.2.3).
-pub(crate) fn is_document_end_marker(trimmed: &str) -> bool {
-    if trimmed == "..." {
+/// Whether `line` is a document end marker `...`, optionally followed
+/// by a comment (YAML 1.2.2 SPEC, 9.3.2.3).
+///
+/// As with [`is_document_start_marker`], the marker is only recognized
+/// at column 0; an indented `...` is ordinary content, so callers must
+/// pass the raw line.
+pub(crate) fn is_document_end_marker(line: &str) -> bool {
+    if line == "..." {
         return true;
     }
-    if let Some(rest) = trimmed.strip_prefix("...") {
+    if let Some(rest) = line.strip_prefix("...") {
         return rest.starts_with([' ', '\t'])
             && rest.trim_start_matches([' ', '\t']).starts_with('#');
     }
