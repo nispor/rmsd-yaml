@@ -37,10 +37,10 @@ impl std::fmt::Display for YamlPosition {
     }
 }
 
-impl TryFrom<&str> for YamlPosition {
-    type Error = Error;
+impl FromStr for YamlPosition {
+    type Err = Error;
 
-    fn try_from(value: &str) -> Result<Self, Error> {
+    fn from_str(value: &str) -> Result<Self, Error> {
         let err_msg = format!(
             "Expecting format `line [0-9]+ column [0-9]+`, but got: {value}"
         );
