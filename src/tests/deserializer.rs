@@ -606,6 +606,18 @@ fn test_deserialize_any_null_scalar_is_null() {
 }
 
 #[test]
+fn test_deserialize_any_empty_document_is_null() {
+    // An empty stream (or one holding only whitespace/comments) has no
+    // document, which the composer represents as `ValueData::Null`.
+    // `deserialize_any` used to reject that variant with an internal
+    // `ErrorKind::Bug` error instead of deserializing it as null.
+    for input in ["", "\n", "# comment only\n", "---\n"] {
+        let got: Value = from_str(input).unwrap();
+        assert!(got.is_null(), "{input:?} should deserialize to null");
+    }
+}
+
+#[test]
 fn test_deserialize_any_rejects_tags_for_generic_targets() {
     #[derive(Debug)]
     struct NoEnumProbe;

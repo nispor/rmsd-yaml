@@ -87,6 +87,7 @@ impl YamlDeserializer {
         V: Visitor<'de>,
     {
         match &self.parsed.data {
+            ValueData::Null => self.deserialize_unit(visitor),
             ValueData::String(_) => {
                 if self.parsed.is_null() {
                     self.deserialize_unit(visitor)
@@ -113,12 +114,6 @@ impl YamlDeserializer {
                 // transparently.
                 visitor.visit_enum(ValueEnumAccess::new(self.parsed.clone()))
             }
-            v => Err(Error::new(
-                ErrorKind::Bug,
-                format!("deserialize_any() got unexpected data {v:?}"),
-                self.parsed.start,
-                self.parsed.end,
-            )),
         }
     }
 
