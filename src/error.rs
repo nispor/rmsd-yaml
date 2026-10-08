@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use crate::YamlPosition;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -151,10 +153,10 @@ impl std::fmt::Display for ErrorKind {
     }
 }
 
-impl TryFrom<&str> for ErrorKind {
-    type Error = Error;
+impl FromStr for ErrorKind {
+    type Err = Error;
 
-    fn try_from(value: &str) -> Result<Self, Error> {
+    fn from_str(value: &str) -> Result<Self, Error> {
         Ok(match value {
             s if s == Self::Bug.to_string() => Self::Bug,
             _ => {
