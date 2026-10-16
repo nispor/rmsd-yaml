@@ -110,7 +110,11 @@ impl<'a> YamlParser<'a> {
                 }
                 '\'' => {
                     self.scanner.advance_till_non_space();
-                    self.handle_single_quoted_flow_scalar(anchor, tag)?;
+                    self.handle_single_quoted_flow_scalar(
+                        anchor,
+                        tag,
+                        rest_indent_count,
+                    )?;
                 }
                 '"' => {
                     self.scanner.advance_till_non_space();
@@ -361,10 +365,50 @@ impl<'a> YamlParser<'a> {
         Ok(())
     }
 
+    /// In block context, a continuation line of a quoted scalar must be
+    /// indented at least as much as the parent requires.
+    ///
+    /// YAML 1.2.2 SPEC, 7.3: both quoted styles route their continuation
+    /// lines through `s-flow-folded(n)` [74] -> `s-flow-line-prefix(n)`
+    /// [69] -> `s-indent(n)`, where `n` is one more than the parent
+    /// block collection's indentation ([197]). Empty (whitespace-only)
+    /// lines are exempt (production [70]).
+    ///
+    /// yaml-test-suite: wrong-indented-multiline-quoted-scalar. libyaml
+    /// accepts such input (its scanner never checks the indentation of a
+    /// quoted scalar continuation line), so this rejection is an
+    /// intentional divergence from libyaml.
+    fn check_quoted_scalar_continuation_indent(
+        &self,
+        min_indent: usize,
+    ) -> Result<(), Error> {
+        if !self.cur_state().is_flow()
+            && let Some(next_line) = self.scanner.peek_line()
+        {
+            let indent = next_line.chars().take_while(|c| *c == ' ').count();
+            if indent < min_indent
+                && !next_line.trim_matches([' ', '\t']).is_empty()
+            {
+                return Err(Error::new(
+                    ErrorKind::LessIndentedWithoutParent,
+                    format!(
+                        "A continuation line of a quoted scalar must be \
+                         indented at least {min_indent} spaces, but got: \
+                         {next_line:?}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn handle_single_quoted_flow_scalar(
         &mut self,
         anchor: Option<String>,
         tag: Option<String>,
+        min_indent: usize,
     ) -> Result<(), Error> {
         if self.scanner.next_char() != Some('\'') {
             return Err(Error::new(
@@ -395,6 +439,7 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_char();
                 }
                 self.check_quoted_scalar_document_marker()?;
+                self.check_quoted_scalar_continuation_indent(min_indent)?;
                 // Line breaks inside scalar content must be normalized
                 // to a single line feed (YAML 1.2.2 SPEC, 5.4,
                 // production [29]) before line folding applies.
@@ -650,30 +695,7 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_char();
                     }
                     self.check_quoted_scalar_document_marker()?;
-                    // In block context, continuation lines must be
-                    // indented at least as much as the parent requires
-                    // (yaml-test-suite:
-                    // wrong-indented-multiline-quoted-scalar).
-                    if !self.cur_state().is_flow()
-                        && let Some(next_line) = self.scanner.peek_line()
-                    {
-                        let indent =
-                            next_line.chars().take_while(|c| *c == ' ').count();
-                        if indent < min_indent
-                            && !next_line.trim_matches([' ', '\t']).is_empty()
-                        {
-                            return Err(Error::new(
-                                ErrorKind::LessIndentedWithoutParent,
-                                format!(
-                                    "A continuation line of a quoted scalar \
-                                     must be indented at least {min_indent} \
-                                     spaces, but got: {next_line:?}"
-                                ),
-                                self.scanner.next_pos,
-                                self.scanner.next_pos,
-                            ));
-                        }
-                    }
+                    self.check_quoted_scalar_continuation_indent(min_indent)?;
                     // Separation spaces at the end of the current line
                     // are a presentation detail; escaped content (e.g. a
                     // `\t` escape) is never trailing whitespace.
