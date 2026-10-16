@@ -322,20 +322,46 @@ fn test_implicit_key_length_limit() {
 fn test_line_break_normalization_in_scalars() {
     // YAML 1.2.2 SPEC, 5.4 (productions [28]/[29]): CRLF and CR
     // inside scalar content are normalized to LF before line folding.
-    assert_eq!(scalar_values("k: 'a\r\nb'\n"), vec!["k", "a b"]);
-    assert_eq!(scalar_values("k: 'a\rb'\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("k: 'a\r\n b'\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("k: 'a\r b'\n"), vec!["k", "a b"]);
     assert_eq!(scalar_values("[ a\r\nb ]\n"), vec!["a b"]);
     assert_eq!(scalar_values("[ a\rb ]\n"), vec!["a b"]);
     // Two normalized breaks fold to a line feed.
-    assert_eq!(scalar_values("k: 'a\r\n\r\nb'\n"), vec!["k", "a\nb"]);
+    assert_eq!(scalar_values("k: 'a\r\n\r\n b'\n"), vec!["k", "a\nb"]);
     assert_eq!(scalar_values("[ a\r\n\r\nb ]\n"), vec!["a\nb"]);
-    // Double-quoted continuation lines keep the indentation rule for
-    // every line break flavor (YAML 1.2.2 SPEC, 7.3.4 with
-    // production [197]).
-    assert!(YamlParser::parse_to_events("k: \"a\nb\"\n").is_err());
-    assert!(YamlParser::parse_to_events("k: \"a\r\nb\"\n").is_err());
-    assert!(YamlParser::parse_to_events("k: \"a\rb\"\n").is_err());
+    // A continuation line of a double- or single-quoted scalar in block
+    // context must be indented one space past the parent collection,
+    // for every line break flavor (YAML 1.2.2 SPEC, 7.3: both styles
+    // route continuation lines through `s-flow-folded(n)` [74] ->
+    // `s-flow-line-prefix(n)` [69], with `n` from production [197];
+    // yaml-test-suite: wrong-indented-multiline-quoted-scalar).
+    // libyaml accepts these, folding them to `a b`; that is a libyaml
+    // bug and this rejection is an intentional, spec-mandated
+    // divergence.
+    for src in [
+        "k: \"a\nb\"\n",
+        "k: \"a\r\nb\"\n",
+        "k: \"a\rb\"\n",
+        "k: 'a\nb'\n",
+        "k: 'a\r\nb'\n",
+        "k: 'a\rb'\n",
+        "---\nquoted: \"a\nb\nc\"\n",
+        "---\nquoted: 'a\nb\nc'\n",
+        "- \"a\nb\"\n",
+        "- 'a\nb'\n",
+    ] {
+        assert!(
+            YamlParser::parse_to_events(src).is_err(),
+            "expected an error for {src:?}"
+        );
+    }
+    // Indented continuation lines stay valid for both styles and all
+    // break flavors; a whitespace-only line is exempt from the
+    // indentation floor (production [70]).
+    assert_eq!(scalar_values("k: \"a\n b\"\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("k: 'a\n b'\n"), vec!["k", "a b"]);
     assert_eq!(scalar_values("k: \"a\r\n b\"\n"), vec!["k", "a b"]);
+    assert_eq!(scalar_values("k: 'a\n\n b'\n"), vec!["k", "a\nb"]);
 }
 
 #[test]

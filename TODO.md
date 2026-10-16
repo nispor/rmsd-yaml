@@ -1,7 +1,3 @@
-- Divergence from libyaml (stricter, spec-supported): a lone `\r`
-  line break inside a double-quoted scalar in block context is
-  rejected by the continuation-line indentation rule (production
-  [197]), while libyaml folds `k: "a\rb"` to `a b`.
 - Streaming `Deserializer` (incremental, without the intermediate
   `YamlValue` tree)
 - Multi-document stream parsing (a lazy, per-document iterator

@@ -1248,7 +1248,9 @@ impl<'a> YamlParser<'a> {
             Some('"') => {
                 self.handle_double_quoted_flow_scalar(anchor, tag, 0)?
             }
-            Some('\'') => self.handle_single_quoted_flow_scalar(anchor, tag)?,
+            Some('\'') => {
+                self.handle_single_quoted_flow_scalar(anchor, tag, 0)?
+            }
             Some(',') | Some(']') | Some('}') | None => {
                 // Empty node, e.g. an omitted value in a flow mapping.
                 let pos = self.scanner.next_pos;
