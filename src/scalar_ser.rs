@@ -162,6 +162,12 @@ pub(crate) fn escape_double_quoted(input: &str) -> String {
             c if (c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32)) => {
                 out.push_str(&format!("\\x{:02X}", c as u32));
             }
+            // `\u` takes exactly four hex digits and `\U` exactly
+            // eight (YAML 1.2.2 SPEC, productions [45]/[46]); astral
+            // characters therefore need the `\U` form.
+            c if (c as u32) > 0xFFFF => {
+                out.push_str(&format!("\\U{:08X}", c as u32));
+            }
             c if (c as u32) > 0xFF => {
                 out.push_str(&format!("\\u{:04X}", c as u32));
             }
@@ -366,6 +372,16 @@ mod tests {
         assert_eq!(to_scalar_string(0, "a b\t", 80), "\"a b\\t\"");
         // The leading-blank edge is already quoted by the first-char rule.
         assert_eq!(to_scalar_string(0, " leading", 80), "\" leading\"");
+    }
+
+    #[test]
+    fn test_astral_characters_use_uppercase_u_escape() {
+        // `\u` is limited to four hex digits; astral characters need
+        // `\U` with eight (YAML 1.2.2 SPEC, productions [45]/[46]).
+        assert_eq!(escape_double_quoted("😀"), "\\U0001F600");
+        assert_eq!(escape_double_quoted("\u{10000}"), "\\U00010000");
+        // A BMP non-ASCII character still uses `\u` when escaped.
+        assert_eq!(escape_double_quoted("\u{2028}"), "\\u2028");
     }
 
     #[test]

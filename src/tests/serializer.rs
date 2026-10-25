@@ -344,3 +344,21 @@ fn test_noncharacters_are_escaped() {
         assert_eq!(back, input);
     }
 }
+
+#[test]
+fn test_astral_characters_round_trip() {
+    // An astral character must be rendered with `\U........` (eight hex
+    // digits). It used to be rendered as `\u1F600`, which is invalid
+    // YAML and did not round-trip.
+    let value = Value::from_str("\"😀\"").unwrap();
+    let out = value.to_string().unwrap();
+    assert_eq!(out, "\"\\U0001F600\"\n");
+    let back = Value::from_str(&out).unwrap();
+    assert_eq!(back.as_str().unwrap(), "😀");
+
+    let input = String::from("😀\"");
+    let out = to_string(&input).unwrap();
+    assert!(out.contains("\\U0001F600"), "got: {out:?}");
+    let back: String = from_str(&out).unwrap();
+    assert_eq!(back, input);
+}
