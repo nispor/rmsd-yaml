@@ -518,7 +518,12 @@ impl<'a> YamlParser<'a> {
         }
         if trimmed.starts_with('%') {
             // Reserved directive: ignored with a warning (YAML 1.2.2
-            // SPEC, 6.11).
+            // SPEC, 6.11). A directive still needs a name: the `%`
+            // must be followed by at least one non-space character.
+            let name = &trimmed[1..];
+            if name.is_empty() || name.starts_with([' ', '\t']) {
+                return Err(self.invalid_directive(trimmed));
+            }
             self.saw_directive = true;
             self.scanner.advance_till_linebreak();
             return Ok(true);
@@ -1613,8 +1618,10 @@ fn is_valid_tag_handle(s: &str) -> bool {
         return true;
     }
     if let Some(name) = s.strip_prefix('!').and_then(|r| r.strip_suffix('!')) {
+        // The handle name is `ns-word-char+` (ASCII letters, digits
+        // and `-`); YAML 1.2.2 SPEC, production [97].
         return !name.is_empty()
-            && !name.contains([' ', '\t', ',', '[', ']', '{', '}']);
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
     }
     false
 }

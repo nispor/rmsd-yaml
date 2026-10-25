@@ -193,3 +193,40 @@ fn test_tag_directive_with_trailing_comment() {
         )]
     );
 }
+
+#[test]
+fn test_reserved_directive_requires_a_name() {
+    // `%` must be followed by a directive name (`ns-char+`, YAML
+    // 1.2.2 SPEC, production [84]); a bare `%` is not a directive.
+    for input in ["%\n---\nx\n", "% \n---\nx\n", "%\t\n---\nx\n"] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidDirective, "{input:?}");
+    }
+    // A named reserved directive is ignored.
+    assert_eq!(
+        scalar_events("%FOO bar baz\n--- \"foo\"\n"),
+        vec![(None, "foo".into())]
+    );
+}
+
+#[test]
+fn test_tag_handle_name_restricted_to_word_characters() {
+    // A named handle is `!` `ns-word-char+` `!` (YAML 1.2.2 SPEC,
+    // production [97]); `.` and an inner `!` are not word characters.
+    for input in [
+        "%TAG !a.b! tag:example.com,2000:app/\n---\n!a.b!s v\n",
+        "%TAG !a!b! tag:example.com,2000:app/\n---\n!a!b!s v\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidDirective, "{input:?}");
+    }
+
+    // Letters, digits and `-` are valid handle-name characters.
+    let events = scalar_events(
+        "%TAG !a-b2! tag:example.com,2000:app/\n---\n!a-b2!s v\n",
+    );
+    assert_eq!(
+        events,
+        vec![(Some("<tag:example.com,2000:app/s>".into()), "v".into())]
+    );
+}
