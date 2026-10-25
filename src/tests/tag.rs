@@ -323,3 +323,30 @@ fn test_invalid_verbatim_tags() {
         vec![(Some("<tag:yaml.org,2002:str>".into()), "baz".into())]
     );
 }
+
+#[test]
+fn test_verbatim_tag_requires_separation_before_content() {
+    // A verbatim tag ends at `>`, so content on the same line needs
+    // separation (YAML 1.2.2 SPEC, production [159]).
+    for input in [
+        "!<tag:yaml.org,2002:str>foo\n",
+        "!<tag:yaml.org,2002:str>\"foo\"\n",
+        "!<tag:yaml.org,2002:str>#comment\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidTag, "{input:?}");
+    }
+
+    // Separation, an empty tagged node in flow, and the `:` value
+    // indicator are fine.
+    assert_eq!(
+        scalar_events("!<tag:yaml.org,2002:str> foo\n"),
+        vec![(Some("<tag:yaml.org,2002:str>".into()), "foo".into())]
+    );
+    assert!(
+        YamlParser::parse_to_events("[!<tag:yaml.org,2002:str>, x]\n").is_ok()
+    );
+    assert!(
+        YamlParser::parse_to_events("{!<tag:yaml.org,2002:str>: v}\n").is_ok()
+    );
+}

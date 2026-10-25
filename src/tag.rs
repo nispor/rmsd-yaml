@@ -44,10 +44,11 @@ impl<'a> YamlParser<'a> {
         }
         // Consume the separating character (space or line break)
         // following the tag token.
-        if matches!(
+        let separated = matches!(
             self.scanner.peek_char(),
             Some(' ') | Some('\t') | Some('\n') | Some('\r')
-        ) {
+        );
+        if separated {
             self.scanner.next_char();
         }
 
@@ -66,6 +67,20 @@ impl<'a> YamlParser<'a> {
             // (verbatim tags are not resolved), and a global tag must
             // be an absolute URI with a scheme (Example 6.25).
             if !is_valid_verbatim_tag(inner) {
+                return Err(self.invalid_tag(&tag_name));
+            }
+            // Verbatim tags have an explicit `>` terminator, so a
+            // following same-line content must be separated by white
+            // space (YAML 1.2.2 SPEC, production [159]: properties
+            // plus `s-separate` before content). Flow terminators and
+            // the `:` value indicator are allowed because they follow
+            // an empty tagged node.
+            if !separated
+                && !matches!(
+                    self.scanner.peek_char(),
+                    None | Some(',') | Some(']') | Some('}') | Some(':')
+                )
+            {
                 return Err(self.invalid_tag(&tag_name));
             }
             return Ok(Some(format!("<{inner}>")));
