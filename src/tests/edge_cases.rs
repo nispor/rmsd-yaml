@@ -869,3 +869,22 @@ fn test_flow_plain_scalar_tab_separation() {
     assert_eq!(scalar_values("[a\t]\n"), vec!["a"]);
     assert_eq!(scalar_values("[a\t\n b]\n"), vec!["a b"]);
 }
+
+#[test]
+fn test_block_scalar_ends_at_document_start_marker() {
+    // A `---` at column 0 is a document start marker and must end a
+    // root block scalar whose content indentation is 0 (YAML 1.2.2
+    // SPEC, production [206]). It used to be swallowed as content.
+    for input in ["|\n---\nx\n", "|\n--- # c\nx\n"] {
+        let err = input.parse::<crate::Value>().unwrap_err();
+        assert_eq!(
+            err.kind(),
+            crate::ErrorKind::NoSupportMultipleDocuments,
+            "{input:?}"
+        );
+    }
+
+    // `---x` has no separation after the marker, so it is content.
+    let value: crate::Value = "|\n---x\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "---x\n");
+}
