@@ -858,3 +858,14 @@ fn test_directives_require_explicit_document_start() {
         "%YAML 1.2\n# comment\n\n---\nfoo\n".parse().unwrap();
     assert_eq!(value.as_str().unwrap(), "foo");
 }
+
+#[test]
+fn test_flow_plain_scalar_tab_separation() {
+    // Tabs are separation white space in flow context: they start a
+    // comment and are excluded from plain-scalar content, including at
+    // a fold point (YAML 1.2.2 SPEC, 6.5/7.4).
+    assert_eq!(scalar_values("[a\t#c\n]\n"), vec!["a"]);
+    assert_eq!(scalar_values("[a\t, b]\n"), vec!["a", "b"]);
+    assert_eq!(scalar_values("[a\t]\n"), vec!["a"]);
+    assert_eq!(scalar_values("[a\t\n b]\n"), vec!["a b"]);
+}
