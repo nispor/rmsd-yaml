@@ -279,4 +279,3 @@ fn test_block_scalar_zero_indentation_after_chomping_is_rejected() {
     assert!(YamlParser::parse_to_events("|+2\n   a\n").is_ok());
     assert!(YamlParser::parse_to_events("|-2\n   a\n").is_ok());
 }
-

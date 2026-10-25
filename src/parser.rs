@@ -418,8 +418,8 @@ impl<'a> YamlParser<'a> {
                     // bare document.
                     return Err(Error::new(
                         ErrorKind::InvalidDirective,
-                        "Directives must be followed by an explicit \
-                         document start marker `---`"
+                        "Directives must be followed by an explicit document \
+                         start marker `---`"
                             .to_string(),
                         self.scanner.next_pos,
                         self.scanner.next_pos,
@@ -530,11 +530,10 @@ impl<'a> YamlParser<'a> {
             self.scanner.advance_till_linebreak();
             return Ok(true);
         }
-        if trimmed.starts_with('%') {
+        if let Some(name) = trimmed.strip_prefix('%') {
             // Reserved directive: ignored with a warning (YAML 1.2.2
             // SPEC, 6.11). A directive still needs a name: the `%`
             // must be followed by at least one non-space character.
-            let name = &trimmed[1..];
             if name.is_empty() || name.starts_with([' ', '\t']) {
                 return Err(self.invalid_directive(trimmed));
             }

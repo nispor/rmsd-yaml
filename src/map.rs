@@ -10,8 +10,8 @@ use crate::{
     YamlParser, YamlPosition, YamlScalarStyle, YamlState,
     parser::{
         find_key_value_separator, flow_collection_is_key,
-        is_document_end_marker, is_document_start_marker,
-        strip_inline_comment, tab_content_is_block_node,
+        is_document_end_marker, is_document_start_marker, strip_inline_comment,
+        tab_content_is_block_node,
     },
 };
 
@@ -1334,7 +1334,9 @@ impl<'a> YamlParser<'a> {
                     // indented markers are ordinary flow content
                     // (YAML 1.2.2 SPEC, production [206]).
                     if (line.starts_with('\t') && !trimmed.is_empty())
-                        || crate::parser::starts_with_document_marker_token(line)
+                        || crate::parser::starts_with_document_marker_token(
+                            line,
+                        )
                     {
                         return Err(Error::new(
                             ErrorKind::InvalidStartOfToken,

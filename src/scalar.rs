@@ -208,8 +208,7 @@ impl<'a> YamlParser<'a> {
             // scalar; an indented `...`/`---` is content, and so is a
             // `---x` without separation (YAML 1.2.2 SPEC, production
             // [206]).
-            if is_document_end_marker(line) || is_document_start_marker(line)
-            {
+            if is_document_end_marker(line) || is_document_start_marker(line) {
                 break;
             }
             if starts_with_document_marker_token(line) {
@@ -1141,8 +1140,8 @@ impl<'a> YamlParser<'a> {
                 let source_content = source_line.trim_start_matches(' ');
                 let second_char = source_content.chars().nth(1);
                 match first_char {
-                    ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
-                    | '>' | '\'' | '"' | '@' | '`' | '%' => {
+                    ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!'
+                    | '|' | '>' | '\'' | '"' | '@' | '`' | '%' => {
                         return Err(Error::new(
                             ErrorKind::InvalidPlainScalarStart,
                             format!(
