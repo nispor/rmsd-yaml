@@ -427,3 +427,14 @@ fn test_multiline_plain_and_single_quoted_round_trip() {
         );
     }
 }
+
+#[test]
+fn test_leading_byte_order_mark_round_trips() {
+    // A leading U+FEFF is a stream byte order mark, not content; it
+    // must be escaped when serializing a string that starts with one.
+    let input = String::from("\u{feff}abc");
+    let out = to_string(&input).unwrap();
+    assert_eq!(out, "\"\\uFEFFabc\"\n");
+    let back: String = from_str(&out).unwrap();
+    assert_eq!(back, input);
+}
