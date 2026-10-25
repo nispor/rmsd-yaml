@@ -233,16 +233,34 @@ pub(crate) fn to_out_yaml_scalar_sq(
     if !input.contains('\n') {
         return format!("'{}'", input.replace('\'', "''"));
     }
+    // In a single-quoted scalar, a line break folds into a space unless
+    // it is followed by an empty line; each content line break is
+    // therefore written as a physical line break plus an empty line
+    // (YAML 1.2.2 SPEC, 6.5). Empty content lines contribute no text of
+    // their own, they only mean another line break.
+    let mut parts = input.split('\n');
+    let first = parts.next().unwrap_or_default();
+    let mut lines: Vec<&str> = vec![first];
+    for part in parts {
+        lines.push("");
+        if !part.is_empty() {
+            lines.push(part);
+        }
+    }
+    if input.ends_with('\n') {
+        // The closing quote's line must be preceded by a real empty
+        // line to retain a trailing content line break.
+        lines.push("");
+    }
     let mut out = String::from("'");
-    let lines: Vec<&str> = input.split('\n').collect();
     for (i, line) in lines.iter().enumerate() {
-        if i > 0 && indent_continuation && !line.is_empty() {
-            out.push_str("  ");
+        if i > 0 {
+            out.push('\n');
+            if indent_continuation && !line.is_empty() {
+                out.push_str("  ");
+            }
         }
         out.push_str(&line.replace('\'', "''"));
-        if i + 1 < lines.len() {
-            out.push('\n');
-        }
     }
     out.push('\'');
     out
