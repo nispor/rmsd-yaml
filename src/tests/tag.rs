@@ -299,3 +299,27 @@ fn test_tag_prefix_syntax() {
     let events = scalar_events("%TAG !e! !%74local\n---\n!e!s v\n");
     assert_eq!(events, vec![(Some("<!tlocals>".into()), "v".into())]);
 }
+
+#[test]
+fn test_invalid_verbatim_tags() {
+    // Verbatim tags are `!<` + `ns-uri-char+` + `>` and must not be
+    // just `!` (YAML 1.2.2 SPEC, production [98], Example 6.25).
+    for input in [
+        "!<!> foo\n",
+        "!<a\"b> foo\n",
+        "!<a b> foo\n",
+        "!<$:?> foo\n",
+        "!<relative/path> foo\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidTag, "{input:?}");
+    }
+    // Valid verbatim local and global tags still work.
+    let events = scalar_events("!<!bar> baz\n");
+    assert_eq!(events, vec![(Some("<!bar>".into()), "baz".into())]);
+    let events = scalar_events("!<tag:yaml.org,2002:str> baz\n");
+    assert_eq!(
+        events,
+        vec![(Some("<tag:yaml.org,2002:str>".into()), "baz".into())]
+    );
+}
