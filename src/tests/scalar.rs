@@ -265,3 +265,17 @@ fn crlf_block_scalar() {
     let s2 = &s2v[1];
     assert_eq!(s2, "line1 line2\n", "got {s2:?}");
 }
+
+#[test]
+fn test_block_scalar_zero_indentation_after_chomping_is_rejected() {
+    // The indentation indicator is `[1-9]`, whether it precedes or
+    // follows the chomping indicator (YAML 1.2.2 SPEC, production
+    // [162]). `|+0` / `|-0` used to accept the invalid zero.
+    for input in ["|+0\n a\n", "|-0\n a\n", ">+0\n a\n", ">-0\n a\n"] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidStartOfToken);
+    }
+    // Non-zero indicators after the chomping indicator still work.
+    assert!(YamlParser::parse_to_events("|+2\n   a\n").is_ok());
+    assert!(YamlParser::parse_to_events("|-2\n   a\n").is_ok());
+}
