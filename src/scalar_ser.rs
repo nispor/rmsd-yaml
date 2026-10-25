@@ -13,7 +13,13 @@ pub(crate) fn to_scalar_string(
     if needs_double_quote(input) {
         return format!("\"{}\"", escape_double_quoted(input));
     }
-    if indent_count + input.chars().count() < max_width {
+    if max_width == 0 || indent_count + input.chars().count() < max_width {
+        input.to_string()
+    } else if input.contains("  ") {
+        // Folding replaces the line break with a single space, so a
+        // run of consecutive spaces would collapse if the fold point
+        // split it. Keep such a scalar on one line instead (a long
+        // line is still valid YAML).
         input.to_string()
     } else {
         // Break the long line with double-quoted folding: each folded
@@ -86,6 +92,9 @@ fn needs_double_quote(input: &str) -> bool {
         return true;
     }
     input.contains(": ")
+        // A trailing `:` would be read as a mapping value indicator
+        // when the scalar is used as a block value (e.g. `key: foo:`).
+        || input.ends_with(':')
         || input.contains(" #")
         || input.contains('"')
         || input.contains('\\')
@@ -382,6 +391,25 @@ mod tests {
         assert_eq!(escape_double_quoted("\u{10000}"), "\\U00010000");
         // A BMP non-ASCII character still uses `\u` when escaped.
         assert_eq!(escape_double_quoted("\u{2028}"), "\\u2028");
+    }
+
+    #[test]
+    fn test_long_line_with_repeated_spaces_is_not_folded() {
+        // Folding a line break to a single space must not collapse a
+        // run of spaces. Such a scalar is kept on one line.
+        let input = format!("{}  {}", "x".repeat(40), "y".repeat(40));
+        assert_eq!(to_scalar_string(0, &input, 40), input);
+    }
+
+    #[test]
+    fn test_max_width_zero_means_no_limit() {
+        let long = "word ".repeat(30) + "end";
+        assert_eq!(to_scalar_string(0, &long, 0), long);
+    }
+
+    #[test]
+    fn test_trailing_colon_is_quoted() {
+        assert_eq!(to_scalar_string(0, "foo:", 80), "\"foo:\"");
     }
 
     #[test]

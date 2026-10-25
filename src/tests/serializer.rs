@@ -362,3 +362,36 @@ fn test_astral_characters_round_trip() {
     let back: String = from_str(&out).unwrap();
     assert_eq!(back, input);
 }
+
+#[test]
+fn test_long_scalar_folding_preserves_content() {
+    // Folding a long scalar inserts a line break that re-parses as a
+    // single space; runs of spaces must not be collapsed in the
+    // process.
+    let input = format!("{}  {}", "x".repeat(40), "y".repeat(40));
+    let out = to_string(&input).unwrap();
+    let back: String = from_str(&out).unwrap();
+    assert_eq!(back, input);
+
+    // `max_width: 0` means no limit (the option's documented
+    // behavior), so the long line is emitted as-is.
+    let out = to_string_with_opt(
+        &input,
+        YamlSerializeOption {
+            max_width: 0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(out, format!("{input}\n"));
+}
+
+#[test]
+fn test_string_ending_with_colon_round_trips() {
+    // An unquoted trailing `:` would be a mapping value indicator.
+    let input = String::from("foo:");
+    let out = to_string(&input).unwrap();
+    assert_eq!(out, "\"foo:\"\n");
+    let back: String = from_str(&out).unwrap();
+    assert_eq!(back, input);
+}
