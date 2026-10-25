@@ -61,7 +61,11 @@ impl<'a> YamlParser<'a> {
             let Some(inner) = inner.strip_suffix('>') else {
                 return Err(self.invalid_tag(&tag_name));
             };
-            if inner.is_empty() || inner.contains([' ', '\t']) {
+            // c-verbatim-tag is `!<` `ns-uri-char+` `>` (YAML 1.2.2
+            // SPEC, production [98]). A lone `!` is explicitly invalid
+            // (verbatim tags are not resolved), and a global tag must
+            // be an absolute URI with a scheme (Example 6.25).
+            if !is_valid_verbatim_tag(inner) {
                 return Err(self.invalid_tag(&tag_name));
             }
             return Ok(Some(format!("<{inner}>")));
@@ -215,6 +219,27 @@ pub(crate) fn is_valid_tag_prefix(s: &str) -> bool {
         return false;
     };
     is_uri_chars(&s[first_len..], false)
+}
+
+/// Whether `inner` (the text between `!<` and `>`) is a local tag
+/// (starting with `!`) or an absolute URI with a scheme (YAML 1.2.2
+/// SPEC, production [98] and Example 6.25).
+fn is_valid_verbatim_tag(inner: &str) -> bool {
+    if inner.is_empty() || inner == "!" || !is_uri_chars(inner, false) {
+        return false;
+    }
+    if inner.starts_with('!') {
+        return true;
+    }
+    let Some((scheme, _)) = inner.split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// Decode `%XX` URI escapes in a tag prefix or suffix (e.g. `%21` -> `!`).
