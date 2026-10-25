@@ -670,18 +670,26 @@ fn str_is_integer(s: &str) -> bool {
         return false;
     }
     if s.starts_with("0x") | s.starts_with("0X") {
-        s[2..].chars().all(|c| c.is_ascii_hexdigit())
+        let digits = &s[2..];
+        !digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit())
     } else if s.starts_with("0o") | s.starts_with("0O") {
-        s[2..].chars().all(|c| c.is_digit(8))
+        let digits = &s[2..];
+        !digits.is_empty() && digits.chars().all(|c| c.is_digit(8))
     } else if s.starts_with("0b") | s.starts_with("0B") {
-        s[2..].chars().all(|c| c.is_digit(2))
+        let digits = &s[2..];
+        !digits.is_empty() && digits.chars().all(|c| c.is_digit(2))
     } else {
         s.chars().all(|c| c.is_ascii_digit())
     }
 }
 
+/// Whether `s` matches the YAML 1.2.2 Core Schema float production
+/// (SPEC, 10.3.2), excluding integer spellings: a scalar without a `.`
+/// or an exponent resolves as an integer first (the Core Schema checks
+/// int before float), so `1` is not a float even though the float
+/// production's `[0-9]+` alternative would also match it.
 fn str_is_float(s: &str) -> bool {
-    matches!(
+    if matches!(
         s,
         ".inf"
             | ".Inf"
@@ -695,7 +703,54 @@ fn str_is_float(s: &str) -> bool {
             | ".nan"
             | ".NaN"
             | ".NAN"
-    ) || !is_rust_float_word(s) && s.parse::<f64>().is_ok()
+    ) {
+        return true;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    if matches!(bytes.first(), Some(b'+') | Some(b'-')) {
+        i += 1;
+    }
+    let mut digits_before = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+        digits_before += 1;
+    }
+    let mut has_dot = false;
+    let mut digits_after_dot = 0usize;
+    if i < bytes.len() && bytes[i] == b'.' {
+        has_dot = true;
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+            digits_after_dot += 1;
+        }
+    }
+    // Without leading digits the dot alternative requires at least one
+    // digit after it (`\.[0-9]+`); `.` and `.e5` are not floats.
+    if digits_before == 0 && (!has_dot || digits_after_dot == 0) {
+        return false;
+    }
+    let mut has_exponent = false;
+    if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+        has_exponent = true;
+        i += 1;
+        if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {
+            i += 1;
+        }
+        let exponent_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == exponent_start {
+            return false;
+        }
+    }
+    if i != bytes.len() {
+        return false;
+    }
+    // A plain integer is resolved as an int, not a float.
+    has_dot || has_exponent
 }
 
 /// Whether `s`, after an optional sign, is one of the bare words that

@@ -901,3 +901,63 @@ fn test_leading_bom_is_stripped_before_the_first_token() {
     let v3: Value = from_str(&mid).unwrap();
     assert_eq!(v3.get("a").unwrap().as_str().unwrap(), "\u{feff}b");
 }
+
+#[test]
+fn test_bare_radix_prefixes_are_strings() {
+    // `0x`, `0o` and `0b` without digits are not integers (the Core
+    // Schema requires at least one digit); they are ordinary strings.
+    for s in ["0x", "0o", "0b", "0X", "0O", "0B"] {
+        let value = crate::Value::from_str(s).unwrap();
+        assert!(!value.is_integer(), "{s:?}");
+        assert!(!value.is_signed_integer(), "{s:?}");
+        let got: Value = from_str(s).unwrap();
+        assert_eq!(got.as_str().unwrap(), s);
+    }
+}
+
+#[test]
+fn test_integer_spellings_are_not_floats() {
+    // The Core Schema resolves int before float (YAML 1.2.2 SPEC,
+    // 10.3), so an integer spelling must not report `is_float`.
+    for s in [
+        "0", "42", "-42", "+42", "0x10", "0o20", "0b10", "-0x10",
+    ] {
+        let value = crate::Value::from_str(s).unwrap();
+        assert!(
+            value.is_integer() || value.is_signed_integer(),
+            "{s:?} should be an integer"
+        );
+        assert!(!value.is_float(), "{s:?} should not be a float");
+    }
+    // Genuine float spellings still report as floats.
+    for s in ["1.5", "-2.5", "+0.5", "5.", ".5", "1e3", "1.5E-2"] {
+        let value = crate::Value::from_str(s).unwrap();
+        assert!(value.is_float(), "{s:?} should be a float");
+        assert!(!value.is_integer(), "{s:?} should not be an integer");
+    }
+}
+
+#[test]
+fn test_bare_dot_is_not_a_float() {
+    // The Core Schema float production requires a digit after the dot
+    // when there are no leading digits (`.5`), so `.`, `+.`, `-.` and
+    // `.e5` are ordinary strings (YAML 1.2.2 SPEC, 10.3.2).
+    for s in [".", "+.", "-.", ".e5", "+.e5", "-.e5"] {
+        let value = crate::Value::from_str(s).unwrap();
+        assert!(!value.is_float(), "{s:?} should not be a float");
+        assert!(value.as_f64().is_err(), "{s:?} should not parse as f64");
+        assert_eq!(value.as_str().unwrap(), s);
+
+        // The serde path used to select f64 and then fail because the
+        // malformed spelling cannot be parsed as a number.
+        let got: Value = from_str(s).unwrap();
+        assert_eq!(got.as_str().unwrap(), s);
+    }
+
+    // A dot with digits on either side, or an exponent after an
+    // integer, is still a float.
+    for s in [".5", "+.5", "-.5", "5.", "5.e3", "1e3"] {
+        let value = crate::Value::from_str(s).unwrap();
+        assert!(value.is_float(), "{s:?} should be a float");
+    }
+}
