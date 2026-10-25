@@ -257,10 +257,12 @@ impl<'a> YamlParser<'a> {
                 // Comment lines are ignored at stream level.
                 self.scanner.advance_till_linebreak();
             } else if doc_terminated
-                && trimmed.starts_with('%')
-                && self.handle_directive(trimmed)?
+                && line.starts_with('%')
+                && self.handle_directive(line)?
             {
-                // `%YAML`, `%TAG` or a reserved directive.
+                // `%YAML`, `%TAG` or a reserved directive. Directives
+                // must sit on a non-indented line (YAML 1.2.2 SPEC,
+                // 6.8).
             } else if line == "---" {
                 // A document start marker is only recognized at column
                 // 0 (YAML 1.2.2 SPEC, 9.1.2); an indented `---` is
@@ -353,6 +355,11 @@ impl<'a> YamlParser<'a> {
                 self.tag_handles.clear();
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
+            } else if trimmed.starts_with('%') {
+                // A directive must start at column 0 (YAML 1.2.2 SPEC,
+                // 6.8); an indented `%` cannot start a YAML node
+                // either.
+                return Err(self.invalid_directive(line));
             } else {
                 if !doc_terminated {
                     return Err(Error::new(

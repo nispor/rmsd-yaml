@@ -701,3 +701,16 @@ fn test_document_start_marker_only_at_column_zero() {
     assert_eq!(scalar_values("a\n---#x\n"), vec!["a ---#x"]);
     assert_eq!(scalar_values("a\n\n---#x\n"), vec!["a\n---#x"]);
 }
+
+#[test]
+fn test_indented_directive_is_rejected() {
+    // Directives must sit on a non-indented line (YAML 1.2.2 SPEC,
+    // 6.8); an indented `%YAML` used to be accepted as a directive.
+    for input in ["  %YAML 1.2\n---\nx\n", "\t%YAML 1.2\n---\nx\n"] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidDirective);
+    }
+    // A directive at column 0 still works.
+    let value: crate::Value = crate::from_str("%YAML 1.2\n---\nx\n").unwrap();
+    assert_eq!(value.as_str().unwrap(), "x");
+}
