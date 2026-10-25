@@ -826,3 +826,14 @@ fn test_raw_non_printable_characters_are_rejected() {
     assert_eq!(err.kind(), crate::ErrorKind::InvalidCharacter);
     assert_eq!(err.start_pos(), crate::YamlPosition::new(1, 4));
 }
+
+#[test]
+fn test_block_scalar_header_accepts_tab_separation() {
+    // The block scalar header is followed by `s-b-comment`, whose
+    // separation is `s-separate-in-line` (spaces or tabs), so a tab
+    // before the line break or a comment is valid (YAML 1.2.2 SPEC,
+    // productions [66]/[77]/[162]).
+    assert_eq!(scalar_values("|\t\n text\n"), vec!["text\n"]);
+    assert_eq!(scalar_values("| \t# comment\n text\n"), vec!["text\n"]);
+    assert_eq!(scalar_values("|2\t# comment\n  text\n"), vec!["text\n"]);
+}

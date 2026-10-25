@@ -179,7 +179,9 @@ impl<'a> YamlScanner<'a> {
                     }
                     break;
                 }
-                ' ' => {
+                ' ' | '\t' => {
+                    // Comment separation includes tabs (YAML 1.2.2
+                    // SPEC, `s-separate-in-line` / `s-b-comment`).
                     saw_space = true;
                     continue;
                 }
