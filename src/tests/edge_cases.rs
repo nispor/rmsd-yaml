@@ -888,3 +888,27 @@ fn test_block_scalar_ends_at_document_start_marker() {
     let value: crate::Value = "|\n---x\n".parse().unwrap();
     assert_eq!(value.as_str().unwrap(), "---x\n");
 }
+
+#[test]
+fn test_indented_document_markers_are_flow_content() {
+    // Document markers are only special at column 0, so an indented
+    // `---`/`...` inside a flow collection is ordinary content
+    // (YAML 1.2.2 SPEC, production [206]). They used to be rejected.
+    assert_eq!(scalar_values("[ a\n  --- ]\n"), vec!["a ---"]);
+    assert_eq!(scalar_values("[ a\n  ... ]\n"), vec!["a ..."]);
+    assert_eq!(scalar_values("[ a\n  --- x ]\n"), vec!["a --- x"]);
+    assert_eq!(
+        scalar_values("{k: a\n  --- }\n"),
+        vec!["k", "a ---"]
+    );
+    // A `---x` without separation is content even at column 0.
+    assert_eq!(scalar_values("[a\n---x ]\n"), vec!["a ---x"]);
+
+    // A real document marker at column 0 inside flow is still an error.
+    for input in ["[a\n--- ]\n", "[a\n... ]\n"] {
+        assert!(
+            YamlParser::parse_to_events(input).is_err(),
+            "{input:?} should be rejected"
+        );
+    }
+}

@@ -1330,9 +1330,11 @@ impl<'a> YamlParser<'a> {
                     self.scanner.remains().split(['\n', '\r']).nth(1)
                 {
                     let trimmed = line.trim_start_matches([' ', '\t']);
+                    // Only column-0 document markers are forbidden;
+                    // indented markers are ordinary flow content
+                    // (YAML 1.2.2 SPEC, production [206]).
                     if (line.starts_with('\t') && !trimmed.is_empty())
-                        || trimmed.starts_with("---")
-                        || trimmed.starts_with("...")
+                        || crate::parser::starts_with_document_marker_token(line)
                     {
                         return Err(Error::new(
                             ErrorKind::InvalidStartOfToken,

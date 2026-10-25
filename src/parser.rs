@@ -537,11 +537,14 @@ impl<'a> YamlParser<'a> {
     pub(crate) fn check_flow_line_start(&self) -> Result<(), Error> {
         if let Some(line) = self.scanner.remains().split(['\n', '\r']).nth(1) {
             let trimmed = line.trim_start_matches([' ', '\t']);
+            // Document markers are only forbidden at column 0; an
+            // indented `---`/`...` is ordinary flow-scalar content
+            // (YAML 1.2.2 SPEC, production [206]). A `---x` without
+            // separation is content even at column 0.
             if (line.starts_with('\t') && !trimmed.is_empty())
                 && trimmed != "]"
                 && trimmed != "}"
-                || trimmed.starts_with("---")
-                || trimmed.starts_with("...")
+                || starts_with_document_marker_token(line)
             {
                 return Err(Error::new(
                     ErrorKind::InvalidStartOfToken,
@@ -1472,6 +1475,20 @@ pub(crate) fn flow_collection_is_key(trimmed: &str) -> bool {
 /// callers.
 pub(crate) fn find_key_value_separator(line: &str) -> Option<usize> {
     line.find(": ").or_else(|| line.find(":\t"))
+}
+
+/// Whether `line` starts (at column 0) with the `---` or `...` marker
+/// token followed by separation or the end of the line. Such a line is
+/// forbidden as content (YAML 1.2.2 SPEC, production [206]
+/// `c-forbidden`), even when trailing content makes it an invalid
+/// document marker line.
+pub(crate) fn starts_with_document_marker_token(line: &str) -> bool {
+    ["---", "..."]
+        .iter()
+        .any(|marker| match line.strip_prefix(marker) {
+            Some(rest) => rest.is_empty() || rest.starts_with([' ', '\t']),
+            None => false,
+        })
 }
 
 /// Whether `line` is a document start marker `---`, optionally
