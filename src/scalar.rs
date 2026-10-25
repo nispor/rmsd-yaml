@@ -521,14 +521,15 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_char();
                     ret.push(c);
                 }
-                '#' if ret.ends_with(' ') || ret.is_empty() => {
-                    // A comment starts after white space.
+                '#' if ret.ends_with([' ', '\t']) || ret.is_empty() => {
+                    // A comment starts after white space (space or
+                    // tab; YAML 1.2.2 SPEC, `s-separate-in-line`).
                     break;
                 }
                 '\n' | '\r' => {
                     // YAML 1.2.2 SPEC, 6.8. Flow Folding: line breaks
                     // inside flow scalars are folded.
-                    ret = ret.trim_end_matches(' ').to_string();
+                    ret = ret.trim_end_matches([' ', '\t']).to_string();
                     let mut line_breaks = 0usize;
                     while let Some(w) = self.scanner.peek_char() {
                         match w {
@@ -589,7 +590,7 @@ impl<'a> YamlParser<'a> {
                 }
             }
         }
-        let value = ret.trim_end_matches(' ').to_string();
+        let value = ret.trim_end_matches([' ', '\t']).to_string();
         if value == "-" || value.starts_with("- ") {
             return Err(Error::new(
                 ErrorKind::InvalidPlainScalarStart,
