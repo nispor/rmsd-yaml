@@ -445,6 +445,13 @@ impl<'a> YamlParser<'a> {
                 return Ok(true);
             }
             let rest = rest.trim_start_matches([' ', '\t']);
+            // An inline comment ends the directive's parameters. A `#`
+            // inside the prefix (not preceded by separation) is part of
+            // the URI and must be kept (YAML 1.2.2 SPEC, 6.8.2).
+            let rest = match find_comment_start(rest) {
+                Some(offset) => &rest[..offset],
+                None => rest,
+            };
             let mut parts = rest.split_whitespace();
             let handle = parts.next().unwrap_or_default();
             let prefix = parts.next().unwrap_or_default();

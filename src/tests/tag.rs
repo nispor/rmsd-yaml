@@ -168,3 +168,28 @@ fn test_document_end_marker_with_comment() {
             .any(|e| matches!(e, crate::YamlEvent::DocumentEnd(true, _)))
     );
 }
+
+#[test]
+fn test_tag_directive_with_trailing_comment() {
+    // A `%TAG` directive line may end with a comment (YAML 1.2.2 SPEC,
+    // production [82] followed by `s-l-comments`). The comment used to
+    // be parsed as extra parameters and rejected.
+    let input = "%TAG !e! tag:example.com,2000:app/ # comment\n---\n!e!foo bar\n";
+    let events = scalar_events(input);
+    assert_eq!(
+        events,
+        vec![(Some("<tag:example.com,2000:app/foo>".into()), "bar".into())]
+    );
+
+    // A `#` that is not preceded by separation belongs to the URI
+    // prefix, not to a comment.
+    let input = "%TAG !e! tag:example.com,2000:app/#frag\n---\n!e!foo bar\n";
+    let events = scalar_events(input);
+    assert_eq!(
+        events,
+        vec![(
+            Some("<tag:example.com,2000:app/#fragfoo>".into()),
+            "bar".into()
+        )]
+    );
+}
