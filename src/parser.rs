@@ -1422,8 +1422,15 @@ pub(crate) fn is_document_end_marker(line: &str) -> bool {
         return true;
     }
     if let Some(rest) = line.strip_prefix("...") {
-        return rest.starts_with([' ', '\t'])
-            && rest.trim_start_matches([' ', '\t']).starts_with('#');
+        // The marker must be followed by separation: either trailing
+        // white space, or a comment introduced by white space
+        // (YAML 1.2.2 SPEC, production [204]: `...` not followed by a
+        // non-white character).
+        if !rest.starts_with([' ', '\t']) {
+            return false;
+        }
+        let after = rest.trim_start_matches([' ', '\t']);
+        return after.is_empty() || after.starts_with('#');
     }
     false
 }
