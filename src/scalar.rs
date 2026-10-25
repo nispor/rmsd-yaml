@@ -920,7 +920,7 @@ impl<'a> YamlParser<'a> {
             } else {
                 line
             };
-            self.validate_plain_scalar(validation_line, first_line)?;
+            self.validate_plain_scalar(validation_line, first_line, line)?;
 
             if self.cur_state().is_block_map_key() {
                 // YAML 1.2.2 SPEC, 7.3.3. Plain Style:
@@ -1086,6 +1086,7 @@ impl<'a> YamlParser<'a> {
         &mut self,
         line: &str,
         first_line: bool,
+        source_line: &str,
     ) -> Result<(), Error> {
         // YAML SPEC 1.2, 7.3.3. Plain Style:
         //      Plain scalars must not begin with most indicators, as this
@@ -1095,40 +1096,48 @@ impl<'a> YamlParser<'a> {
         //      this causes no ambiguity.
         //      The restrictions apply to the first line only:
         //      continuation lines may start with any character.
-        if first_line
-            && let Some(first_char) =
-                line.trim_start_matches(' ').chars().next()
-        {
-            match first_char {
-                ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
-                | '>' | '\'' | '"' | '@' | '`' | '%' => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidPlainScalarStart,
-                        format!(
-                            "Plain scalar should not start with '{first_char} \
-                             '"
-                        ),
-                        self.scanner.next_pos,
-                        self.scanner.next_pos,
-                    ));
+        if first_line {
+            // The first-character check must skip the line's leading
+            // indentation (`  :foo` is a valid plain scalar). The
+            // lookahead is taken from the original source line, not
+            // from `line`: `line` may be a cut-down validation slice
+            // that removed the `:` value indicator (e.g. the key of
+            // `::` is `:` followed by the mapping indicator).
+            let content = line.trim_start_matches(' ');
+            if let Some(first_char) = content.chars().next() {
+                let source_content = source_line.trim_start_matches(' ');
+                let second_char = source_content.chars().nth(1);
+                match first_char {
+                    ',' | '[' | ']' | '{' | '}' | '#' | '&' | '*' | '!' | '|'
+                    | '>' | '\'' | '"' | '@' | '`' | '%' => {
+                        return Err(Error::new(
+                            ErrorKind::InvalidPlainScalarStart,
+                            format!(
+                                "Plain scalar should not start with \
+                                 '{first_char} '"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                    ':' | '?' | '-'
+                        if matches!(
+                            second_char,
+                            None | Some(' ') | Some('\t')
+                        ) =>
+                    {
+                        return Err(Error::new(
+                            ErrorKind::InvalidPlainScalarStart,
+                            format!(
+                                "Plain scalar should not start with \
+                                 '{first_char} '"
+                            ),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
+                    _ => (),
                 }
-                ':' | '?' | '-'
-                    if matches!(
-                        self.scanner.remains().chars().nth(1),
-                        Some(' ') | Some('\t')
-                    ) =>
-                {
-                    return Err(Error::new(
-                        ErrorKind::InvalidPlainScalarStart,
-                        format!(
-                            "Plain scalar should not start with '{first_char} \
-                             '"
-                        ),
-                        self.scanner.next_pos,
-                        self.scanner.next_pos,
-                    ));
-                }
-                _ => (),
             }
         }
 
