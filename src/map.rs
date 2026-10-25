@@ -11,7 +11,7 @@ use crate::{
     parser::{
         find_key_value_separator, flow_collection_is_key,
         is_document_end_marker, is_document_start_marker,
-        tab_content_is_block_node,
+        strip_inline_comment, tab_content_is_block_node,
     },
 };
 
@@ -1074,9 +1074,12 @@ impl<'a> YamlParser<'a> {
                     self.scanner.remains().trim_start_matches([' ', '\t']);
                 let key_first_line =
                     key_content.split(['\n', '\r']).next().unwrap_or_default();
+                // An inline comment is not part of the key's structure
+                // (`? a # b: c` is the explicit key `a`, followed by a
+                // comment).
+                let key_first_line = strip_inline_comment(key_first_line);
                 if find_key_value_separator(key_first_line).is_some()
                     || key_first_line.starts_with(':')
-                    || key_first_line.starts_with(": ")
                 {
                     let key_column =
                         self.scanner.next_pos.column.saturating_sub(1);
