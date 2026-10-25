@@ -889,7 +889,9 @@ impl<'a> YamlParser<'a> {
             }
 
             let code = strip_inline_comment(line);
-            if !self.cur_state().is_block_map_key() && code.contains(": ") {
+            if !self.cur_state().is_block_map_key()
+                && find_key_value_separator(code).is_some()
+            {
                 if code.trim_start_matches(' ').starts_with(':') {
                     // An explicit mapping value line (`: value` on its
                     // own line) terminates the plain scalar and belongs
@@ -1096,7 +1098,8 @@ impl<'a> YamlParser<'a> {
                     return false;
                 }
                 if !self.cur_state().is_block_map_key()
-                    && strip_inline_comment(line).contains(": ")
+                    && find_key_value_separator(strip_inline_comment(line))
+                        .is_some()
                 {
                     return false;
                 }

@@ -985,3 +985,24 @@ fn test_document_marker_with_trailing_content_is_rejected() {
     let value: crate::Value = "a: 1\n... # done\n".parse().unwrap();
     assert_eq!(value.get("a").unwrap().as_str().unwrap(), "1");
 }
+
+#[test]
+fn test_mapping_looking_continuation_with_tab_separator() {
+    // A `:` followed by a tab is a block mapping value indicator just
+    // like `: `. A line that looks like a mapping entry cannot
+    // continue a plain scalar.
+    for input in ["a\n\nb:\tc\n", "k: a\n\n  b:\tc\n"] {
+        assert!(
+            YamlParser::parse_to_events(input).is_err(),
+            "{input:?} should be rejected"
+        );
+    }
+
+    // A tab-separated sequence entry after a blank line still starts a
+    // new entry and does not fold the blank line into the scalar.
+    let value: crate::Value = "- a\n\n-\tb\n".parse().unwrap();
+    let items = value.as_sequence().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].as_str().unwrap(), "a");
+    assert_eq!(items[1].as_str().unwrap(), "b");
+}
