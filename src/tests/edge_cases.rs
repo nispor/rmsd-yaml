@@ -954,3 +954,30 @@ fn test_anchor_before_flow_indicator() {
         assert_eq!(err.kind(), crate::ErrorKind::InvalidAnchor, "{input:?}");
     }
 }
+
+#[test]
+fn test_document_marker_with_trailing_content_is_rejected() {
+    // `... foo` is neither a document end marker (trailing content is
+    // not a comment) nor allowed content (YAML 1.2.2 SPEC, productions
+    // [205]/[206]). It used to be parsed as a plain scalar or block
+    // scalar content.
+    for input in ["... foo\n", "a\n... foo\n", "|\n... foo\n"] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            crate::ErrorKind::InvalidStartOfToken,
+            "{input:?}"
+        );
+    }
+
+    // Without the marker token (no separation) or when indented, the
+    // text is ordinary content.
+    let value: crate::Value = "...x\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "...x");
+    let value: crate::Value = "  ... foo\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "... foo");
+
+    // A comment after the marker is still a valid document end.
+    let value: crate::Value = "a: 1\n... # done\n".parse().unwrap();
+    assert_eq!(value.get("a").unwrap().as_str().unwrap(), "1");
+}
