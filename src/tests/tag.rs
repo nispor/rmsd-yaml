@@ -230,3 +230,34 @@ fn test_tag_handle_name_restricted_to_word_characters() {
         vec![(Some("<tag:example.com,2000:app/s>".into()), "v".into())]
     );
 }
+
+#[test]
+fn test_invalid_tag_suffix_characters() {
+    // A tag shorthand suffix may only contain `ns-tag-char`
+    // (YAML 1.2.2 SPEC, productions [39]/[40]).
+    for input in [
+        "!foo\"bar\" baz\n",
+        "!foo{bar} baz\n",
+        "!foo<bar baz\n",
+        "!foo%zz baz\n",
+        "!foo%2 baz\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidTag, "{input:?}");
+    }
+
+    // URI escapes and the other allowed punctuation still work.
+    let events = scalar_events("!foo%21 baz\n");
+    assert_eq!(
+        events,
+        vec![(Some("<!foo!>".into()), "baz".into())]
+    );
+    let events = scalar_events("!a.b~c*d/e?f:g@h&i=j+k$l_m#n;o'p(q) baz\n");
+    assert_eq!(
+        events,
+        vec![(
+            Some("<!a.b~c*d/e?f:g@h&i=j+k$l_m#n;o'p(q)>".into()),
+            "baz".into()
+        )]
+    );
+}

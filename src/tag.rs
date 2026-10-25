@@ -113,10 +113,50 @@ impl<'a> YamlParser<'a> {
     }
 }
 
-/// Characters allowed in a tag suffix (c-tag-char excludes the flow
-/// indicators and separation spaces).
+/// Characters allowed in a tag suffix: `ns-tag-char` is
+/// `ns-uri-char` minus `!` and the flow indicators (YAML 1.2.2 SPEC,
+/// productions [39]/[40]). `%XX` escapes must be complete.
 fn is_valid_tag_suffix(s: &str) -> bool {
-    !s.contains([' ', '\t', ',', '[', ']', '{', '}'])
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' {
+            if i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit()
+            {
+                return false;
+            }
+            i += 3;
+        } else if b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'-' | b'#'
+                    | b';'
+                    | b'/'
+                    | b'?'
+                    | b':'
+                    | b'@'
+                    | b'&'
+                    | b'='
+                    | b'+'
+                    | b'$'
+                    | b'_'
+                    | b'.'
+                    | b'~'
+                    | b'*'
+                    | b'\''
+                    | b'('
+                    | b')'
+            )
+        {
+            i += 1;
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// Decode `%XX` URI escapes in a tag suffix (e.g. `%21` -> `!`). Escaped
