@@ -57,6 +57,12 @@ fn needs_double_quote(input: &str) -> bool {
     if input.starts_with("---") || input.starts_with("...") {
         return true;
     }
+    // A leading byte order mark would be stripped when the scalar is
+    // parsed back as the start of a stream (YAML 1.2.2 SPEC, 5.2), so
+    // it must be escaped instead.
+    if input.starts_with('\u{feff}') {
+        return true;
+    }
     // A trailing YAML blank (space or tab) cannot appear at the end of
     // a plain scalar — the scanner trims/folds it — so the value would
     // not round-trip unquoted (e.g. "trailing " re-parses as
