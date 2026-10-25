@@ -395,3 +395,35 @@ fn test_string_ending_with_colon_round_trips() {
     let back: String = from_str(&out).unwrap();
     assert_eq!(back, input);
 }
+
+#[test]
+fn test_multiline_plain_and_single_quoted_round_trip() {
+    // A content line break in a single-quoted rendering needs an empty
+    // physical line, otherwise YAML folding turns it into a space
+    // (YAML 1.2.2 SPEC, 6.5).
+    let value = Value::from_str("plain: a\n b\n\n c\n").unwrap();
+    let out = value.to_string().unwrap();
+    assert_eq!(out, "plain: 'a b\n\n  c'\n");
+    let back = Value::from_str(&out).unwrap();
+    assert_eq!(back.get("plain").unwrap().as_str().unwrap(), "a b\nc");
+
+    // Consecutive content line breaks need the same number of empty
+    // physical lines.
+    let value = Value::from_str("'a\n\n\nb'\n").unwrap();
+    assert_eq!(value.as_str().unwrap(), "a\n\nb");
+    let out = value.to_string().unwrap();
+    let back = Value::from_str(&out).unwrap();
+    assert_eq!(back.as_str().unwrap(), value.as_str().unwrap());
+
+    // Leading and trailing content line breaks are preserved too.
+    for input in ["'\na'\n", "'a\n'\n", "'\na\n'\n"] {
+        let value = Value::from_str(input).unwrap();
+        let out = value.to_string().unwrap();
+        let back = Value::from_str(&out).unwrap();
+        assert_eq!(
+            back.as_str().unwrap(),
+            value.as_str().unwrap(),
+            "input {input:?}, dumped {out:?}"
+        );
+    }
+}

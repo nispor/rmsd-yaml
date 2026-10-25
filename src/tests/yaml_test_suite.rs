@@ -44,14 +44,6 @@ const SKIPPED_OUT_YAML_TEST: &[&str] = &[
     // block-mapping-with-missing-values)
     "flow-mapping-separate-values",
     "literal-scalars", // out.yaml adds a `---` the input lacks
-    // out.yaml has an extra blank line the events do not
-    "multiline-plain-scalar-with-empty-line",
-    // out.yaml has an extra blank line the events do not
-    "multiline-plain-value-with-tabs-on-empty-lines",
-    // out.yaml has an extra blank line (does not round-trip)
-    "multiline-scalar-at-top-level",
-    // out.yaml has an extra blank line (does not round-trip)
-    "multiline-scalar-at-top-level-1-3",
     // out.yaml appends a `...` the input lacks
     "multiline-scalar-that-looks-like-a-yaml-directive",
     // out.yaml adds a `---` the input lacks
@@ -71,15 +63,13 @@ const SKIPPED_OUT_YAML_TEST: &[&str] = &[
     // multi-doc stream: compose() rejects >1 document
     "spec-example-6-18-primary-tag-handle-1-3",
     // 1.3 variant drops the input's `---`
+    "multiline-scalar-at-top-level-1-3",
+    // 1.3 variant drops the input's `---`
     "spec-example-6-8-flow-folding-1-3",
-    // out.yaml has an extra blank line the events do not
-    "spec-example-7-12-plain-lines",
     // 1.3 variant drops the input's `---`
     "spec-example-7-5-double-quoted-line-breaks-1-3",
     // 1.3 variant drops the input's `---`
     "spec-example-7-6-double-quoted-lines-1-3",
-    // out.yaml has an extra blank line the events do not
-    "spec-example-7-9-single-quoted-lines",
     // 1.3 variant: extra blank line and dropped `---`
     "spec-example-7-9-single-quoted-lines-1-3",
     // out.yaml drops the indentation hint for a leading break
