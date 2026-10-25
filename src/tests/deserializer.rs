@@ -919,9 +919,7 @@ fn test_bare_radix_prefixes_are_strings() {
 fn test_integer_spellings_are_not_floats() {
     // The Core Schema resolves int before float (YAML 1.2.2 SPEC,
     // 10.3), so an integer spelling must not report `is_float`.
-    for s in [
-        "0", "42", "-42", "+42", "0x10", "0o20", "0b10", "-0x10",
-    ] {
+    for s in ["0", "42", "-42", "+42", "0x10", "0o20", "0b10", "-0x10"] {
         let value = crate::Value::from_str(s).unwrap();
         assert!(
             value.is_integer() || value.is_signed_integer(),

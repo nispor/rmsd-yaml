@@ -174,7 +174,8 @@ fn test_tag_directive_with_trailing_comment() {
     // A `%TAG` directive line may end with a comment (YAML 1.2.2 SPEC,
     // production [82] followed by `s-l-comments`). The comment used to
     // be parsed as extra parameters and rejected.
-    let input = "%TAG !e! tag:example.com,2000:app/ # comment\n---\n!e!foo bar\n";
+    let input =
+        "%TAG !e! tag:example.com,2000:app/ # comment\n---\n!e!foo bar\n";
     let events = scalar_events(input);
     assert_eq!(
         events,
@@ -248,10 +249,7 @@ fn test_invalid_tag_suffix_characters() {
 
     // URI escapes and the other allowed punctuation still work.
     let events = scalar_events("!foo%21 baz\n");
-    assert_eq!(
-        events,
-        vec![(Some("<!foo!>".into()), "baz".into())]
-    );
+    assert_eq!(events, vec![(Some("<!foo!>".into()), "baz".into())]);
     let events = scalar_events("!a.b~c*d/e?f:g@h&i=j+k$l_m#n;o'p(q) baz\n");
     assert_eq!(
         events,

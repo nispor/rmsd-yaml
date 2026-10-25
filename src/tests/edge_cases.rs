@@ -646,14 +646,23 @@ fn test_flow_mapping_value_indicator_before_collection() {
     let value: crate::Value = crate::from_str("{a:[1, 2]}").unwrap();
     let a = value.get("a").unwrap();
     assert_eq!(
-        a.as_sequence().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>(),
+        a.as_sequence()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect::<Vec<_>>(),
         vec!["1".to_string(), "2".to_string()]
     );
 
     let value: crate::Value = crate::from_str("{a:{b: c}}").unwrap();
     let a = value.get("a").unwrap();
     assert_eq!(
-        a.as_mapping().unwrap().get(&"b".into()).unwrap().as_str().unwrap(),
+        a.as_mapping()
+            .unwrap()
+            .get(&"b".into())
+            .unwrap()
+            .as_str()
+            .unwrap(),
         "c"
     );
 
@@ -661,8 +670,17 @@ fn test_flow_mapping_value_indicator_before_collection() {
     let value: crate::Value = crate::from_str("[a:{b: c}]").unwrap();
     let entry = &value.as_sequence().unwrap()[0];
     assert_eq!(
-        entry.as_mapping().unwrap().get(&"a".into()).unwrap().as_mapping().unwrap()
-            .get(&"b".into()).unwrap().as_str().unwrap(),
+        entry
+            .as_mapping()
+            .unwrap()
+            .get(&"a".into())
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .get(&"b".into())
+            .unwrap()
+            .as_str()
+            .unwrap(),
         "c"
     );
 }
@@ -689,10 +707,7 @@ fn test_document_start_marker_only_at_column_zero() {
     // A `---` placed inside a line is ordinary content, not a
     // document marker (YAML 1.2.2 SPEC, 9.1.2).
     assert_eq!(scalar_values("a --- b\n"), vec!["a --- b"]);
-    assert_eq!(
-        scalar_values("key: --- value\n"),
-        vec!["key", "--- value"]
-    );
+    assert_eq!(scalar_values("key: --- value\n"), vec!["key", "--- value"]);
 
     // `---#` has no separation after the marker, so it is a plain
     // scalar (production [206] only forbids a marker followed by
@@ -755,10 +770,7 @@ fn test_inline_comments_do_not_affect_block_structure() {
     assert_eq!(scalar_values("a # b: c\n"), vec!["a"]);
     assert_eq!(scalar_values("- a # b: c\n"), vec!["a"]);
     assert_eq!(scalar_values("a: 1 # b: c\n"), vec!["a", "1"]);
-    assert_eq!(
-        scalar_values("a: > # b: c\n  text\n"),
-        vec!["a", "text\n"]
-    );
+    assert_eq!(scalar_values("a: > # b: c\n  text\n"), vec!["a", "text\n"]);
     assert_eq!(scalar_values("? a # b: c\n: 1\n"), vec!["a", "1"]);
     assert_eq!(scalar_values("--- a # b: c\n"), vec!["a"]);
 
@@ -806,12 +818,7 @@ fn test_raw_non_printable_characters_are_rejected() {
 
     // Printable non-ASCII, NEL, tab and astral characters stay
     // accepted.
-    for input in [
-        "a: \t\n",
-        "a: \u{85}\n",
-        "a: \u{a0}\n",
-        "a: \u{1F600}\n",
-    ] {
+    for input in ["a: \t\n", "a: \u{85}\n", "a: \u{a0}\n", "a: \u{1F600}\n"] {
         assert!(YamlParser::parse_to_events(input).is_ok(), "{input:?}");
     }
 
@@ -897,10 +904,7 @@ fn test_indented_document_markers_are_flow_content() {
     assert_eq!(scalar_values("[ a\n  --- ]\n"), vec!["a ---"]);
     assert_eq!(scalar_values("[ a\n  ... ]\n"), vec!["a ..."]);
     assert_eq!(scalar_values("[ a\n  --- x ]\n"), vec!["a --- x"]);
-    assert_eq!(
-        scalar_values("{k: a\n  --- }\n"),
-        vec!["k", "a ---"]
-    );
+    assert_eq!(scalar_values("{k: a\n  --- }\n"), vec!["k", "a ---"]);
     // A `---x` without separation is content even at column 0.
     assert_eq!(scalar_values("[a\n---x ]\n"), vec!["a ---x"]);
 
