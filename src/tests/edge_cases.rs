@@ -766,3 +766,22 @@ fn test_inline_comments_do_not_affect_block_structure() {
     assert_eq!(scalar_values("'a # b': c\n"), vec!["a # b", "c"]);
     assert_eq!(scalar_values("\"a # b\": c\n"), vec!["a # b", "c"]);
 }
+
+#[test]
+fn test_indented_plain_scalar_indicator_start() {
+    // A plain scalar may be indented at the document root; the
+    // indicator lookahead must use the scalar's first character, not
+    // the indentation spaces (YAML 1.2.2 SPEC, 7.3.3, `ns-plain-first`).
+    assert_eq!(scalar_values("  :foo\n"), vec![":foo"]);
+    assert_eq!(scalar_values("  ?foo\n"), vec!["?foo"]);
+    assert_eq!(scalar_values("  -foo\n"), vec!["-foo"]);
+    assert_eq!(scalar_values("  ---\n"), vec!["---"]);
+    assert_eq!(scalar_values("  --- text\n"), vec!["--- text"]);
+
+    // A real `: ` after the indentation still starts a mapping with an
+    // empty key.
+    let value: crate::Value = "  : foo\n".parse().unwrap();
+    let map = value.as_mapping().unwrap();
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.iter().next().unwrap().1.as_str().unwrap(), "foo");
+}
