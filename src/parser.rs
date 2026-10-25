@@ -517,7 +517,7 @@ impl<'a> YamlParser<'a> {
             let prefix = parts.next().unwrap_or_default();
             if parts.next().is_some()
                 || !is_valid_tag_handle(handle)
-                || prefix.is_empty()
+                || !crate::tag::is_valid_tag_prefix(prefix)
             {
                 return Err(self.invalid_directive(trimmed));
             }

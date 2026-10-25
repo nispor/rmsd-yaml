@@ -259,3 +259,43 @@ fn test_invalid_tag_suffix_characters() {
         )]
     );
 }
+
+#[test]
+fn test_tag_prefix_syntax() {
+    // `ns-tag-prefix` is either `!` plus URI characters or an
+    // `ns-tag-char` followed by URI characters (YAML 1.2.2 SPEC,
+    // productions [101]-[103]); a prefix starting with a flow
+    // indicator is invalid.
+    for input in [
+        "%TAG !e! ,bad\n---\n!e!s v\n",
+        "%TAG !e! [bad]\n---\n!e!s v\n",
+        "%TAG !e! {bad}\n---\n!e!s v\n",
+        "%TAG !e! %zz\n---\n!e!s v\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidDirective, "{input:?}");
+    }
+
+    // A local prefix (starting with `!`) may contain flow indicators
+    // and `!`; a global prefix may not start with them.
+    let events = scalar_events("%TAG !e! !local\n---\n!e!s v\n");
+    assert_eq!(events, vec![(Some("<!locals>".into()), "v".into())]);
+    let events =
+        scalar_events("%TAG !e! tag:example.com,2000:app/\n---\n!e!s v\n");
+    assert_eq!(
+        events,
+        vec![(Some("<tag:example.com,2000:app/s>".into()), "v".into())]
+    );
+
+    // `ns-tag-char` is a single `ns-uri-char`, so a global prefix may
+    // start with a complete `%XX` escape (productions [39]/[40]). The
+    // escape is decoded during tag resolution.
+    let events =
+        scalar_events("%TAG !e! %74ag:example.com,2000:app/\n---\n!e!s v\n");
+    assert_eq!(
+        events,
+        vec![(Some("<tag:example.com,2000:app/s>".into()), "v".into())]
+    );
+    let events = scalar_events("%TAG !e! !%74local\n---\n!e!s v\n");
+    assert_eq!(events, vec![(Some("<!tlocals>".into()), "v".into())]);
+}
