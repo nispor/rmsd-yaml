@@ -43,30 +43,30 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
-                '+' => {
+                '+' | '-' => {
                     self.scanner.next_char();
-                    chomping_method = ChompingMethod::Keep;
-                    if let Some(d) = self
-                        .scanner
-                        .peek_char()
-                        .and_then(|c| c.to_digit(10))
-                        .map(|d| d as usize)
-                    {
-                        self.scanner.next_char();
-                        indentation_indicator = Some(d);
-                    }
-                }
-                '-' => {
-                    self.scanner.next_char();
-                    chomping_method = ChompingMethod::Strip;
-                    if let Some(d) = self
-                        .scanner
-                        .peek_char()
-                        .and_then(|c| c.to_digit(10))
-                        .map(|d| d as usize)
-                    {
-                        self.scanner.next_char();
-                        indentation_indicator = Some(d);
+                    chomping_method = if next_char == '+' {
+                        ChompingMethod::Keep
+                    } else {
+                        ChompingMethod::Strip
+                    };
+                    match self.scanner.peek_char() {
+                        Some(d @ '1'..='9') => {
+                            self.scanner.next_char();
+                            indentation_indicator =
+                                Some(d.to_digit(10).unwrap() as usize);
+                        }
+                        Some('0') => {
+                            return Err(Error::new(
+                                ErrorKind::InvalidStartOfToken,
+                                "Block scalar indentation indicator must not \
+                                 be 0"
+                                    .to_string(),
+                                self.scanner.next_pos,
+                                self.scanner.next_pos,
+                            ));
+                        }
+                        _ => {}
                     }
                 }
                 _ => (),
