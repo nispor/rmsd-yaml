@@ -800,6 +800,22 @@ impl<'a> YamlParser<'a> {
                         tag,
                     )?;
                 } else {
+                    // A standalone alias node cannot carry node
+                    // properties (YAML 1.2.2 SPEC, 6.9.2: "an alias
+                    // cannot be anchored"; the same applies to a tag,
+                    // since an alias denotes a reference, not a new
+                    // node). The flow path already rejects this; the
+                    // block path used to silently drop the properties.
+                    // Properties in front of an alias *key* are valid,
+                    // because they decorate the enclosing mapping.
+                    if anchor.is_some() || tag.is_some() {
+                        return Err(Error::new(
+                            ErrorKind::InvalidAnchor,
+                            "Alias cannot carry node properties".to_string(),
+                            self.scanner.next_pos,
+                            self.scanner.next_pos,
+                        ));
+                    }
                     self.scanner.advance(indent_count);
                     let name = self.handle_alias()?;
                     self.push_event(YamlEvent::Alias(
