@@ -261,9 +261,11 @@ impl<'a> YamlParser<'a> {
                 && self.handle_directive(trimmed)?
             {
                 // `%YAML`, `%TAG` or a reserved directive.
-            } else if trimmed == "---" {
-                let indent_count =
-                    line.chars().take_while(|c| *c == ' ').count();
+            } else if line == "---" {
+                // A document start marker is only recognized at column
+                // 0 (YAML 1.2.2 SPEC, 9.1.2); an indented `---` is
+                // ordinary content.
+                let indent_count = 0;
                 if doc_started {
                     // A new document invalidates the previous one's
                     // `%TAG` declarations and implicitly ends the
@@ -285,9 +287,7 @@ impl<'a> YamlParser<'a> {
                 had_any_document = true;
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
-            } else if let Some(offset) =
-                line.find("--- ").or_else(|| line.find("---\t"))
-            {
+            } else if line.starts_with("--- ") || line.starts_with("---\t") {
                 if doc_started {
                     self.tag_handles.clear();
                     self.push_event(YamlEvent::DocumentEnd(
@@ -298,7 +298,7 @@ impl<'a> YamlParser<'a> {
                 // A block mapping may not start on the same line as the
                 // `---` marker (YAML 1.2.2 SPEC, 9.1.2.3), e.g.
                 // `--- a: b` or `--- &anchor a: b`.
-                let mut rest = line[offset + 4..].trim_start_matches(' ');
+                let mut rest = line[4..].trim_start_matches([' ', '\t']);
                 if rest.starts_with('&') || rest.starts_with('!') {
                     rest = rest
                         .split_once([' ', '\t'])
@@ -323,7 +323,7 @@ impl<'a> YamlParser<'a> {
                     true,
                     self.scanner.next_pos,
                 ));
-                self.scanner.advance_offset(offset + 4);
+                self.scanner.advance_offset(4);
                 self.handle_node(0, 0, None, None)?;
                 doc_terminated = false;
                 doc_started = true;
@@ -1367,7 +1367,12 @@ pub(crate) fn is_document_start_marker(line: &str) -> bool {
         return true;
     }
     if let Some(rest) = line.strip_prefix("---") {
-        return rest.starts_with([' ', '\t']) || rest.starts_with('#');
+        // A `---` followed directly by a non-space character (`---#x`
+        // or `---x`) is ordinary plain-scalar content, not a document
+        // marker (YAML 1.2.2 SPEC, production [206]: `c-forbidden`
+        // requires a line break, white space or end of input after the
+        // marker).
+        return rest.starts_with([' ', '\t']);
     }
     false
 }

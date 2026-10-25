@@ -683,3 +683,21 @@ fn test_document_end_marker_with_trailing_whitespace() {
     let value: crate::Value = crate::from_str("k: |-\n  x\n...   \n").unwrap();
     assert_eq!(value.get("k").unwrap().as_str().unwrap(), "x");
 }
+
+#[test]
+fn test_document_start_marker_only_at_column_zero() {
+    // A `---` placed inside a line is ordinary content, not a
+    // document marker (YAML 1.2.2 SPEC, 9.1.2).
+    assert_eq!(scalar_values("a --- b\n"), vec!["a --- b"]);
+    assert_eq!(
+        scalar_values("key: --- value\n"),
+        vec!["key", "--- value"]
+    );
+
+    // `---#` has no separation after the marker, so it is a plain
+    // scalar (production [206] only forbids a marker followed by
+    // white space, a line break or end of input).
+    assert_eq!(scalar_values("---#x\n"), vec!["---#x"]);
+    assert_eq!(scalar_values("a\n---#x\n"), vec!["a ---#x"]);
+    assert_eq!(scalar_values("a\n\n---#x\n"), vec!["a\n---#x"]);
+}
