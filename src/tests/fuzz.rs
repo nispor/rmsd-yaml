@@ -104,11 +104,16 @@ fn reader_rejects_invalid_utf8_with_error() {
 }
 
 #[test]
-fn reader_accepts_valid_utf8_binary() {
-    // NUL bytes are valid UTF-8: from_reader must parse them instead of
-    // rejecting the stream.
-    let value: Value = from_reader(Cursor::new(b"a: \x00b\n")).unwrap();
-    assert_eq!(value, "a: \0b\n".parse::<Value>().unwrap());
+fn reader_accepts_valid_utf8_but_rejects_raw_nul() {
+    // NUL is valid UTF-8 but is outside YAML's printable character set
+    // (YAML 1.2.2 SPEC, 5.1), so the reader must reject the stream.
+    let err = from_reader::<_, Value>(Cursor::new(b"a: \x00b\n")).unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::InvalidCharacter);
+
+    // Printable non-ASCII UTF-8 is accepted.
+    let value: Value =
+        from_reader(Cursor::new("a: \u{1F600}\n".as_bytes())).unwrap();
+    assert_eq!(value.get("a").unwrap().as_str().unwrap(), "\u{1F600}");
 }
 
 #[test]

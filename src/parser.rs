@@ -3,7 +3,8 @@
 use std::{cmp::max, collections::HashMap};
 
 use crate::{
-    Error, ErrorKind, YamlEvent, YamlScalarStyle, YamlScanner, YamlState,
+    Error, ErrorKind, YamlEvent, YamlPosition, YamlScalarStyle, YamlScanner,
+    YamlState,
 };
 
 #[derive(Debug)]
@@ -197,6 +198,27 @@ impl<'a> YamlParser<'a> {
         // `U+FEFF` appearing anywhere else remains ordinary content
         // (`str::strip_prefix` only removes a leading occurrence).
         let input = input.strip_prefix('\u{feff}').unwrap_or(input);
+        // YAML streams consist of the printable subset of Unicode
+        // only (YAML 1.2.2 SPEC, 5.1): C0 controls other than
+        // tab/LF/CR, DEL, the C1 controls other than NEL, and
+        // U+FFFE/U+FFFF must be rejected when they appear raw. The
+        // stream BOM is not content, so validate (and report positions
+        // in) the BOM-stripped input.
+        if let Some((offset, c)) =
+            input.char_indices().find(|(_, c)| !is_yaml_printable(*c))
+        {
+            let pos = position_at(input, offset);
+            return Err(Error::new(
+                ErrorKind::InvalidCharacter,
+                format!(
+                    "Raw character U+{:04X} is not allowed in a YAML stream; \
+                     use an escape sequence",
+                    c as u32
+                ),
+                pos,
+                pos,
+            ));
+        }
         let mut parser = Self {
             scanner: YamlScanner::new(input),
             states: Vec::new(),
@@ -1309,6 +1331,43 @@ impl<'a> YamlParser<'a> {
         }
         Ok(())
     }
+}
+
+/// Whether `c` belongs to YAML's printable character set (YAML 1.2.2
+/// SPEC, production [1] `c-printable`).
+fn is_yaml_printable(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n'
+            | '\r'
+            | '\u{20}'..='\u{7E}'
+            | '\u{85}'
+            | '\u{A0}'..='\u{D7FF}'
+            | '\u{E000}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
+/// Compute the 1-based line/column position of the byte at `offset`.
+fn position_at(input: &str, offset: usize) -> YamlPosition {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    let mut chars = input[..offset].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            line += 1;
+            column = 1;
+        } else if c == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    YamlPosition::new(line, column)
 }
 
 /// Whether a line starting with a quoted scalar is followed by `:`,

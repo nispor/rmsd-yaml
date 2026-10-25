@@ -89,9 +89,14 @@ fn needs_double_quote(input: &str) -> bool {
         || input.contains(" #")
         || input.contains('"')
         || input.contains('\\')
-        || input
-            .chars()
-            .any(|c| c.is_control() || is_yaml_line_break(c))
+        || input.chars().any(|c| {
+            // U+FFFE/U+FFFF are outside YAML's `c-printable` set but
+            // are not Unicode control characters, so `is_control`
+            // alone would let them through as invalid raw content.
+            c.is_control()
+                || is_yaml_line_break(c)
+                || matches!(c, '\u{fffe}' | '\u{ffff}')
+        })
         || looks_like_non_string(input)
 }
 

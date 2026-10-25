@@ -328,3 +328,19 @@ fn test_negative_zero_round_trips_as_float() {
     let got_inner: Inner = from_str(&s).unwrap();
     assert!(got_inner.neg_zero == 0.0 && got_inner.neg_zero.is_sign_negative());
 }
+
+#[test]
+fn test_noncharacters_are_escaped() {
+    // U+FFFE/U+FFFF are not `c-printable` (YAML 1.2.2 SPEC, 5.1), so
+    // they must not be emitted raw as the parser rejects them.
+    for c in ['\u{fffe}', '\u{ffff}'] {
+        let input = String::from(c);
+        let out = to_string(&input).unwrap();
+        assert!(
+            out.contains(&format!("\\u{:04X}", c as u32)),
+            "{input:?} rendered as {out:?}"
+        );
+        let back: String = from_str(&out).unwrap();
+        assert_eq!(back, input);
+    }
+}
