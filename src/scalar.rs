@@ -4,7 +4,7 @@ use crate::{
     Error, ErrorKind, YamlEvent, YamlParser, YamlScalarStyle,
     parser::{
         find_comment_start, find_key_value_separator, is_document_end_marker,
-        is_document_start_marker,
+        is_document_start_marker, strip_inline_comment,
     },
 };
 
@@ -856,8 +856,9 @@ impl<'a> YamlParser<'a> {
                 }
             }
 
-            if !self.cur_state().is_block_map_key() && line.contains(": ") {
-                if line.trim_start_matches(' ').starts_with(':') {
+            let code = strip_inline_comment(line);
+            if !self.cur_state().is_block_map_key() && code.contains(": ") {
+                if code.trim_start_matches(' ').starts_with(':') {
                     // An explicit mapping value line (`: value` on its
                     // own line) terminates the plain scalar and belongs
                     // to the surrounding mapping.
@@ -1062,7 +1063,9 @@ impl<'a> YamlParser<'a> {
                 {
                     return false;
                 }
-                if !self.cur_state().is_block_map_key() && line.contains(": ") {
+                if !self.cur_state().is_block_map_key()
+                    && strip_inline_comment(line).contains(": ")
+                {
                     return false;
                 }
                 return true;

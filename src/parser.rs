@@ -307,6 +307,9 @@ impl<'a> YamlParser<'a> {
                         .map(|(_, after)| after.trim_start())
                         .unwrap_or("");
                 }
+                // A comment after the inline content is not part of the
+                // line's structure (`--- a # b: c` is the scalar `a`).
+                let rest = strip_inline_comment(rest);
                 if !rest.is_empty()
                     && !rest
                         .starts_with(['\'', '"', '[', '{', '*', '|', '>', '-'])
@@ -698,10 +701,12 @@ impl<'a> YamlParser<'a> {
             }
 
             let trimmed = line.trim_start_matches(' ');
+            // Structural indicators after an inline comment are part
+            // of the comment, not of the line's YAML structure (e.g.
+            // `a # b: c` is the scalar `a` followed by a comment).
+            let code = strip_inline_comment(trimmed);
 
-            if trimmed.starts_with("- ")
-                || trimmed.starts_with("-\t")
-                || trimmed == "-"
+            if code.starts_with("- ") || code.starts_with("-\t") || code == "-"
             {
                 if self.cur_state().is_block_map_value()
                     && self.scanner.done_pos.line == self.scanner.next_pos.line
@@ -738,8 +743,8 @@ impl<'a> YamlParser<'a> {
                 };
                 self.handle_block_seq(expected_indent_count, anchor, tag)?;
             } else if !self.cur_state().is_block_map_value()
-                && (trimmed.starts_with('\'') || trimmed.starts_with('"'))
-                && quoted_scalar_is_key(trimmed)
+                && (code.starts_with('\'') || code.starts_with('"'))
+                && quoted_scalar_is_key(code)
             {
                 // A quoted scalar followed by `:` is a mapping key,
                 // e.g. `"foo\nbar": 23`.
@@ -749,8 +754,8 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed.starts_with('\'') || trimmed.starts_with('"') {
-                if quoted_scalar_is_key(trimmed)
+            } else if code.starts_with('\'') || code.starts_with('"') {
+                if quoted_scalar_is_key(code)
                     && self.scanner.done_pos.line != self.scanner.next_pos.line
                 {
                     // A quoted scalar used as a block mapping key on a
@@ -777,7 +782,7 @@ impl<'a> YamlParser<'a> {
                     // (rejects e.g. `a: 'b': c`).
                     self.expect_flow_end_separation()?;
                 }
-            } else if let Some(after_star) = trimmed.strip_prefix('*') {
+            } else if let Some(after_star) = code.strip_prefix('*') {
                 // An alias followed by `:` is a mapping key, e.g.
                 // `*alias1 : scalar3`.
                 let name_len = after_star
@@ -827,8 +832,8 @@ impl<'a> YamlParser<'a> {
                     // collection sees the next line.
                     self.skip_comment_and_empty_lines();
                 }
-            } else if trimmed.starts_with("[") || trimmed.starts_with("{") {
-                if flow_collection_is_key(trimmed) {
+            } else if code.starts_with('[') || code.starts_with('{') {
+                if flow_collection_is_key(code) {
                     // A flow collection used as a block mapping key,
                     // e.g. `[flow]: block` or `{a: b}: value`.
                     self.handle_block_map(
@@ -842,14 +847,14 @@ impl<'a> YamlParser<'a> {
                     // the scanner may still sit at the line's leading
                     // spaces (e.g. `  [1, 2]`).
                     self.scanner.advance(indent_count);
-                    if trimmed.starts_with("[") {
+                    if code.starts_with('[') {
                         self.handle_flow_seq(anchor, tag)?;
                     } else {
                         self.handle_flow_map(anchor, tag)?;
                     }
                     self.expect_flow_end_separation()?;
                 }
-            } else if find_key_value_separator(trimmed).is_some() {
+            } else if find_key_value_separator(code).is_some() {
                 if self.cur_state().is_block_map_value()
                     && self.scanner.done_pos.line == self.scanner.next_pos.line
                     && !self.in_explicit_value
@@ -886,9 +891,9 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed == "?"
-                || trimmed.starts_with("? ")
-                || trimmed.starts_with("?\t")
+            } else if code == "?"
+                || code.starts_with("? ")
+                || code.starts_with("?\t")
             {
                 // Explicit mapping keys, e.g. `? key`.
                 self.handle_block_map(
@@ -897,7 +902,7 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed.ends_with(":") {
+            } else if code.ends_with(':') {
                 // A block mapping key ending with `:`. Guess out the
                 // indent: the mapping's entries sit at the key's own
                 // column. For a key that follows content on the same
@@ -918,7 +923,7 @@ impl<'a> YamlParser<'a> {
                     anchor,
                     tag,
                 )?;
-            } else if trimmed.starts_with('!') || trimmed.starts_with('&') {
+            } else if code.starts_with('!') || code.starts_with('&') {
                 self.scanner.advance(indent_count);
                 // YAML 1.2.2 SPEC, 6.9. Node Properties:
                 //      Node properties may appear in any order, but each
@@ -1152,7 +1157,7 @@ impl<'a> YamlParser<'a> {
                     self.scanner.done_pos,
                 ));
                 return Ok(());
-            } else if trimmed.starts_with('%') {
+            } else if code.starts_with('%') {
                 return Err(Error::new(
                     ErrorKind::MissingDocumentEndMarkerBeforeDirective,
                     format!(
@@ -1412,6 +1417,46 @@ pub(crate) fn is_document_start_marker(line: &str) -> bool {
         return rest.starts_with([' ', '\t']);
     }
     false
+}
+
+/// Return `line` with a trailing inline comment removed. A comment
+/// starts at a `#` preceded by a space or tab (YAML 1.2.2 SPEC, 7.1);
+/// `#` characters inside single- or double-quoted scalars are content.
+/// Used only for structural lookahead, never to change what the scalar
+/// scanners see.
+pub(crate) fn strip_inline_comment(line: &str) -> &str {
+    let mut prev = '\0';
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (i, c) in line.char_indices() {
+        if in_double {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_double = false;
+            }
+        } else if in_single {
+            // A doubled `''` toggles twice, leaving the state inside
+            // the quoted scalar, which is exactly right.
+            if c == '\'' {
+                in_single = false;
+            }
+        } else {
+            match c {
+                '\'' => in_single = true,
+                '"' => in_double = true,
+                '#' if i == 0 || matches!(prev, ' ' | '\t') => {
+                    return line[..i].trim_end_matches([' ', '\t']);
+                }
+                _ => {}
+            }
+        }
+        prev = c;
+    }
+    line.trim_end_matches([' ', '\t'])
 }
 
 /// Find the start of an inline comment: a `#` preceded by a space or

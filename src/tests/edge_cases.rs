@@ -746,3 +746,23 @@ fn test_block_alias_cannot_carry_node_properties() {
         assert_eq!(err.kind(), crate::ErrorKind::InvalidAnchor, "{input:?}");
     }
 }
+
+#[test]
+fn test_inline_comments_do_not_affect_block_structure() {
+    // An inline comment is a presentation detail: a `: ` inside it
+    // must not turn a scalar into a mapping or a mapping value into a
+    // nested mapping (YAML 1.2.2 SPEC, 7.1).
+    assert_eq!(scalar_values("a # b: c\n"), vec!["a"]);
+    assert_eq!(scalar_values("- a # b: c\n"), vec!["a"]);
+    assert_eq!(scalar_values("a: 1 # b: c\n"), vec!["a", "1"]);
+    assert_eq!(
+        scalar_values("a: > # b: c\n  text\n"),
+        vec!["a", "text\n"]
+    );
+    assert_eq!(scalar_values("? a # b: c\n: 1\n"), vec!["a", "1"]);
+    assert_eq!(scalar_values("--- a # b: c\n"), vec!["a"]);
+
+    // A `#` inside a quoted scalar is content, not a comment.
+    assert_eq!(scalar_values("'a # b': c\n"), vec!["a # b", "c"]);
+    assert_eq!(scalar_values("\"a # b\": c\n"), vec!["a # b", "c"]);
+}
