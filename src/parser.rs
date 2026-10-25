@@ -430,6 +430,13 @@ impl<'a> YamlParser<'a> {
             if version.is_empty() || !is_valid_yaml_version(version) {
                 return Err(self.invalid_directive(trimmed));
             }
+            // A version 1.2 processor must reject documents declaring a
+            // different major version (YAML 1.2.2 SPEC, 6.8.1); a
+            // higher minor version (e.g. 1.3) is accepted, as is 1.1.
+            let major = version.split('.').next().unwrap_or_default();
+            if major != "1" {
+                return Err(self.invalid_directive(trimmed));
+            }
             if !after.is_empty() && !after.starts_with('#') {
                 return Err(self.invalid_directive(trimmed));
             }

@@ -714,3 +714,20 @@ fn test_indented_directive_is_rejected() {
     let value: crate::Value = crate::from_str("%YAML 1.2\n---\nx\n").unwrap();
     assert_eq!(value.as_str().unwrap(), "x");
 }
+
+#[test]
+fn test_yaml_directive_major_version() {
+    // A version 1.2 processor must reject documents declaring a
+    // different major version (YAML 1.2.2 SPEC, 6.8.1). Higher minor
+    // versions and 1.1 must still be accepted.
+    let err = YamlParser::parse_to_events("%YAML 2.0\n---\nx\n").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::InvalidDirective);
+    let err = YamlParser::parse_to_events("%YAML 0.9\n---\nx\n").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::InvalidDirective);
+
+    for version in ["1.1", "1.2", "1.3"] {
+        let input = format!("%YAML {version}\n---\nx\n");
+        let value: crate::Value = crate::from_str(&input).unwrap();
+        assert_eq!(value.as_str().unwrap(), "x");
+    }
+}
