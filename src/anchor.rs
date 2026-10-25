@@ -54,7 +54,40 @@ impl<'a> YamlParser<'a> {
             ));
         }
         let name = name.to_string();
-        self.scanner.advance_till_linebreak_or_space();
+        // Consume exactly one separating white-space character after
+        // the name. A flow indicator (`[`, `]`, `{`, `}`, `,`) is not
+        // separation: it terminates the node and must be left for the
+        // caller (e.g. `[&a, b]` is an anchored empty node followed by
+        // an entry `b`).
+        let separated = match self.scanner.peek_char() {
+            Some('\r') => {
+                self.scanner.next_char();
+                if self.scanner.peek_char() == Some('\n') {
+                    self.scanner.next_char();
+                }
+                true
+            }
+            Some(' ') | Some('\t') | Some('\n') => {
+                self.scanner.next_char();
+                true
+            }
+            _ => false,
+        };
+        // Node properties must be separated from their content (YAML
+        // 1.2.2 SPEC, production [161]). A flow sequence/mapping that
+        // starts immediately after the anchor name is content, not an
+        // empty node, so it is invalid without separation.
+        if !separated
+            && matches!(self.scanner.peek_char(), Some('[') | Some('{'))
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidAnchor,
+                "Node properties must be separated from the node content"
+                    .to_string(),
+                start_pos,
+                self.scanner.next_pos,
+            ));
+        }
         if self.scanner.peek_char() == Some('*') {
             return Err(Error::new(
                 ErrorKind::InvalidAnchor,

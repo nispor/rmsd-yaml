@@ -912,3 +912,45 @@ fn test_indented_document_markers_are_flow_content() {
         );
     }
 }
+
+#[test]
+fn test_anchor_before_flow_indicator() {
+    // A flow indicator terminates an anchor's empty node; it must not
+    // be consumed as separation (`[&a, b]` has an anchored empty first
+    // entry followed by `b`).
+    let value: crate::Value = "[&a, b]\n".parse().unwrap();
+    let items = value.as_sequence().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items[0].is_null());
+    assert_eq!(items[0].meta.anchor.as_deref(), Some("a"));
+    assert_eq!(items[1].as_str().unwrap(), "b");
+
+    // The alias resolves to the anchored empty node.
+    let value: crate::Value = "[&a, *a]\n".parse().unwrap();
+    let items = value.as_sequence().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items[1].is_null());
+    assert_eq!(items[1].meta.alias.as_deref(), Some("a"));
+
+    // A non-whitespace character after an anchor is not swallowed: it
+    // starts the node's content and `,` cannot start a plain scalar.
+    assert_eq!(
+        YamlParser::parse_to_events("&a,b\n").unwrap_err().kind(),
+        crate::ErrorKind::InvalidPlainScalarStart
+    );
+
+    // Properties followed by content on the next line still decorate
+    // that content.
+    let value: crate::Value = "&a\nb\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "b");
+    assert_eq!(value.meta.anchor.as_deref(), Some("a"));
+
+    // A flow collection immediately after the anchor name is content,
+    // and node properties require separation before content (YAML
+    // 1.2.2 SPEC, production [161]). It cannot be read as an anchored
+    // empty node followed by an adjacent collection either.
+    for input in ["[&a[1]]\n", "&a[1]\n", "key: &a[1]\n", "&a{x: 1}\n"] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidAnchor, "{input:?}");
+    }
+}
