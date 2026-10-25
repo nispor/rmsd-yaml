@@ -100,7 +100,11 @@ impl<'a> YamlParser<'a> {
             },
         };
 
-        Ok(Some(format!("<{prefix}{}>", decode_percent(suffix))))
+        Ok(Some(format!(
+            "<{}{}>",
+            decode_percent(&prefix),
+            decode_percent(suffix)
+        )))
     }
 
     fn invalid_tag(&self, tag: &str) -> Error {
@@ -113,10 +117,46 @@ impl<'a> YamlParser<'a> {
     }
 }
 
-/// Characters allowed in a tag suffix: `ns-tag-char` is
-/// `ns-uri-char` minus `!` and the flow indicators (YAML 1.2.2 SPEC,
-/// productions [39]/[40]). `%XX` escapes must be complete.
-fn is_valid_tag_suffix(s: &str) -> bool {
+/// Whether `b` is an `ns-uri-char` other than `%XX` escapes: word
+/// characters plus the URI punctuation (YAML 1.2.2 SPEC, production
+/// [39]).
+fn is_ns_uri_char_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'-' | b'#'
+                | b';'
+                | b'/'
+                | b'?'
+                | b':'
+                | b'@'
+                | b'&'
+                | b'='
+                | b'+'
+                | b'$'
+                | b','
+                | b'_'
+                | b'.'
+                | b'!'
+                | b'~'
+                | b'*'
+                | b'\''
+                | b'('
+                | b')'
+                | b'['
+                | b']'
+        )
+}
+
+/// Whether `b` is an `ns-tag-char` other than a `%XX` escape:
+/// `ns-uri-char` minus `!` and the flow indicators (production [40]).
+fn is_ns_tag_char_byte(b: u8) -> bool {
+    is_ns_uri_char_byte(b) && !matches!(b, b'!' | b',' | b'[' | b']')
+}
+
+/// Scan `s` as a run of `ns-uri-char` (or `ns-tag-char` when
+/// `tag_chars` is set), validating that `%XX` escapes are complete.
+fn is_uri_chars(s: &str, tag_chars: bool) -> bool {
     let bytes = s.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
@@ -129,28 +169,11 @@ fn is_valid_tag_suffix(s: &str) -> bool {
                 return false;
             }
             i += 3;
-        } else if b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'-' | b'#'
-                    | b';'
-                    | b'/'
-                    | b'?'
-                    | b':'
-                    | b'@'
-                    | b'&'
-                    | b'='
-                    | b'+'
-                    | b'$'
-                    | b'_'
-                    | b'.'
-                    | b'~'
-                    | b'*'
-                    | b'\''
-                    | b'('
-                    | b')'
-            )
-        {
+        } else if if tag_chars {
+            is_ns_tag_char_byte(b)
+        } else {
+            is_ns_uri_char_byte(b)
+        } {
             i += 1;
         } else {
             return false;
@@ -159,7 +182,43 @@ fn is_valid_tag_suffix(s: &str) -> bool {
     true
 }
 
-/// Decode `%XX` URI escapes in a tag suffix (e.g. `%21` -> `!`). Escaped
+/// Characters allowed in a tag suffix (`ns-tag-char`, production
+/// [40]). `%XX` escapes must be complete.
+fn is_valid_tag_suffix(s: &str) -> bool {
+    is_uri_chars(s, true)
+}
+
+/// Whether `s` is an `ns-tag-prefix` (YAML 1.2.2 SPEC, productions
+/// [101]-[103]): either a local prefix (`!` followed by URI
+/// characters) or a global prefix (an `ns-tag-char` followed by URI
+/// characters).
+pub(crate) fn is_valid_tag_prefix(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    let first_len = if first == b'!' {
+        1
+    } else if first == b'%' {
+        // `ns-tag-char` is a single `ns-uri-char`, and `ns-uri-char`
+        // includes a complete `%XX` escape (productions [39]/[40]).
+        if bytes.len() < 3
+            || !bytes[1].is_ascii_hexdigit()
+            || !bytes[2].is_ascii_hexdigit()
+        {
+            return false;
+        }
+        3
+    } else if is_ns_tag_char_byte(first) {
+        1
+    } else {
+        return false;
+    };
+    is_uri_chars(&s[first_len..], false)
+}
+
+/// Decode `%XX` URI escapes in a tag prefix or suffix (e.g. `%21` -> `!`).
+/// Escaped
 /// bytes are accumulated and decoded as UTF-8 as a whole (falling back
 /// to lossy decoding if the result is not valid UTF-8) so multi-byte
 /// sequences split across several `%XX` escapes (e.g. `%C3%A9` -> `é`)
