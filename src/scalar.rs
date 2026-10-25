@@ -203,9 +203,12 @@ impl<'a> YamlParser<'a> {
             };
             let spaces = line.chars().take_while(|c| *c == ' ').count();
 
-            // A document end marker at column 0 terminates the block
-            // scalar; an indented `...` is content.
-            if is_document_end_marker(line) {
+            // A document marker at column 0 terminates the block
+            // scalar; an indented `...`/`---` is content, and so is a
+            // `---x` without separation (YAML 1.2.2 SPEC, production
+            // [206]).
+            if is_document_end_marker(line) || is_document_start_marker(line)
+            {
                 break;
             }
 
