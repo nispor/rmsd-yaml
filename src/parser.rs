@@ -380,6 +380,20 @@ impl<'a> YamlParser<'a> {
                 self.tag_handles.clear();
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
+            } else if starts_with_document_marker_token(line) {
+                // A `...`/`---` token with trailing content that is not
+                // a comment (e.g. `... foo`) is neither a valid marker
+                // line nor allowed content (YAML 1.2.2 SPEC,
+                // productions [205]/[206]).
+                return Err(Error::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "A document marker line may not contain trailing \
+                         content: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             } else if trimmed.starts_with('%') {
                 // A directive must start at column 0 (YAML 1.2.2 SPEC,
                 // 6.8); an indented `%` cannot start a YAML node

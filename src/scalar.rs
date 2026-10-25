@@ -4,7 +4,8 @@ use crate::{
     Error, ErrorKind, YamlEvent, YamlParser, YamlScalarStyle,
     parser::{
         find_comment_start, find_key_value_separator, is_document_end_marker,
-        is_document_start_marker, strip_inline_comment,
+        is_document_start_marker, starts_with_document_marker_token,
+        strip_inline_comment,
     },
 };
 
@@ -210,6 +211,17 @@ impl<'a> YamlParser<'a> {
             if is_document_end_marker(line) || is_document_start_marker(line)
             {
                 break;
+            }
+            if starts_with_document_marker_token(line) {
+                return Err(Error::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "A document marker line may not contain trailing \
+                         content: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             }
 
             // A tab inside the indentation region is an error (a tab
@@ -833,10 +845,27 @@ impl<'a> YamlParser<'a> {
 
             // A `---` document start marker terminates the scalar too.
             if (!first_line || starts_at_line_start)
-                && line.starts_with("---")
-                && (line.len() == 3 || line.chars().nth(3) == Some(' '))
+                && is_document_start_marker(line)
             {
                 break;
+            }
+
+            // A `...`/`---` token at column 0 with trailing non-comment
+            // content is forbidden (YAML 1.2.2 SPEC, production [206]).
+            // A marker-looking first line that starts mid-line (e.g.
+            // the value in `key: --- x`) is ordinary content.
+            if self.scanner.next_pos.column == 1
+                && starts_with_document_marker_token(line)
+            {
+                return Err(Error::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "A document marker line may not contain trailing \
+                         content: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             }
 
             let trimmed = line.trim_start_matches(' ');
