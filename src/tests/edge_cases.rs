@@ -634,3 +634,35 @@ fn test_document_marker_at_line_start_ends_document() {
     let value: crate::Value = crate::from_str("---\n...\n").unwrap();
     assert!(value.data == crate::ValueData::Null);
 }
+
+#[test]
+fn test_flow_mapping_value_indicator_before_collection() {
+    // A `:` in a flow collection separates the key from the value when
+    // it is followed by any flow indicator, not only `,`/`]`/`}`. This
+    // keeps JSON-like `{a:[1, 2]}` and `{a:{b: c}}` parseable (YAML
+    // 1.2.2 SPEC, production [147]: `c-ns-flow-map-separate-value`
+    // requires the character after `:` to not be `ns-plain-safe`, and
+    // `ns-plain-safe(FLOW-IN)` excludes `[` and `{`).
+    let value: crate::Value = crate::from_str("{a:[1, 2]}").unwrap();
+    let a = value.get("a").unwrap();
+    assert_eq!(
+        a.as_sequence().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>(),
+        vec!["1".to_string(), "2".to_string()]
+    );
+
+    let value: crate::Value = crate::from_str("{a:{b: c}}").unwrap();
+    let a = value.get("a").unwrap();
+    assert_eq!(
+        a.as_mapping().unwrap().get(&"b".into()).unwrap().as_str().unwrap(),
+        "c"
+    );
+
+    // Same for the flow-sequence single-pair form.
+    let value: crate::Value = crate::from_str("[a:{b: c}]").unwrap();
+    let entry = &value.as_sequence().unwrap()[0];
+    assert_eq!(
+        entry.as_mapping().unwrap().get(&"a".into()).unwrap().as_mapping().unwrap()
+            .get(&"b".into()).unwrap().as_str().unwrap(),
+        "c"
+    );
+}
