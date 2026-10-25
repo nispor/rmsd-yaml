@@ -511,7 +511,9 @@ impl<'a> YamlParser<'a> {
                             | Some('\n')
                             | Some('\r')
                             | Some(',')
+                            | Some('[')
                             | Some(']')
+                            | Some('{')
                             | Some('}')
                     ) {
                         break;
@@ -565,7 +567,9 @@ impl<'a> YamlParser<'a> {
                                     | Some('\n')
                                     | Some('\r')
                                     | Some(',')
+                                    | Some('[')
                                     | Some(']')
+                                    | Some('{')
                                     | Some('}')
                             ) {
                                 break;
