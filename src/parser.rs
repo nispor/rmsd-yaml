@@ -397,6 +397,20 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
+                if self.saw_directive {
+                    // A directives document must begin with an
+                    // explicit `---` marker (YAML 1.2.2 SPEC,
+                    // production [209]); directives cannot decorate a
+                    // bare document.
+                    return Err(Error::new(
+                        ErrorKind::InvalidDirective,
+                        "Directives must be followed by an explicit \
+                         document start marker `---`"
+                            .to_string(),
+                        self.scanner.next_pos,
+                        self.scanner.next_pos,
+                    ));
+                }
                 self.push_event(YamlEvent::DocumentStart(
                     false,
                     self.scanner.next_pos,

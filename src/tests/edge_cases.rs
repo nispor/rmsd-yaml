@@ -837,3 +837,24 @@ fn test_block_scalar_header_accepts_tab_separation() {
     assert_eq!(scalar_values("| \t# comment\n text\n"), vec!["text\n"]);
     assert_eq!(scalar_values("|2\t# comment\n  text\n"), vec!["text\n"]);
 }
+
+#[test]
+fn test_directives_require_explicit_document_start() {
+    // A directives document must be followed by `---` (YAML 1.2.2
+    // SPEC, production [209]); directives used to decorate a bare
+    // document.
+    for input in [
+        "%YAML 1.2\nfoo\n",
+        "%TAG !e! tag:example.com,2000:app/\nfoo\n",
+        "%YAML 1.2\n# comment\nfoo\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidDirective, "{input:?}");
+    }
+
+    // Comments and empty lines between the directive and `---` are
+    // fine.
+    let value: crate::Value =
+        "%YAML 1.2\n# comment\n\n---\nfoo\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "foo");
+}
