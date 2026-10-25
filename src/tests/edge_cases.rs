@@ -666,3 +666,20 @@ fn test_flow_mapping_value_indicator_before_collection() {
         "c"
     );
 }
+
+#[test]
+fn test_document_end_marker_with_trailing_whitespace() {
+    // A document end marker may be followed by separation spaces (and
+    // an optional comment) before the line break (YAML 1.2.2 SPEC,
+    // productions [204]/[205]). Trailing spaces used to make `...`
+    // parse as a plain scalar.
+    let value: crate::Value = crate::from_str("...   \n").unwrap();
+    assert!(value.data == crate::ValueData::Null);
+
+    let value: crate::Value = crate::from_str("a: 1\n...\t\n").unwrap();
+    assert_eq!(value.get("a").unwrap().as_str().unwrap(), "1");
+
+    // The marker also terminates an open block scalar.
+    let value: crate::Value = crate::from_str("k: |-\n  x\n...   \n").unwrap();
+    assert_eq!(value.get("k").unwrap().as_str().unwrap(), "x");
+}
