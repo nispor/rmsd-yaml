@@ -785,3 +785,44 @@ fn test_indented_plain_scalar_indicator_start() {
     assert_eq!(map.len(), 1);
     assert_eq!(map.iter().next().unwrap().1.as_str().unwrap(), "foo");
 }
+
+#[test]
+fn test_raw_non_printable_characters_are_rejected() {
+    // YAML streams may only contain the printable character subset
+    // (YAML 1.2.2 SPEC, 5.1); raw C0/C1 controls (other than
+    // tab/LF/CR/NEL), DEL, U+FFFE and U+FFFF must be rejected.
+    for input in [
+        "a: \u{0}\n",
+        "a: \u{1}\n",
+        "a: \u{7f}\n",
+        "a: \u{80}\n",
+        "a: \u{9f}\n",
+        "a: \u{fffe}\n",
+        "a: \u{ffff}\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidCharacter, "{input:?}");
+    }
+
+    // Printable non-ASCII, NEL, tab and astral characters stay
+    // accepted.
+    for input in [
+        "a: \t\n",
+        "a: \u{85}\n",
+        "a: \u{a0}\n",
+        "a: \u{1F600}\n",
+    ] {
+        assert!(YamlParser::parse_to_events(input).is_ok(), "{input:?}");
+    }
+
+    // A raw forbidden character can still be expressed with an escape
+    // inside a quoted scalar.
+    let value: crate::Value = "\"\\x01\"\n".parse().unwrap();
+    assert_eq!(value.as_str().unwrap(), "\u{1}");
+
+    // A leading stream BOM is not content, so it must not shift the
+    // reported error column.
+    let err = YamlParser::parse_to_events("\u{feff}a: \u{0}\n").unwrap_err();
+    assert_eq!(err.kind(), crate::ErrorKind::InvalidCharacter);
+    assert_eq!(err.start_pos(), crate::YamlPosition::new(1, 4));
+}

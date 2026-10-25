@@ -11,6 +11,11 @@ pub enum ErrorKind {
     /// Found character not for start of any token. e.g. (\t cannot be used
     /// as start of token)
     InvalidStartOfToken,
+    /// A raw character outside YAML's printable character set (e.g. a
+    /// C0 control other than tab/LF/CR, DEL, or a C1 control). Such
+    /// characters must be escaped inside a quoted scalar (YAML 1.2.2
+    /// SPEC, 5.1).
+    InvalidCharacter,
     /// Invalid position string
     InvalidPosition,
     /// YAML reserved indicators( @ or `) can't start a plain scalar.
@@ -123,6 +128,7 @@ impl std::fmt::Display for ErrorKind {
                     "unfinished_sequence_indicator",
                 Self::IndentTooSmall => "indent_too_small",
                 Self::InvalidStartOfToken => "invalid_start_of_token",
+                Self::InvalidCharacter => "invalid_character",
                 Self::ExpectingCommentOrLineBreak =>
                     "expecting_comment_or_linebreak",
                 Self::InvalidPlainScalarStart => "invalid_plain_scalar_start",
