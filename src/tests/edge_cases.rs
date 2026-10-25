@@ -731,3 +731,18 @@ fn test_yaml_directive_major_version() {
         assert_eq!(value.as_str().unwrap(), "x");
     }
 }
+
+#[test]
+fn test_block_alias_cannot_carry_node_properties() {
+    // An alias denotes a reference and may not be anchored or tagged
+    // (YAML 1.2.2 SPEC, 6.9.2). The block path used to silently drop
+    // the properties.
+    for input in [
+        "a: &x 1\nb: !t *x\n",
+        "x: &a 1\ny: !<tag:yaml.org,2002:str> *a\n",
+        "!t *b\n",
+    ] {
+        let err = YamlParser::parse_to_events(input).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidAnchor, "{input:?}");
+    }
+}
