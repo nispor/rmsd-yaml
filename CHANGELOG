@@ -1,4 +1,49 @@
 # Changelog
+## [0.2.0] - 2026-10-28
+### Breaking changes
+ - `ErrorKind` and `YamlPosition` now implement `FromStr` instead of
+   `TryFrom<&str>`. (3096b38)
+ - `parser`: Reject raw non-printable characters. This adds the
+   `ErrorKind::InvalidCharacter` variant; because `ErrorKind` is not
+   `#[non_exhaustive]`, exhaustive matches in downstream code must be
+   updated. (6929013)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - deserializer: Handle ValueData::Null in deserialize_any. (e2b5e4d)
+ - parser: Enforce quoted-scalar continuation indentation for single quotes. (b23e2e9)
+ - parser: End flow plain scalars at ':' before '[' or '{'. (8b045c7)
+ - parser: Accept trailing white space after a document end marker. (f7064f9)
+ - parser: Recognize document start markers only at column 0. (f16bb6d)
+ - parser: Reject indented directives. (8d078de)
+ - parser: Reject a zero block-scalar indentation indicator after chomping. (7326953)
+ - parser: Allow a trailing comment on %TAG directive lines. (bb6bad9)
+ - parser: Reject %YAML directives with an unsupported major version. (33c50d7)
+ - parser: Reject node properties on block aliases. (616efe3)
+ - parser: Ignore inline comments when detecting block structure. (6858281)
+ - parser: Fix plain-scalar first-character checks with indentation. (d836c80)
+ - value: Fix integer/float Core Schema resolution. (449e086)
+ - serializer: Escape astral characters with \U instead of \u. (9a3c8af)
+ - serializer: Fix lossy folding of long scalars and max_width 0. (a56c122)
+ - parser: Accept tab separation in block scalar headers. (1f89fd8)
+ - parser: Require an explicit document start after directives. (2bbfef0)
+ - parser: Validate reserved directive names and tag handles. (52ad0da)
+ - parser: Validate tag shorthand suffixes. (9d2e785)
+ - parser: Treat tabs as separation in flow plain scalars. (cdc5e06)
+ - parser: End root block scalars at a document start marker. (54639cc)
+ - parser: Only reject column-0 document markers inside flow collections. (99bdab5)
+ - parser: Do not consume a flow indicator as anchor separation. (1f6b2c0)
+ - parser: Reject document marker tokens with trailing content. (cf2045f)
+ - serializer: Preserve content line breaks in single-quoted dumps. (d5d3779)
+ - serializer: Escape a leading byte order mark. (b5c4f68)
+ - parser: Validate %TAG directive prefixes. (df61757)
+ - parser: Validate verbatim tags. (cd3bc24)
+ - parser: Treat ':\t' as a mapping separator in plain-scalar lookahead. (4c0de84)
+ - parser: Require separation after a verbatim tag. (fa4718d)
+ - serializer: Fix nested folded scalar indentation. (80e632e)
+
 ## [0.1.1] - 2026-09-21
 ### Breaking changes
  - N/A
