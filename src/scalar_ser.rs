@@ -22,8 +22,9 @@ pub(crate) fn to_scalar_string(
         // line is still valid YAML).
         input.to_string()
     } else {
-        // Break the long line with double-quoted folding: each folded
-        // line is indented by one space relative to the opening quote.
+        // Break the long line with double-quoted folding. A continuation
+        // line must be indented more than the enclosing block, so use the
+        // scalar's indentation (at least one space).
         let mut lines: Vec<String> = Vec::new();
         let mut current = String::new();
         let mut current_width = 0usize;
@@ -43,7 +44,8 @@ pub(crate) fn to_scalar_string(
             current_width += word.chars().count();
         }
         lines.push(current);
-        format!("\"{}\"", lines.join("\n "))
+        let continuation = " ".repeat(indent_count.max(1));
+        format!("\"{}\"", lines.join(&format!("\n{continuation}")))
     }
 }
 

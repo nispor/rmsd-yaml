@@ -25,6 +25,16 @@ struct S {
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct N(u32);
 
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct LongTitle {
+    title: String,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct NestedLongTitle {
+    cves: Vec<LongTitle>,
+}
+
 fn round_trip<T>(value: &T, expected: &str)
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
@@ -156,6 +166,23 @@ fn test_long_line_is_folded() {
     assert!(s.contains('\n'), "folds: {s:?}");
     let back: String = from_str(&s).unwrap();
     assert_eq!(back, long);
+}
+
+#[test]
+fn test_nested_long_scalar_folding_round_trips() {
+    // A folded continuation line must be indented past the enclosing
+    // block, not just one space from the start of the line.
+    let value = NestedLongTitle {
+        cves: vec![LongTitle {
+            title: "RPK Server Signature Algorithm Selection Can Dereference \
+                    a Missing Certificate"
+                .to_string(),
+        }],
+    };
+    let s = to_string(&value).unwrap();
+    assert!(s.contains('\n'), "folds: {s:?}");
+    let back: NestedLongTitle = from_str(&s).unwrap();
+    assert_eq!(back, value);
 }
 
 #[test]
