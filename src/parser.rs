@@ -41,6 +41,10 @@ pub(crate) struct YamlParser<'a> {
     /// Whether a `%YAML` directive was seen since the last document
     /// boundary; a second `%YAML` for the same document is an error.
     yaml_directive_seen: bool,
+    /// Whether the previous document ended with an explicit `...`
+    /// marker (or no document has been parsed yet), so a new bare
+    /// document may start without another `...`.
+    doc_terminated: bool,
     /// Current node nesting depth, incremented by `handle_node()` and
     /// `handle_flow_node()` (the two recursive "parse one more node"
     /// entry points) and checked against `max_depth` to guard against a
@@ -183,27 +187,17 @@ impl<'a> YamlParser<'a> {
         Self::parse_to_events_with_max_depth(input, MAX_NESTING_DEPTH)
     }
 
-    /// Like [`Self::parse_to_events`], but nodes nested deeper than
-    /// `max_depth` are rejected instead of the default
-    /// `MAX_NESTING_DEPTH`. Backs `YamlParseOption::max_depth`.
-    pub(crate) fn parse_to_events_with_max_depth(
-        input: &'a str,
-        max_depth: usize,
-    ) -> Result<Vec<YamlEvent>, Error> {
-        // Strip a single leading UTF-8 BOM (`U+FEFF`, YAML 1.2.2 SPEC,
-        // 2.1.1) if present. Without this, the BOM character merges
-        // into the first token of the stream — e.g. `\u{feff}a: 1`
-        // would parse as the key `"\u{feff}a"` (a single character of
-        // BOM followed by `a`) instead of the correct key `"a"`.
-        // `U+FEFF` appearing anywhere else remains ordinary content
-        // (`str::strip_prefix` only removes a leading occurrence).
-        let input = input.strip_prefix('\u{feff}').unwrap_or(input);
-        // YAML streams consist of the printable subset of Unicode
-        // only (YAML 1.2.2 SPEC, 5.1): C0 controls other than
-        // tab/LF/CR, DEL, the C1 controls other than NEL, and
-        // U+FFFE/U+FFFF must be rejected when they appear raw. The
-        // stream BOM is not content, so validate (and report positions
-        // in) the BOM-stripped input.
+    /// Strip a single leading UTF-8 BOM (`U+FEFF`, YAML 1.2.2 SPEC,
+    /// 2.1.1). `U+FEFF` appearing anywhere else remains ordinary
+    /// content (`str::strip_prefix` only removes a leading occurrence).
+    pub(crate) fn strip_bom(input: &str) -> &str {
+        input.strip_prefix('\u{feff}').unwrap_or(input)
+    }
+
+    /// Reject raw characters outside YAML's printable subset (YAML
+    /// 1.2.2 SPEC, 5.1): C0 controls other than tab/LF/CR, DEL, the C1
+    /// controls other than NEL, and U+FFFE/U+FFFF.
+    pub(crate) fn validate_input(input: &str) -> Result<(), Error> {
         if let Some((offset, c)) =
             input.char_indices().find(|(_, c)| !is_yaml_printable(*c))
         {
@@ -219,8 +213,19 @@ impl<'a> YamlParser<'a> {
                 pos,
             ));
         }
-        let mut parser = Self {
-            scanner: YamlScanner::new(input),
+        Ok(())
+    }
+
+    /// Build a parser for already validated input, resuming at
+    /// `start_line` and with the previous document's termination state.
+    pub(crate) fn new_validated(
+        input: &'a str,
+        max_depth: usize,
+        doc_terminated: bool,
+        start_line: usize,
+    ) -> Self {
+        Self {
+            scanner: YamlScanner::new_at(input, start_line),
             states: Vec::new(),
             events: Vec::new(),
             block_indent: None,
@@ -230,95 +235,119 @@ impl<'a> YamlParser<'a> {
             tag_handles: HashMap::new(),
             saw_directive: false,
             yaml_directive_seen: false,
+            doc_terminated,
             depth: 0,
             max_depth,
-        };
-        loop {
-            let cur_pos = parser.scanner.done_pos;
-            parser.handle_stream()?;
-            if parser.scanner.is_empty() {
-                break;
-            }
-            if parser.scanner.done_pos == cur_pos {
-                return Err(Error::new(
-                    ErrorKind::Bug,
-                    format!(
-                        "YamlParser::parse_to_events(): dead-loop: remains \
-                         {:?}",
-                        parser.scanner.remains()
-                    ),
-                    cur_pos,
-                    cur_pos,
-                ));
-            }
         }
-        for event in &parser.events {
+    }
+
+    /// Build a parser for a stream, validating the input and applying
+    /// the configurable nesting limit.
+    pub(crate) fn new_with_max_depth(
+        input: &'a str,
+        max_depth: usize,
+    ) -> Result<Self, Error> {
+        let input = Self::strip_bom(input);
+        Self::validate_input(input)?;
+        Ok(Self::new_validated(input, max_depth, true, 1))
+    }
+
+    /// Byte offset of the scanner in the input slice it was created
+    /// with.
+    pub(crate) fn offset(&self) -> usize {
+        self.scanner.offset()
+    }
+
+    /// Current 1-based line, used to resume error positions when a
+    /// stream is parsed one document at a time.
+    pub(crate) fn current_line(&self) -> usize {
+        self.scanner.next_pos.line
+    }
+
+    /// Whether the just-parsed document was explicitly terminated.
+    pub(crate) fn is_doc_terminated(&self) -> bool {
+        self.doc_terminated
+    }
+
+    /// Like [`Self::parse_to_events`], but nodes nested deeper than
+    /// `max_depth` are rejected instead of the default
+    /// `MAX_NESTING_DEPTH`. Backs `YamlParseOption::max_depth`.
+    pub(crate) fn parse_to_events_with_max_depth(
+        input: &'a str,
+        max_depth: usize,
+    ) -> Result<Vec<YamlEvent>, Error> {
+        let mut parser = Self::new_with_max_depth(input, max_depth)?;
+        let mut events = vec![YamlEvent::StreamStart];
+        while let Some(mut document) = parser.next_document()? {
+            events.append(&mut document);
+        }
+        events.push(YamlEvent::StreamEnd);
+        for event in &events {
             log::trace!("{:?}", event);
         }
 
-        Ok(parser.events)
+        Ok(events)
     }
 
-    /// Stream started, but not `---` or string other than `b-break` found yet.
-    fn handle_stream(&mut self) -> Result<(), Error> {
-        self.push_event(YamlEvent::StreamStart);
-        log::trace!("handle_stream {:?}", self.scanner.remains());
-        // Whether the previous document was terminated by `...` (or no
-        // document has been parsed yet).
-        let mut doc_terminated = true;
-        // Whether at least one document has been seen in this stream
-        // (never reset; used for the empty-stream check).
-        let mut had_any_document = false;
-        // Whether the document currently being parsed has started.
-        let mut doc_started = false;
-        while let Some(line) = self.scanner.peek_line() {
+    /// Parse the next document and return its events, starting with
+    /// `DocumentStart` and ending with `DocumentEnd`. Returns `None`
+    /// once the stream has no more documents.
+    ///
+    /// Parsing one document per call is what makes the public
+    /// multi-document [`Deserializer`](crate::Deserializer) lazy: a
+    /// later malformed document does not prevent an earlier one from
+    /// being used, and no whole-stream event vector is retained.
+    pub(crate) fn next_document(
+        &mut self,
+    ) -> Result<Option<Vec<YamlEvent>>, Error> {
+        let event_start = self.events_len();
+        log::trace!("next_document {:?}", self.scanner.remains());
+        loop {
+            let Some(line) = self.scanner.peek_line() else {
+                if self.saw_directive {
+                    return Err(Error::new(
+                        ErrorKind::InvalidDirective,
+                        "Directives must be followed by a document, but the \
+                         stream ended without one"
+                            .to_string(),
+                        self.scanner.done_pos,
+                        self.scanner.done_pos,
+                    ));
+                }
+                return Ok(None);
+            };
             let trimmed = line.trim_start_matches([' ', '\t']);
             if trimmed.is_empty() {
                 self.scanner.advance_till_linebreak();
-            } else if trimmed.starts_with('#') {
+                continue;
+            }
+            if trimmed.starts_with('#') {
                 // Comment lines are ignored at stream level.
                 self.scanner.advance_till_linebreak();
-            } else if doc_terminated
+                continue;
+            }
+            if self.doc_terminated
                 && line.starts_with('%')
                 && self.handle_directive(line)?
             {
                 // `%YAML`, `%TAG` or a reserved directive. Directives
                 // must sit on a non-indented line (YAML 1.2.2 SPEC,
                 // 6.8).
-            } else if line == "---" {
+                continue;
+            }
+            if line == "---" {
                 // A document start marker is only recognized at column
                 // 0 (YAML 1.2.2 SPEC, 9.1.2); an indented `---` is
                 // ordinary content.
-                let indent_count = 0;
-                if doc_started {
-                    // A new document invalidates the previous one's
-                    // `%TAG` declarations and implicitly ends the
-                    // previous document.
-                    self.tag_handles.clear();
-                    self.push_event(YamlEvent::DocumentEnd(
-                        false,
-                        self.scanner.done_pos,
-                    ));
-                }
                 self.push_event(YamlEvent::DocumentStart(
                     true,
                     self.scanner.next_pos,
                 ));
                 self.scanner.advance_till_linebreak();
-                self.handle_node(indent_count, indent_count, None, None)?;
-                doc_terminated = false;
-                doc_started = true;
-                had_any_document = true;
-                self.saw_directive = false;
-                self.yaml_directive_seen = false;
-            } else if line.starts_with("--- ") || line.starts_with("---\t") {
-                if doc_started {
-                    self.tag_handles.clear();
-                    self.push_event(YamlEvent::DocumentEnd(
-                        false,
-                        self.scanner.done_pos,
-                    ));
-                }
+                self.handle_node(0, 0, None, None)?;
+                break;
+            }
+            if line.starts_with("--- ") || line.starts_with("---\t") {
                 // A block mapping may not start on the same line as the
                 // `---` marker (YAML 1.2.2 SPEC, 9.1.2.3), e.g.
                 // `--- a: b` or `--- &anchor a: b`.
@@ -352,13 +381,10 @@ impl<'a> YamlParser<'a> {
                 ));
                 self.scanner.advance_offset(4);
                 self.handle_node(0, 0, None, None)?;
-                doc_terminated = false;
-                doc_started = true;
-                had_any_document = true;
-                self.saw_directive = false;
-                self.yaml_directive_seen = false;
-            } else if is_document_end_marker(line) {
-                if self.saw_directive && !doc_started {
+                break;
+            }
+            if is_document_end_marker(line) {
+                if self.saw_directive {
                     return Err(Error::new(
                         ErrorKind::InvalidDirective,
                         "Directives must be followed by a document, but the \
@@ -368,19 +394,14 @@ impl<'a> YamlParser<'a> {
                         self.scanner.next_pos,
                     ));
                 }
-                if doc_started {
-                    self.push_event(YamlEvent::DocumentEnd(
-                        true,
-                        self.scanner.next_pos,
-                    ));
-                }
                 self.scanner.advance_till_linebreak_or_space();
-                doc_terminated = true;
-                doc_started = false;
+                self.doc_terminated = true;
                 self.tag_handles.clear();
                 self.saw_directive = false;
                 self.yaml_directive_seen = false;
-            } else if starts_with_document_marker_token(line) {
+                continue;
+            }
+            if starts_with_document_marker_token(line) {
                 // A `...`/`---` token with trailing content that is not
                 // a comment (e.g. `... foo`) is neither a valid marker
                 // line nor allowed content (YAML 1.2.2 SPEC,
@@ -394,72 +415,114 @@ impl<'a> YamlParser<'a> {
                     self.scanner.next_pos,
                     self.scanner.next_pos,
                 ));
-            } else if trimmed.starts_with('%') {
+            }
+            if trimmed.starts_with('%') {
                 // A directive must start at column 0 (YAML 1.2.2 SPEC,
                 // 6.8); an indented `%` cannot start a YAML node
                 // either.
                 return Err(self.invalid_directive(line));
-            } else {
-                if !doc_terminated {
-                    return Err(Error::new(
-                        ErrorKind::MissingDocumentEndMarkerBeforeDirective,
-                        format!(
-                            "Expecting document end marker `...` before new \
-                             document content: {line}"
-                        ),
-                        self.scanner.next_pos,
-                        self.scanner.next_pos,
-                    ));
-                }
-                if self.saw_directive {
-                    // A directives document must begin with an
-                    // explicit `---` marker (YAML 1.2.2 SPEC,
-                    // production [209]); directives cannot decorate a
-                    // bare document.
-                    return Err(Error::new(
-                        ErrorKind::InvalidDirective,
-                        "Directives must be followed by an explicit document \
-                         start marker `---`"
-                            .to_string(),
-                        self.scanner.next_pos,
-                        self.scanner.next_pos,
-                    ));
-                }
-                self.push_event(YamlEvent::DocumentStart(
-                    false,
+            }
+            if !self.doc_terminated {
+                return Err(Error::new(
+                    ErrorKind::MissingDocumentEndMarkerBeforeDirective,
+                    format!(
+                        "Expecting document end marker `...` before new \
+                         document content: {line}"
+                    ),
+                    self.scanner.next_pos,
                     self.scanner.next_pos,
                 ));
-                self.handle_node(0, 0, None, None)?;
-                doc_terminated = false;
-                doc_started = true;
-                had_any_document = true;
-                self.saw_directive = false;
-                self.yaml_directive_seen = false;
+            }
+            if self.saw_directive {
+                // A directives document must begin with an explicit
+                // `---` marker (YAML 1.2.2 SPEC, production [209]);
+                // directives cannot decorate a bare document.
+                return Err(Error::new(
+                    ErrorKind::InvalidDirective,
+                    "Directives must be followed by an explicit document \
+                     start marker `---`"
+                        .to_string(),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+            self.push_event(YamlEvent::DocumentStart(
+                false,
+                self.scanner.next_pos,
+            ));
+            self.handle_node(0, 0, None, None)?;
+            break;
+        }
+
+        self.saw_directive = false;
+        self.yaml_directive_seen = false;
+        self.finish_document()?;
+        Ok(Some(self.take_events_since(event_start)))
+    }
+
+    /// Emit the `DocumentEnd` event after a document's node has been
+    /// parsed and leave the scanner at the next document (or EOF).
+    fn finish_document(&mut self) -> Result<(), Error> {
+        // Comments and empty lines between the node and the document
+        // marker belong to neither document.
+        self.skip_comment_and_empty_lines();
+        match self.scanner.peek_line() {
+            None => {
+                self.push_event(YamlEvent::DocumentEnd(
+                    false,
+                    self.scanner.done_pos,
+                ));
+                self.doc_terminated = false;
+            }
+            Some(line) if is_document_end_marker(line) => {
+                let pos = self.scanner.next_pos;
+                self.push_event(YamlEvent::DocumentEnd(true, pos));
+                self.scanner.advance_till_linebreak_or_space();
+                self.doc_terminated = true;
+            }
+            Some(line)
+                if line == "---"
+                    || line.starts_with("--- ")
+                    || line.starts_with("---\t") =>
+            {
+                self.push_event(YamlEvent::DocumentEnd(
+                    false,
+                    self.scanner.done_pos,
+                ));
+                self.doc_terminated = false;
+            }
+            Some(line) if starts_with_document_marker_token(line) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidStartOfToken,
+                    format!(
+                        "A document marker line may not contain trailing \
+                         content: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
+            }
+            Some(line)
+                if line.starts_with('%')
+                    || line
+                        .trim_start_matches([' ', '\t'])
+                        .starts_with('%') =>
+            {
+                return Err(self.invalid_directive(line));
+            }
+            Some(line) => {
+                return Err(Error::new(
+                    ErrorKind::MissingDocumentEndMarkerBeforeDirective,
+                    format!(
+                        "Expecting document end marker `...` before new \
+                         document content: {line}"
+                    ),
+                    self.scanner.next_pos,
+                    self.scanner.next_pos,
+                ));
             }
         }
-
-        if self.saw_directive && !doc_started {
-            return Err(Error::new(
-                ErrorKind::InvalidDirective,
-                "Directives must be followed by a document, but the stream \
-                 ended without one"
-                    .to_string(),
-                self.scanner.done_pos,
-                self.scanner.done_pos,
-            ));
-        }
-
-        if !had_any_document {
-            // An empty stream has no documents (e.g. empty input or a
-            // bare `...`).
-        } else if !doc_terminated {
-            // The last document did not end with an explicit `...`.
-            self.push_event(YamlEvent::DocumentEnd(
-                false,
-                self.scanner.done_pos,
-            ));
-        }
-        self.push_event(YamlEvent::StreamEnd);
+        self.tag_handles.clear();
         Ok(())
     }
 

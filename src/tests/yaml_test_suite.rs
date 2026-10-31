@@ -289,6 +289,65 @@ fn yaml_test_suit_out_yaml() {
     log::info!("Tested {tested} {OUT_YAML_FILE_NAME} tests");
 }
 
+/// Exercise the multi-document stream iterator over every
+/// yaml-test-suite case. Every non-error case must yield documents
+/// that deserialize to `Value`; error cases must surface an error from
+/// one of the documents.
+#[test]
+fn yaml_test_suit_stream_iteration() {
+    use serde::Deserialize;
+
+    super::testlib::init_logger();
+
+    let test_data_dir =
+        std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join(TEST_DATA_FOLDER_PATH);
+    let test_paths = discover_test_paths(&test_data_dir);
+    let mut multi_document_cases = 0usize;
+
+    for test_path in test_paths {
+        let test_path_str = test_path
+            .strip_prefix(&test_data_dir)
+            .unwrap()
+            .display()
+            .to_string();
+        let input_yaml = read_file(&test_path.join(INPUT_YAML_FILE_NAME));
+        let is_error = test_path.join("error").exists();
+        let documents = crate::Deserializer::from_str(&input_yaml);
+        let mut saw_error = false;
+        let mut documents_len = 0usize;
+
+        for document in documents {
+            match crate::Value::deserialize(document) {
+                Ok(_) => {
+                    documents_len += 1;
+                }
+                Err(_) => {
+                    saw_error = true;
+                    if !is_error {
+                        panic!(
+                            "{test_path_str}: stream failed on a valid case"
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+        if is_error {
+            assert!(
+                saw_error,
+                "{test_path_str}: error case produced no error document"
+            );
+        } else if documents_len > 1 {
+            multi_document_cases += 1;
+        }
+    }
+    assert!(
+        multi_document_cases > 0,
+        "expected at least one multi-document test case"
+    );
+}
+
 /// Run the `in.json` comparison for every case except
 /// `SKIPPED_IN_JSON_TEST`.
 #[test]

@@ -13,24 +13,28 @@ pub(crate) struct YamlScanner<'a> {
 }
 
 impl<'a> YamlScanner<'a> {
-    pub(crate) fn new(input: &'a str) -> Self {
+    /// Start scanning at `input`, reporting the first character at
+    /// `start_line`. Used when a stream is parsed one document at a time
+    /// so positions stay absolute within the stream.
+    pub(crate) fn new_at(input: &'a str, start_line: usize) -> Self {
         Self {
             iter: input.char_indices(),
             next_pos: if input.is_empty() {
                 YamlPosition::EOF
             } else {
-                YamlPosition::new(1, 1)
+                YamlPosition::new(start_line, 1)
             },
             done_pos: if input.is_empty() {
                 YamlPosition::EOF
             } else {
-                YamlPosition::new(1, 0)
+                YamlPosition::new(start_line, 0)
             },
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.iter.as_str().is_empty()
+    /// Byte offset of the next character in the original input.
+    pub(crate) fn offset(&self) -> usize {
+        self.iter.offset()
     }
 
     pub(crate) fn remains(&self) -> &'a str {

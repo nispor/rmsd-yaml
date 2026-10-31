@@ -8,6 +8,7 @@ mod map;
 mod scalar;
 mod sequence;
 mod serializer;
+mod stream;
 mod suite_probe;
 mod tag;
 mod testlib;

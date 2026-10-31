@@ -6,8 +6,9 @@ for `serde_yaml` with minimal dependencies (`serde`, `indexmap`, `log`).
 
 ## Features
 
-- YAML 1.2 support
+- YAML 1.2.2 support
 - API similar to serde-yaml
+- Multi-document stream parsing and dumping
 - No `unsafe` code; no C bindings
 
 ## Quick start
@@ -59,6 +60,40 @@ match &value.data {
 # Ok::<(), rmsd_yaml::Error>(())
 ```
 
+## Multi-document streams
+
+`Deserializer` iterates the documents of a stream lazily. Each item is
+a single-document deserializer:
+
+```rust
+use rmsd_yaml::{Deserializer, Value};
+use serde::Deserialize;
+
+let input = "---\nname: first\n---\nname: second\n";
+for document in Deserializer::from_str(input) {
+    let value = Value::deserialize(document)?;
+    println!("{value:?}");
+}
+# Ok::<(), rmsd_yaml::Error>(())
+```
+
+Dumping multiple documents into one stream uses `Serializer`; the
+first document follows the normal options and later documents are
+separated with `---`:
+
+```rust
+use rmsd_yaml::Serializer;
+
+let mut serializer = Serializer::new(Vec::new());
+serializer.serialize(&vec![1, 2])?;
+serializer.serialize(&vec![3])?;
+assert_eq!(serializer.into_inner(), b"- 1\n- 2\n---\n- 3\n".to_vec());
+# Ok::<(), rmsd_yaml::Error>(())
+```
+
+`from_str` and `from_reader` remain single-document APIs and reject a
+stream with more than one document.
+
 ## Serialization options
 
 ```rust
@@ -76,17 +111,11 @@ let yaml = to_string_with_opt(
 # Ok::<(), rmsd_yaml::Error>(())
 ```
 
-## Performance
-
-Run `cargo bench` for a comparison against `serde_yaml` on a
-representative configuration document (parse and serialize throughput).
-
 ## Limitations
 
-* Multi-document YAML streams (`---`-separated) are not supported.
-  Parsing one is an error (`ErrorKind::NoSupportMultipleDocuments`),
-  and there is no API to serialize more than one document into a
-  single output stream. See `TODO.md` for tracking.
+* `from_str`/`from_reader` reject multi-document streams with
+  `ErrorKind::NoSupportMultipleDocuments`; use `Deserializer` for
+  those.
 * Byte-identical round-trip is not promised. `Value::to_string()`
   re-emits parsed documents as faithfully as supported, but
   yaml-test-suite corner cases requiring extensive design changes

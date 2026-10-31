@@ -1,9 +1,7 @@
-- Streaming `Deserializer` (incremental, without the intermediate
-  `YamlValue` tree)
-- Multi-document stream parsing (a lazy, per-document iterator
-  comparable to `serde_yaml::Deserializer`'s `Iterator` impl).
-  The earlier eager `documents`/`documents_with_opt` API was
-  removed since it did not align with `serde_yaml`'s API shape;
-  revisit only on request.
-- Support multi-document streams in the dump
-  (`NoSupportMultipleDocuments` failures)
+- Truly incremental single-document parsing: the parser currently
+  buffers one document's events, so memory is O(largest document).
+- Truly streaming reader input: `Deserializer::from_reader` buffers the
+  whole reader before parsing (the document iterator itself is lazy).
+- Borrowed deserialization (`T: Deserialize<'de>` yielding `&str`)
+  requires borrowing scalar slices from the input; scalars are owned
+  `String`s today.

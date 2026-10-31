@@ -1,4 +1,20 @@
 # Changelog
+## [Unreleased]
+### New features
+ - `Deserializer` iterates multi-document streams lazily; each item is
+   a `DocumentDeserializer`. `from_str`/`from_reader` constructors are
+   provided (reader input is buffered before parsing).
+ - `from_value()` converts an owned `Value` back into a `T`.
+ - `to_writer()`/`to_writer_with_opt()` write a single document.
+ - `Serializer` emits multiple documents into one stream, separating
+   them with `---`.
+ - Single-document deserialization now walks the event stream directly
+   instead of composing a `Value` tree first.
+
+### Bug fixes
+ - deserializer: Move sequence/map/enum data out of the `Value` tree
+   instead of cloning it.
+
 ## [0.2.0] - 2026-10-28
 ### Breaking changes
  - `ErrorKind` and `YamlPosition` now implement `FromStr` instead of
