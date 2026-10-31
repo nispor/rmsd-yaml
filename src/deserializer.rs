@@ -14,7 +14,7 @@ use serde::{
 
 use crate::{
     Error, ErrorKind, MappingAccess, SequenceAccess, Value, ValueData,
-    ValueEnumAccess, YamlPosition, YamlScalarStyle,
+    ValueEnumAccess, YamlPosition, YamlScalarStyle, YamlTag,
     compose::MAX_COMPOSED_NODES, parser::MAX_NESTING_DEPTH,
 };
 
@@ -86,6 +86,11 @@ impl YamlDeserializer {
     where
         V: Visitor<'de>,
     {
+        if matches!(self.parsed.data, ValueData::Tag(_)) {
+            // Consume the tagged node: no `Value` clone is needed.
+            let parsed = std::mem::take(&mut self.parsed);
+            return visitor.visit_enum(ValueEnumAccess::new(parsed));
+        }
         match &self.parsed.data {
             ValueData::Null => self.deserialize_unit(visitor),
             ValueData::String(_) => {
@@ -105,15 +110,12 @@ impl YamlDeserializer {
             }
             ValueData::Array(_) => self.deserialize_seq(visitor),
             ValueData::Map(_) => self.deserialize_map(visitor),
-            ValueData::Tag(_) => {
-                // Deliver the resolved tag through serde's enum
-                // mechanism, like `serde_yaml`. Visitors that
-                // understand enums (`Value`, Rust enums) receive the
-                // tag; generic "any" visitors without `visit_enum`
-                // reject tagged nodes instead of resolving them
-                // transparently.
-                visitor.visit_enum(ValueEnumAccess::new(self.parsed.clone()))
-            }
+            // Deliver the resolved tag through serde's enum mechanism,
+            // like `serde_yaml`. Visitors that understand enums
+            // (`Value`, Rust enums) receive the tag; generic "any"
+            // visitors without `visit_enum` reject tagged nodes
+            // instead of resolving them transparently.
+            ValueData::Tag(_) => unreachable!("tag handled above"),
         }
     }
 
@@ -177,12 +179,19 @@ pub fn from_str_with_opt<'a, T>(
 where
     T: Deserialize<'a>,
 {
-    let parsed = Value::from_str_with_opt(s, &option)?;
+    T::deserialize(crate::stream::Deserializer::from_str_with_opt(s, option))
+}
+
+/// Interpret a [`Value`] as an instance of type `T`, mirroring
+/// `serde_yaml::from_value`.
+pub fn from_value<T>(value: Value) -> Result<T, Error>
+where
+    T: serde::de::DeserializeOwned,
+{
     let mut deserializer = YamlDeserializer {
-        parsed,
+        parsed: value,
         path: String::new(),
     };
-
     T::deserialize(&mut deserializer)
 }
 
@@ -231,22 +240,23 @@ where
 /// assert_eq!(err.kind(), rmsd_yaml::ErrorKind::InputTooLarge);
 /// ```
 pub fn from_reader_with_opt<R, T>(
-    mut rdr: R,
+    rdr: R,
     option: YamlParseOption,
 ) -> Result<T, Error>
 where
     R: std::io::Read,
     T: serde::de::DeserializeOwned,
 {
-    let content = read_to_string_with_limit(&mut rdr, option.max_input_bytes)?;
-    from_str_with_opt(&content, option)
+    T::deserialize(crate::stream::Deserializer::from_reader_with_opt(
+        rdr, option,
+    ))
 }
 
 /// Read `rdr` to a `String`, capped at `max_input_bytes` (or
 /// unbounded when it is `0`). Reads one byte past the limit so a
 /// stream containing exactly `max_input_bytes` can be told apart from
 /// one that exceeds it, instead of silently truncating.
-fn read_to_string_with_limit(
+pub(crate) fn read_to_string_with_limit(
     rdr: &mut impl std::io::Read,
     max_input_bytes: usize,
 ) -> Result<String, Error> {
@@ -549,40 +559,43 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        if let ValueData::Array(v) = &self.parsed.data {
-            // TODO: We cannot move data output of `&mut self`, so we use
-            // to_vec() to clone here. Maybe should use `Option<Value>` for
-            // Self::parsed, where we can use `Option::take()` to move data out.
-            let access = SequenceAccess::new(v.to_vec(), self.path.clone());
-            visitor.visit_seq(access)
-        } else if let ValueData::Tag(tag) = &self.parsed.data {
-            if let ValueData::Array(v) = &tag.data {
-                let access = SequenceAccess::new(v.to_vec(), self.path.clone());
-                visitor.visit_seq(access)
-            } else {
-                Err(Error::new(
-                    ErrorKind::UnexpectedYamlNodeType,
-                    format!(
-                        "Expecting a sequence in tag, got {}",
-                        self.parsed.data
-                    ),
-                    self.parsed.start,
-                    self.parsed.end,
-                ))
+        let start = self.parsed.start;
+        let end = self.parsed.end;
+        let null = self.parsed.is_null();
+        let parsed = std::mem::take(&mut self.parsed);
+        let data = match parsed.data {
+            ValueData::Array(v) => v,
+            ValueData::Tag(tag) => match tag.data {
+                ValueData::Array(v) => v,
+                other => {
+                    let got = ValueData::Tag(Box::new(YamlTag {
+                        name: tag.name,
+                        data: other,
+                    }));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedYamlNodeType,
+                        format!("Expecting a sequence in tag, got {got}"),
+                        start,
+                        end,
+                    ));
+                }
+            },
+            _ if null => {
+                // `a:` and `a: null` deserialize into an empty sequence,
+                // matching serde_yaml.
+                vec![]
             }
-        } else if self.parsed.is_null() {
-            // `a:` and `a: null` deserialize into an empty sequence,
-            // matching serde_yaml.
-            let access = SequenceAccess::new(vec![], self.path.clone());
-            visitor.visit_seq(access)
-        } else {
-            Err(Error::new(
-                ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a sequence, got {}", self.parsed.data),
-                self.parsed.start,
-                self.parsed.end,
-            ))
-        }
+            other => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a sequence, got {other}"),
+                    start,
+                    end,
+                ));
+            }
+        };
+        let access = SequenceAccess::new(data, self.path.clone());
+        visitor.visit_seq(access)
     }
 
     fn deserialize_tuple<V>(
@@ -612,26 +625,43 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        if let ValueData::Map(v) = &self.parsed.data {
-            // TODO: We cannot move data output of `&mut self`, so we use clone
-            // here. Maybe should use `Option<Value>` for Self::parsed,
-            // where we can use `Option::take()` to move data out.
-            let access = MappingAccess::new(*v.clone(), self.path.clone());
-            visitor.visit_map(access)
-        } else if self.parsed.is_null() {
-            // `a:` and `a: null` deserialize into an empty map/struct,
-            // matching serde_yaml.
-            let access =
-                MappingAccess::new(Default::default(), self.path.clone());
-            visitor.visit_map(access)
-        } else {
-            Err(Error::new(
-                ErrorKind::UnexpectedYamlNodeType,
-                format!("Expecting a map, got {}", self.parsed.data),
-                self.parsed.start,
-                self.parsed.end,
-            ))
-        }
+        let start = self.parsed.start;
+        let end = self.parsed.end;
+        let null = self.parsed.is_null();
+        let parsed = std::mem::take(&mut self.parsed);
+        let data = match parsed.data {
+            ValueData::Map(v) => *v,
+            ValueData::Tag(tag) => match tag.data {
+                ValueData::Map(v) => *v,
+                other => {
+                    let got = ValueData::Tag(Box::new(YamlTag {
+                        name: tag.name,
+                        data: other,
+                    }));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedYamlNodeType,
+                        format!("Expecting a map in tag, got {got}"),
+                        start,
+                        end,
+                    ));
+                }
+            },
+            _ if null => {
+                // `a:` and `a: null` deserialize into an empty map/struct,
+                // matching serde_yaml.
+                Default::default()
+            }
+            other => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedYamlNodeType,
+                    format!("Expecting a map, got {other}"),
+                    start,
+                    end,
+                ));
+            }
+        };
+        let access = MappingAccess::new(data, self.path.clone());
+        visitor.visit_map(access)
     }
 
     fn deserialize_struct<V>(
@@ -655,10 +685,7 @@ impl<'de> Deserializer<'de> for &mut YamlDeserializer {
     where
         V: Visitor<'de>,
     {
-        // TODO: We cannot move data output of `&mut self`, so we use clone
-        // here. Maybe should use `Option<Value>` for Self::parsed,
-        // where we can use `Option::take()` to move data out.
-        let access = ValueEnumAccess::new(self.parsed.clone());
+        let access = ValueEnumAccess::new(std::mem::take(&mut self.parsed));
 
         visitor.visit_enum(access)
     }

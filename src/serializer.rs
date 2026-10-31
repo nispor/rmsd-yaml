@@ -105,6 +105,98 @@ where
     to_string_with_opt(value, YamlSerializeOption::default())
 }
 
+/// Serialize a value as a single YAML document into `writer`.
+pub fn to_writer<W, T>(mut writer: W, value: &T) -> Result<(), Error>
+where
+    W: std::io::Write,
+    T: Serialize,
+{
+    to_writer_with_opt(&mut writer, value, YamlSerializeOption::default())
+}
+
+/// Like [`to_writer`], but with explicit serialization options.
+pub fn to_writer_with_opt<W, T>(
+    mut writer: W,
+    value: &T,
+    option: YamlSerializeOption,
+) -> Result<(), Error>
+where
+    W: std::io::Write,
+    T: Serialize,
+{
+    let output = to_string_with_opt(value, option)?;
+    writer.write_all(output.as_bytes())?;
+    Ok(())
+}
+
+/// A writer-based YAML serializer that can emit multiple documents
+/// into a single stream.
+///
+/// The first document follows [`YamlSerializeOption`]'s
+/// `leading_start_indicator`; every later document is preceded by a
+/// `---` marker.
+///
+/// ```rust
+/// use rmsd_yaml::Serializer;
+///
+/// let mut serializer = Serializer::new(Vec::new());
+/// serializer.serialize(&vec![1, 2])?;
+/// serializer.serialize(&vec![3])?;
+/// assert_eq!(
+///     serializer.into_inner(),
+///     b"- 1\n- 2\n---\n- 3\n".to_vec()
+/// );
+/// # Ok::<(), rmsd_yaml::Error>(())
+/// ```
+#[derive(Debug)]
+pub struct Serializer<W> {
+    writer: W,
+    option: YamlSerializeOption,
+    documents: usize,
+}
+
+impl<W: std::io::Write> Serializer<W> {
+    /// Create a serializer writing to `writer` with the default
+    /// options.
+    pub fn new(writer: W) -> Self {
+        Self::with_opt(writer, YamlSerializeOption::default())
+    }
+
+    /// Create a serializer writing to `writer` with explicit options.
+    pub fn with_opt(writer: W, option: YamlSerializeOption) -> Self {
+        Self {
+            writer,
+            option,
+            documents: 0,
+        }
+    }
+
+    /// Serialize `value` as the next document of the stream.
+    pub fn serialize<T>(&mut self, value: &T) -> Result<(), Error>
+    where
+        T: Serialize,
+    {
+        let mut output = to_string_with_opt(value, self.option.clone())?;
+        if self.documents > 0 && !output.starts_with("---") {
+            output.insert_str(0, "---\n");
+        }
+        self.writer.write_all(output.as_bytes())?;
+        self.documents += 1;
+        Ok(())
+    }
+
+    /// Flush the underlying writer.
+    pub fn flush(&mut self) -> Result<(), Error> {
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    /// Consume the serializer and return the underlying writer.
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+}
+
 impl YamlSerializer {
     fn get_indent_count(&self) -> usize {
         if !self.output.ends_with("\n")
@@ -757,14 +849,14 @@ fn tag_shorthand(name: &str) -> String {
     format!("<{inner}>")
 }
 
-/// Dump a parsed [`Value`] back to YAML (the `to_yaml` workflow),
+/// Dump a parsed [`Value`](crate::Value) back to YAML (the `to_yaml` workflow),
 /// using the default [`YamlSerializeOption`].
 impl crate::Value {
     pub fn to_string(&self) -> Result<String, Error> {
         self.to_string_with_opt(YamlSerializeOption::default())
     }
 
-    /// Dump a parsed [`Value`] back to YAML, honoring `option`.
+    /// Dump a parsed [`Value`](crate::Value) back to YAML, honoring `option`.
     ///
     /// `indent_count` controls the block indentation (minimum 2) and
     /// `leading_start_indicator` prepends a `---` document header.

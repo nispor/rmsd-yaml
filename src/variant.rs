@@ -157,13 +157,13 @@ impl<'de> EnumAccess<'de> for ValueEnumAccess {
 /// receive the short variant name (`str`, `Alpha`); a `Value` seed
 /// receives the full resolved tag (`<tag:yaml.org,2002:str>`,
 /// `<!Alpha>`) by using `deserialize_any`.
-struct TagNameDeserializer {
+pub(crate) struct TagNameDeserializer {
     full: String,
     short: String,
 }
 
 impl TagNameDeserializer {
-    fn new(full: &str) -> Self {
+    pub(crate) fn new(full: &str) -> Self {
         Self {
             full: full.to_string(),
             short: variant_name_from_tag(full).to_string(),
