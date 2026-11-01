@@ -260,26 +260,31 @@ pub(crate) fn read_to_string_with_limit(
     rdr: &mut impl std::io::Read,
     max_input_bytes: usize,
 ) -> Result<String, Error> {
+    let mut content = Vec::new();
     if max_input_bytes == 0 {
-        let mut content = String::new();
-        rdr.read_to_string(&mut content)?;
-        return Ok(content);
+        rdr.read_to_end(&mut content)?;
+    } else {
+        let take_limit = (max_input_bytes as u64).saturating_add(1);
+        rdr.take(take_limit).read_to_end(&mut content)?;
+        if content.len() > max_input_bytes {
+            return Err(Error::new(
+                ErrorKind::InputTooLarge,
+                format!(
+                    "YAML input exceeds the maximum supported size of \
+                     {max_input_bytes} bytes"
+                ),
+                YamlPosition::EOF,
+                YamlPosition::EOF,
+            ));
+        }
     }
-    let take_limit = (max_input_bytes as u64).saturating_add(1);
-    let mut content = String::new();
-    rdr.take(take_limit).read_to_string(&mut content)?;
-    if content.len() > max_input_bytes {
-        return Err(Error::new(
-            ErrorKind::InputTooLarge,
-            format!(
-                "YAML input exceeds the maximum supported size of \
-                 {max_input_bytes} bytes"
-            ),
-            YamlPosition::EOF,
-            YamlPosition::EOF,
-        ));
-    }
-    Ok(content)
+    String::from_utf8(content).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )
+        .into()
+    })
 }
 
 impl<'de> Deserializer<'de> for &mut YamlDeserializer {

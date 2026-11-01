@@ -198,10 +198,20 @@ impl<'a> YamlParser<'a> {
     /// 1.2.2 SPEC, 5.1): C0 controls other than tab/LF/CR, DEL, the C1
     /// controls other than NEL, and U+FFFE/U+FFFF.
     pub(crate) fn validate_input(input: &str) -> Result<(), Error> {
+        Self::validate_input_from(input, 1)
+    }
+
+    /// Like [`Self::validate_input`], but `start_line` is the line the
+    /// first character of `input` occupies in the surrounding stream.
+    pub(crate) fn validate_input_from(
+        input: &str,
+        start_line: usize,
+    ) -> Result<(), Error> {
         if let Some((offset, c)) =
             input.char_indices().find(|(_, c)| !is_yaml_printable(*c))
         {
-            let pos = position_at(input, offset);
+            let mut pos = position_at(input, offset);
+            pos.line += start_line.saturating_sub(1);
             return Err(Error::new(
                 ErrorKind::InvalidCharacter,
                 format!(
@@ -316,6 +326,10 @@ impl<'a> YamlParser<'a> {
                 }
                 return Ok(None);
             };
+            if line.starts_with('\u{feff}') {
+                self.scanner.advance(1);
+                continue;
+            }
             let trimmed = line.trim_start_matches([' ', '\t']);
             if trimmed.is_empty() {
                 self.scanner.advance_till_linebreak();
@@ -465,7 +479,16 @@ impl<'a> YamlParser<'a> {
     fn finish_document(&mut self) -> Result<(), Error> {
         // Comments and empty lines between the node and the document
         // marker belong to neither document.
-        self.skip_comment_and_empty_lines();
+        loop {
+            self.skip_comment_and_empty_lines();
+            if let Some(line) = self.scanner.peek_line()
+                && line.starts_with('\u{feff}')
+            {
+                self.scanner.advance(1);
+                continue;
+            }
+            break;
+        }
         match self.scanner.peek_line() {
             None => {
                 self.push_event(YamlEvent::DocumentEnd(

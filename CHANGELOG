@@ -14,6 +14,13 @@
 ### Bug fixes
  - deserializer: Move sequence/map/enum data out of the `Value` tree
    instead of cloning it.
+ - deserializer: Report `InputTooLarge` instead of an invalid-UTF-8
+   error when `max_input_bytes` cuts through a multi-byte character.
+ - parser: Validate raw characters per document so an invalid character
+   in a later document does not prevent earlier stream documents from
+   being read.
+ - parser: Accept a byte order mark at the start of any document in a
+   stream.
 
 ## [0.2.0] - 2026-10-28
 ### Breaking changes

@@ -126,23 +126,15 @@ impl<'a> Deserializer<'a> {
         // `strip_bom` only removes a prefix; the difference is the BOM
         // length in bytes.
         let offset = source.as_str().len() - input.len();
-        match YamlParser::validate_input(input) {
-            Ok(()) => Self {
-                source,
-                offset,
-                start_line: 1,
-                max_depth: option.max_depth,
-                max_nodes: option.max_nodes,
-                doc_terminated: true,
-                pending_error: None,
-                done: false,
-            },
-            Err(error) => {
-                let mut deserializer = Self::from_error(error, option);
-                deserializer.source = source;
-                deserializer.offset = offset;
-                deserializer
-            }
+        Self {
+            source,
+            offset,
+            start_line: 1,
+            max_depth: option.max_depth,
+            max_nodes: option.max_nodes,
+            doc_terminated: true,
+            pending_error: None,
+            done: false,
         }
     }
 }
@@ -300,7 +292,7 @@ impl Iterator for Deserializer<'_> {
             self.done = true;
             return Some(DocumentDeserializer::from_error(error));
         }
-        let (result, consumed, line, doc_terminated) = {
+        let (result, consumed, line, doc_terminated, validation) = {
             let remaining = &self.source.as_str()[self.offset..];
             let mut parser = YamlParser::new_validated(
                 remaining,
@@ -309,28 +301,41 @@ impl Iterator for Deserializer<'_> {
                 self.start_line,
             );
             let result = parser.next_document();
+            let consumed = parser.offset();
+            let validation = YamlParser::validate_input_from(
+                &remaining[..consumed],
+                self.start_line,
+            );
             (
                 result,
-                parser.offset(),
+                consumed,
                 parser.current_line(),
                 parser.is_doc_terminated(),
+                validation,
             )
         };
         self.offset += consumed;
         self.start_line = line;
         self.doc_terminated = doc_terminated;
         match result {
-            Ok(Some(events)) => Some(DocumentDeserializer::from_events(
-                events,
-                self.max_depth,
-                self.max_nodes,
-            )),
+            Ok(Some(events)) => {
+                if let Err(error) = validation {
+                    self.done = true;
+                    return Some(DocumentDeserializer::from_error(error));
+                }
+                Some(DocumentDeserializer::from_events(
+                    events,
+                    self.max_depth,
+                    self.max_nodes,
+                ))
+            }
             Ok(None) => {
                 self.done = true;
-                None
+                validation.err().map(DocumentDeserializer::from_error)
             }
             Err(error) => {
                 self.done = true;
+                let error = validation.err().unwrap_or(error);
                 Some(DocumentDeserializer::from_error(error))
             }
         }
