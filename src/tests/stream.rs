@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    io::{self, Cursor, Read},
+};
 
 use serde::Deserialize;
 
@@ -302,4 +305,238 @@ fn malformed_second_document_does_not_poison_the_first() {
     let first: Value = document_value(documents.next().unwrap());
     assert!(first.get("ok").unwrap().as_bool().unwrap());
     assert!(Value::deserialize(documents.next().unwrap()).is_err());
+}
+
+#[test]
+fn invalid_character_in_a_later_document_is_reported_lazily() {
+    let mut documents =
+        Deserializer::from_str("---\nok: true\n---\nbad: \u{0}\n");
+    let first = document_value(documents.next().unwrap());
+    assert!(first.get("ok").unwrap().as_bool().unwrap());
+
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidCharacter);
+    assert_eq!(error.start_pos().line, 4);
+    assert!(documents.next().is_none());
+}
+
+#[test]
+fn invalid_character_in_the_first_document_is_reported() {
+    let mut documents = Deserializer::from_str("---\nbad: \u{0}\n---\nok: 1\n");
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidCharacter);
+    assert_eq!(error.start_pos().line, 2);
+    assert!(documents.next().is_none());
+}
+
+#[test]
+fn invalid_character_in_a_trailing_comment_is_reported() {
+    let mut documents =
+        Deserializer::from_str("---\nok: 1\n...\n# bad \u{0}\n");
+    let first = document_value(documents.next().unwrap());
+    assert_eq!(first.get("ok").unwrap().as_str().unwrap(), "1");
+
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidCharacter);
+    assert_eq!(error.start_pos().line, 4);
+    assert!(documents.next().is_none());
+}
+
+#[test]
+fn byte_order_mark_can_start_each_document() {
+    let values: Vec<Value> = Deserializer::from_str(
+        "\u{feff}---\nfirst\n...\n\u{feff}---\nsecond\n",
+    )
+    .map(document_value)
+    .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn byte_order_mark_can_start_a_bare_document() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\nfirst\n...\n\u{feff}second\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn byte_order_mark_before_the_next_document_marker_is_ignored() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\nfirst\n\u{feff}---\nsecond\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn byte_order_mark_before_a_document_end_marker_is_ignored() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\nfirst\n\u{feff}...\n---\nsecond\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn reader_max_input_bytes_handles_a_multibyte_boundary() {
+    let option = YamlParseOption {
+        max_input_bytes: 2,
+        ..Default::default()
+    };
+    let value: Value =
+        crate::from_reader_with_opt(Cursor::new("é"), option.clone()).unwrap();
+    assert_eq!(value.as_str().unwrap(), "é");
+
+    let error =
+        crate::from_reader_with_opt::<_, Value>(Cursor::new("éé"), option)
+            .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InputTooLarge);
+}
+
+#[test]
+fn empty_reader_stream_yields_no_documents() {
+    assert_eq!(Deserializer::from_reader(std::io::empty()).count(), 0);
+    let value: Value = crate::from_reader(std::io::empty()).unwrap();
+    assert!(value.is_null());
+}
+
+struct FailingReader {
+    failed: bool,
+}
+
+impl Read for FailingReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.failed {
+            return Err(io::Error::other("reader failed"));
+        }
+        self.failed = true;
+        let input = b"a: 1\n";
+        buf[..input.len()].copy_from_slice(input);
+        Ok(input.len())
+    }
+}
+
+#[test]
+fn reader_errors_are_surfaced() {
+    let error = crate::from_reader::<_, Value>(FailingReader { failed: false })
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Bug);
+    assert!(error.msg().contains("reader failed"));
+}
+
+#[test]
+fn documents_may_start_with_an_inline_marker() {
+    let values: Vec<Value> = Deserializer::from_str("--- first\n--- second\n")
+        .map(document_value)
+        .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn bare_document_followed_by_marker_starts_a_new_document() {
+    let values: Vec<Value> = Deserializer::from_str("first\n---\nsecond\n")
+        .map(document_value)
+        .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn document_end_marker_with_trailing_comment_is_accepted() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\nfirst\n... # end\n---\nsecond\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].as_str().unwrap(), "first");
+    assert_eq!(values[1].as_str().unwrap(), "second");
+}
+
+#[test]
+fn document_markers_inside_a_block_scalar_do_not_split_the_stream() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\ntext: |\n  ---\n  ...\n---\nnext: 1\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(
+        values[0].get("text").unwrap().as_str().unwrap(),
+        "---\n...\n"
+    );
+    assert_eq!(values[1].get("next").unwrap().as_str().unwrap(), "1");
+}
+
+#[test]
+fn aliases_can_be_redefined_in_each_document() {
+    let values: Vec<Value> =
+        Deserializer::from_str("---\na: &x 1\nb: *x\n---\na: &x 2\nb: *x\n")
+            .map(document_value)
+            .collect();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0].get("b").unwrap().as_str().unwrap(), "1");
+    assert_eq!(values[1].get("b").unwrap().as_str().unwrap(), "2");
+}
+
+#[test]
+fn directive_only_stream_is_an_error() {
+    let mut documents = Deserializer::from_str("%YAML 1.2\n");
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidDirective);
+    assert!(documents.next().is_none());
+}
+
+#[test]
+fn explicit_empty_documents_are_distinct() {
+    let values: Vec<Value> = Deserializer::from_str("---\n...\n---\n...\n")
+        .map(document_value)
+        .collect();
+    assert_eq!(values.len(), 2);
+    assert!(values.iter().all(Value::is_null));
+}
+
+#[test]
+fn stream_of_only_end_markers_has_no_documents() {
+    assert_eq!(Deserializer::from_str("...\n...\n").count(), 0);
+}
+
+#[test]
+fn single_document_api_accepts_a_trailing_comment_after_the_end_marker() {
+    let value: Value = from_str("---\na: 1\n...\n# trailing\n").unwrap();
+    assert_eq!(value.get("a").unwrap().as_str().unwrap(), "1");
+}
+
+#[test]
+fn single_document_api_rejects_a_second_empty_document() {
+    let error = from_str::<Value>("---\na\n---\n").unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::NoSupportMultipleDocuments);
+}
+
+#[test]
+fn second_document_error_positions_are_absolute_with_crlf() {
+    let mut documents =
+        Deserializer::from_str("---\r\na: 1\r\n---\r\n[bad\r\n");
+    let _first = document_value(documents.next().unwrap());
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.start_pos().line, 5);
+}
+
+#[test]
+fn second_document_error_positions_are_absolute_with_cr() {
+    let mut documents = Deserializer::from_str("---\ra: 1\r---\r[bad\r");
+    let _first = document_value(documents.next().unwrap());
+    let error = Value::deserialize(documents.next().unwrap()).unwrap_err();
+    assert_eq!(error.start_pos().line, 5);
 }

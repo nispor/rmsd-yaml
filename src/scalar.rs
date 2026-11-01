@@ -17,6 +17,11 @@ enum ChompingMethod {
     Keep,
 }
 
+fn is_bom_document_marker(line: &str) -> bool {
+    line.strip_prefix('\u{feff}')
+        .is_some_and(starts_with_document_marker_token)
+}
+
 impl<'a> YamlParser<'a> {
     fn get_indent_indicator_and_chomping_method(
         &mut self,
@@ -837,6 +842,11 @@ impl<'a> YamlParser<'a> {
             // starts mid-line (e.g. `key: ...` is the plain scalar
             // `...`) are ordinary content.
             if (!first_line || starts_at_line_start)
+                && is_bom_document_marker(line)
+            {
+                break;
+            }
+            if (!first_line || starts_at_line_start)
                 && is_document_end_marker(line)
             {
                 break;
@@ -1085,6 +1095,9 @@ impl<'a> YamlParser<'a> {
                 }
                 let indent = line.chars().take_while(|c| *c == ' ').count();
                 if indent < rest_indent_count {
+                    return false;
+                }
+                if is_bom_document_marker(line) {
                     return false;
                 }
                 if is_document_end_marker(line) {
